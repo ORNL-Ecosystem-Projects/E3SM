@@ -535,6 +535,7 @@ module ColumnDataType
     real(r8), pointer :: qflx_lat_aqu         (:)   => null() ! Total lateral flux between hummock/hollow (mm H2O /s)
     real(r8), pointer :: qflx_lat_aqu_layer   (:,:) => null() ! Lateral flux between hummock/hollow by layer (mm H2O/s)
     real(r8), pointer :: qflx_surf_input      (:)   => null() ! Runoff input from Hummock (mm H2O/s)
+    real(r8), pointer :: qflx_tide            (:)   => null() ! tidal flux between consecutive timesteps TAO
 
     real(r8), pointer :: mflx_infl_1d         (:)   => null() ! infiltration source in top soil control volume (kg H2O /s)
     real(r8), pointer :: mflx_dew_1d          (:)   => null() ! liquid+snow dew source in top soil control volume (kg H2O /s)
@@ -5841,14 +5842,12 @@ contains
     allocate(this%qflx_over_supply       (begc:endc))             ; this%qflx_over_supply     (:)   = spval
     allocate(this%qflx_irr_demand        (begc:endc))             ; this%qflx_irr_demand      (:)   = spval
     allocate(this%qflx_h2orof_drain      (begc:endc))             ; this%qflx_h2orof_drain    (:)   = spval
-<<<<<<< HEAD
     allocate(this%qflx_from_uphill       (begc:endc))             ; this%qflx_from_uphill     (:)   = spval
     allocate(this%qflx_to_downhill       (begc:endc))             ; this%qflx_to_downhill     (:)   = spval
-=======
     allocate(this%qflx_lat_aqu           (begc:endc))             ; this%qflx_lat_aqu         (:)   = spval
     allocate(this%qflx_lat_aqu_layer     (begc:endc,1:nlevgrnd))  ; this%qflx_lat_aqu_layer   (:,:) = spval
-    allocate(this%qflx_surf_input        (begc:endc))             ; this%qflx_surf_input         (:)   = spval   
->>>>>>> 5feee98c42 (Updates for ELM_SPRUCE)
+    allocate(this%qflx_surf_input        (begc:endc))             ; this%qflx_surf_input      (:)   = spval  
+    allocate(this%qflx_tide              (begc:endc))             ; this%qflx_tide            (:)   = spval !TAO
 
     !VSFM variables
     ncells = endc - begc + 1
