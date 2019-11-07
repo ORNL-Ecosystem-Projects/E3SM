@@ -1,5 +1,5 @@
 module ColumnDataType
-
+    
   !-----------------------------------------------------------------------
   ! !DESCRIPTION:
   ! Column data type allocation and initialization
@@ -486,6 +486,7 @@ module ColumnDataType
     real(r8), pointer :: qflx_gross_infl_soil (:)   => null() ! gross infiltration, before considering the evaporation
     real(r8), pointer :: qflx_adv             (:,:) => null() ! advective flux across different soil layer interfaces [mm H2O/s] [+ downward]
     real(r8), pointer :: qflx_rootsoi         (:,:) => null() ! root and soil water exchange [mm H2O/s] [+ into root]
+    real(r8), pointer :: qflx_tran_veg_sat    (:)   => null() ! Transpiration from saturated zone
     real(r8), pointer :: dwb                  (:)   => null() !  water mass change [+ increase] [mm H2O/s]
     real(r8), pointer :: qflx_infl            (:)   => null() ! infiltration (mm H2O /s)
     real(r8), pointer :: qflx_surf            (:)   => null() ! surface runoff (mm H2O /s)
@@ -530,6 +531,10 @@ module ColumnDataType
     real(r8), pointer :: qflx_h2orof_drain    (:)   => null() ! drainage from floodplain inundation volume (mm H2O/s))
     real(r8), pointer :: qflx_from_uphill     (:)   => null() ! input to top soil layer from uphill topounit(s) (mm H2O/s))
     real(r8), pointer :: qflx_to_downhill     (:)   => null() ! output from column to the downhill topounit (mm H2O/s))
+
+    real(r8), pointer :: qflx_lat_aqu         (:)   => null() ! Total lateral flux between hummock/hollow (mm H2O /s)
+    real(r8), pointer :: qflx_lat_aqu_layer   (:,:) => null() ! Lateral flux between hummock/hollow by layer (mm H2O/s)
+    real(r8), pointer :: qflx_surf_input      (:)   => null() ! Runoff input from Hummock (mm H2O/s)
 
     real(r8), pointer :: mflx_infl_1d         (:)   => null() ! infiltration source in top soil control volume (kg H2O /s)
     real(r8), pointer :: mflx_dew_1d          (:)   => null() ! liquid+snow dew source in top soil control volume (kg H2O /s)
@@ -5836,8 +5841,14 @@ contains
     allocate(this%qflx_over_supply       (begc:endc))             ; this%qflx_over_supply     (:)   = spval
     allocate(this%qflx_irr_demand        (begc:endc))             ; this%qflx_irr_demand      (:)   = spval
     allocate(this%qflx_h2orof_drain      (begc:endc))             ; this%qflx_h2orof_drain    (:)   = spval
+<<<<<<< HEAD
     allocate(this%qflx_from_uphill       (begc:endc))             ; this%qflx_from_uphill     (:)   = spval
     allocate(this%qflx_to_downhill       (begc:endc))             ; this%qflx_to_downhill     (:)   = spval
+=======
+    allocate(this%qflx_lat_aqu           (begc:endc))             ; this%qflx_lat_aqu         (:)   = spval
+    allocate(this%qflx_lat_aqu_layer     (begc:endc,1:nlevgrnd))  ; this%qflx_lat_aqu_layer   (:,:) = spval
+    allocate(this%qflx_surf_input        (begc:endc))             ; this%qflx_surf_input         (:)   = spval   
+>>>>>>> 5feee98c42 (Updates for ELM_SPRUCE)
 
     !VSFM variables
     ncells = endc - begc + 1
@@ -5963,7 +5974,14 @@ contains
             avgflag='A', long_name='output from column to downhill topounit', &
             ptr_col=this%qflx_to_downhill, c2l_scale_type='urbanf')
     endif
-   
+
+#if (defined HUM_HOL)
+    this%qflx_lat_aqu(begc:endc) = spval
+    call hist_addfld1d (fname='QLAT_AQU', units='kg/m2/s', &
+         avgflag='A', long_name='Lateral flux between hummock/hollow', &
+         ptr_col=this%qflx_lat_aqu, set_lake=spval, c2l_scale_type='urbanf', default='inactive')
+#endif
+
     if (create_glacier_mec_landunit) then
             this%qflx_glcice(begc:endc) = spval
              call hist_addfld1d (fname='QICE',  units='mm/s',  &
