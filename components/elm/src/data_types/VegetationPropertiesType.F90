@@ -162,6 +162,9 @@ module VegetationPropertiesType
      real(r8), pointer :: vegshape(:)         ! shape parameter to modify shrub burial by snow (1 = parabolic, 2 = hemispheric)
      real(r8), pointer :: stocking(:)         ! stocking density for pft (stems / hectare)
      real(r8), pointer :: taper(:)            ! ratio of height:radius_breast_height (woody vegetation allometry)
+     !salinity response parameters
+     real(r8), allocatable :: sal_threshold(:)       !Threshold for salinity effects (ppt)
+     real(r8), allocatable :: KM_salinity(:)         !Half saturation constant for omotic inhibition function (ppt)
 
    contains
    procedure, public :: Init => veg_vp_init
@@ -205,6 +208,7 @@ contains
     ! snow/vegetation interactions (NGEE Arctic IM3)
     use pftvarcon , only : bendresist, stocking, vegshape, taper
     use pftvarcon , only : bbbopt, mbbopt, nstor, br_xr, tc_stress, lmrhd, crit_gdd1, crit_gdd2
+    use pftvarcon , only : sal_threshold, KM_salinity
     !
 
     class (vegetation_properties_type) :: this
@@ -349,6 +353,10 @@ contains
 
     allocate( this%crit_gdd1(0:numpft))                          ; this%crit_gdd1(:)             =nan
     allocate( this%crit_gdd2(0:numpft))                          ; this%crit_gdd2(:)             =nan
+ 
+    allocate( this%sal_threshold(0:numpft))        ; this%sal_threshold(:)       =nan
+    allocate( this%KM_salinity(0:numpft))          ; this%KM_salinity(:)         =nan
+
     do m = 0,numpft
 
        ! not needed anymore: woody(m)=1 for tree, 2 for shrub, or 0 for any other
@@ -469,6 +477,8 @@ contains
         this%vmax_nfix(m)      = vmax_nfix(m)
         this%km_nfix(m)        = km_nfix(m)
         this%vmax_ptase(m)     = vmax_ptase(m)
+        this%sal_threshold(m)  = sal_threshold(m)
+        this%KM_salinity(m)    = KM_salinity(m)
 
         do j = 1 , nlevdecomp
            this%decompmicc_patch_vr(m,j) = decompmicc_patch_vr(j,m)
