@@ -165,6 +165,7 @@ module VegetationPropertiesType
      !salinity response parameters
      real(r8), allocatable :: sal_threshold(:)       !Threshold for salinity effects (ppt)
      real(r8), allocatable :: KM_salinity(:)         !Half saturation constant for omotic inhibition function (ppt)
+     real(r8), allocatable :: osm_inhib(:)           !Osmotic inhibition factor
 
    contains
    procedure, public :: Init => veg_vp_init
@@ -208,7 +209,7 @@ contains
     ! snow/vegetation interactions (NGEE Arctic IM3)
     use pftvarcon , only : bendresist, stocking, vegshape, taper
     use pftvarcon , only : bbbopt, mbbopt, nstor, br_xr, tc_stress, lmrhd, crit_gdd1, crit_gdd2
-    use pftvarcon , only : sal_threshold, KM_salinity
+    use pftvarcon , only : sal_threshold, KM_salinity, osm_inhib
     !
 
     class (vegetation_properties_type) :: this
@@ -355,7 +356,9 @@ contains
     allocate( this%crit_gdd2(0:numpft))                          ; this%crit_gdd2(:)             =nan
  
     allocate( this%sal_threshold(0:numpft))        ; this%sal_threshold(:)       =nan
-    allocate( this%KM_salinity(0:numpft))          ; this%KM_salinity(:)         =nan
+    allocate( this%KM_salinity(0:numpft))          ; this%KM_salinity(:)
+=nan
+    allocate( this%osm_inhib(0:numpft))            ; this%osm_inhib(:)           =nan
 
     do m = 0,numpft
 
@@ -479,6 +482,7 @@ contains
         this%vmax_ptase(m)     = vmax_ptase(m)
         this%sal_threshold(m)  = sal_threshold(m)
         this%KM_salinity(m)    = KM_salinity(m)
+        this%osm_inhib(m)      = osm_inhib(m)
 
         do j = 1 , nlevdecomp
            this%decompmicc_patch_vr(m,j) = decompmicc_patch_vr(j,m)
