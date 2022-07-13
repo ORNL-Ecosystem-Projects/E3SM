@@ -168,6 +168,7 @@ module VegetationPropertiesType
      real(r8), allocatable :: osm_inhib(:)           !Osmotic inhibition factor
      real(r8), allocatable :: sal_opt(:)             !Salinity at which optimal biomass occurs (ppt)
      real(r8), allocatable :: sal_tol(:)             !Salinity tolerance; width parameter for Gaussian distribution (ppt -1)
+     real(r8), allocatable :: floodf(:)              !Growth inhibition factor due to flooding/inundation (0-1)
 
    contains
    procedure, public :: Init => veg_vp_init
@@ -211,7 +212,7 @@ contains
     ! snow/vegetation interactions (NGEE Arctic IM3)
     use pftvarcon , only : bendresist, stocking, vegshape, taper
     use pftvarcon , only : bbbopt, mbbopt, nstor, br_xr, tc_stress, lmrhd, crit_gdd1, crit_gdd2
-    use pftvarcon , only : sal_threshold, KM_salinity, osm_inhib, sal_opt, sal_tol
+    use pftvarcon , only : sal_threshold, KM_salinity, osm_inhib, sal_opt, sal_tol, floodf
     !
 
     class (vegetation_properties_type) :: this
@@ -362,6 +363,7 @@ contains
     allocate( this%osm_inhib(0:numpft))            ; this%osm_inhib(:)           =nan
     allocate( this%sal_opt(0:numpft))              ; this%sal_opt(:)             =nan
     allocate( this%sal_tol(0:numpft))              ; this%sal_tol(:)             =nan   
+    allocate( this%floodf(0:numpft))               ; this%floodf(:)              =nan
     do m = 0,numpft
 
        ! not needed anymore: woody(m)=1 for tree, 2 for shrub, or 0 for any other
@@ -487,6 +489,7 @@ contains
         this%osm_inhib(m)      = osm_inhib(m)
         this%sal_opt(m)        = sal_opt(m)
         this%sal_tol(m)        = sal_tol(m)
+        this%floodf(m)         = floodf(m)
 
         do j = 1 , nlevdecomp
            this%decompmicc_patch_vr(m,j) = decompmicc_patch_vr(j,m)
