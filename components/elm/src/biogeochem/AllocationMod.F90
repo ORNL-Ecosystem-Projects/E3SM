@@ -2758,7 +2758,7 @@ contains
 
          gresp_storage = cpool_to_leafc_storage(p) + cpool_to_frootc_storage(p)
          gresp_storage = gresp_storage + cpool_to_livecrootc_storage(p) !Graminoid rhizomes (B Sulman)
-         if (woody(ivt(p)) == 1._r8) then
+         if (woody(ivt(p)) >= 1._r8) then
             gresp_storage = gresp_storage + cpool_to_livestemc_storage(p)
             gresp_storage = gresp_storage + cpool_to_deadstemc_storage(p)
             gresp_storage = gresp_storage + cpool_to_deadcrootc_storage(p)
