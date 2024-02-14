@@ -723,7 +723,6 @@ contains
     allocate( stocking           (0:mxpft) )
     allocate( taper              (0:mxpft) )
 
-
     ! Tidal cycle coefficients
     allocate( tide_coeff_amp (max_tide_coeffs))
     allocate( tide_coeff_phase (max_tide_coeffs))
@@ -1278,7 +1277,6 @@ contains
     if ( .not. readv ) gcbr_p(:) = 0._r8
     call ncd_io('gcbr_q',gcbr_q, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if ( .not. readv ) gcbr_q(:) = 0._r8
-
     call ncd_io('mergetoclmpft', mergetoelmpft, 'read', ncid, readvar=readv)
     ! in case parameter file is using 'mergetoelmpft'
     if ( .not. readv ) call ncd_io('mergetoelmpft', mergetoelmpft, 'read', ncid, readvar=readv)
