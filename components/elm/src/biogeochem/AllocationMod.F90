@@ -515,6 +515,7 @@ contains
     real(r8):: maxroot_c, maxroot_n, maxroot_p
     real(r8):: sminn_avg, sminp_avg !temporary hold for root fraction weighted nutrient concentration over the plant profile
     real(r8):: mm, mmp !temporary hold for Michaelis-Menten limitation values
+    real(r8):: callo, nallo, pallo !temporary hold for allometry values
     real(r8):: scale_q10 !temporary hold for Q10-scalar on uptake rate
     real(r8):: scale_wtd !temporary hold for water table inhibition on uptake rate
 
@@ -640,8 +641,11 @@ contains
          prev_fpg_patch               => cnstate_vars%prev_fpg_patch          , & ! Input: [real(r8) (:)     ] previous step's N limitation
          prev_fpg_p_patch             => cnstate_vars%prev_fpg_p_patch        , & ! Input: [real(r8) (:)     ] previous step's P limitation
 
-         mm                           => cnstate_vars%mm_patch                , & ! Input: [real (r8) (:)     ] patch level Michaelis-Menten coefficient on N limitation
-         mmp                          => cnstate_vars%mmp_patch               , & ! Input: [real (r8) (:)     ] patch level Michaelis-Menten coefficient on P limitation
+         nscarcity                    => cnstate_vars%nscarcity_patch        , & ! Input: [real (r8) (:)     ] scarcity of vegetation n-supply relative to c-supply
+         pscarcity                    => cnstate_vars%pscarcity_patch        , & ! Input: [real (r8) (:)     ] abundance of vegetation p-supply relative to c-supply
+
+         npool                        => veg_ns%npool                        , & ! Input:  [real(r8) (:)   ]  (gN/m2) plant N pool storage
+         ppool                        => veg_ps%ppool                        , & ! Input:  [real(r8) (:)   ]  (gN/m2) plant P pool storage
 
          plant_nabsorb                => veg_nf%plant_nabsorb                 , & ! Input: [real(r8) (:)     ] fine root's ability to take up N (gN/m2/s)
          plant_pabsorb                => veg_pf%plant_pabsorb                 , & ! Input: [real(r8) (:)     ] fine root's ability to take up P
@@ -767,30 +771,6 @@ contains
 
          f1 = froot_leaf(ivt(p))
          f2 = croot_stem(ivt(p))
-
-#ifdef HUM_HOL
-         if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
-            ! Michaelis-Menten coefficients
-            sminn_avg = 0._r8
-            sminp_avg = 0._r8
-            do j = 1,col_pp%nlevbed(c)
-               sminn_avg = sminn_avg + ( &
-                  max(smin_nh4_vr(c,j), 0._r8) + & 
-                  max(smin_no3_vr(c,j), 0._r8) ) * rootfr(p,j)
-               sminp_avg = sminp_avg + sminp_vr(c,j) * rootfr(p,j)
-            end do
-
-            mm(p) = sminn_avg / (AllocParamsInst%kmin_nuptake(ivt(p)) + sminn_avg)
-            mmp(p) = sminp_avg / (AllocParamsInst%kmin_puptake(ivt(p)) + sminp_avg)
-
-            write (iulog, *) c, ivt(p), mm(p), mmp(p), sminn_avg, sminp_avg
-
-            ! When nutrients become more abundant, the trees grow more roots
-            ! , whereas the shrub grow less roots. 
-            f1 = froot_leaf(ivt(p)) + AllocParamsInst%froot_leaf_slope(ivt(p)) * min(mm(p), mmp(p))
-            f1 = max(f1, 0.1_r8)
-         end if
-#endif
 
          ! modified wood allocation to be 2.2 at npp=800 gC/m2/yr, 0.2 at npp=0,
          ! constrained so that it does not go lower than 0.2 (under negative annsum_npp)
@@ -965,6 +945,37 @@ contains
             end if
          end if
 
+
+#ifdef HUM_HOL
+         if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
+            ! calculate temporary allometry, when root is not shifted
+            callo = (1._r8+g1)*(1._r8+f1+f3*(1._r8+f2))
+            nallo = 1._r8/cnl + f1/cnfr + (f3*f4*(1._r8+f2))/cnlw + &
+                 (f3*(1._r8-f4)*(1._r8+f2))/cndw
+            pallo = 1._r8/cpl + f1/cpfr + (f3*f4*(1._r8+f2))/cplw + &
+                 (f3*(1._r8-f4)*(1._r8+f2))/cpdw
+
+            ! compare the n/ppool size to allometry, if too much, reduce root allocation,
+            ! if too little, increase root allocation.
+            ! this function = 1 when npool = 0, = 0.135 when n/ppool is twice allometry
+
+            ! avoid infinity during cold start
+            if (npool(p) >= cpool(p)) then
+               nscarcity(p) = 0._r8
+            else
+               nscarcity(p) = exp( - npool(p)/cpool(p) * callo / nallo )
+            end if            
+            if (ppool(p) >= cpool(p)) then
+               pscarcity(p) = 0._r8
+            else
+               pscarcity(p) = exp( - ppool(p)/cpool(p) * callo / pallo )
+            end if
+
+            ! pick the limiting one between N and P by applying max
+            f1 = froot_leaf(ivt(p)) * (1 + AllocParamsInst%froot_leaf_slope(ivt(p)) * max(nscarcity(p), pscarcity(p)))
+         end if
+#endif
+
          ! based on available C, use constant allometric relationships to
          ! determine N requirements
          ! determine P requirements   -X. YANG
@@ -1094,11 +1105,24 @@ contains
                scale_wtd = 1._r8
             end if
 
+            ! Michaelis-Menten coefficients
+            sminn_avg = 0._r8
+            sminp_avg = 0._r8
+            do j = 1,col_pp%nlevbed(c)
+               sminn_avg = sminn_avg + ( &
+                  max(smin_nh4_vr(c,j), 0._r8) + & 
+                  max(smin_no3_vr(c,j), 0._r8) ) * rootfr(p,j)
+               sminp_avg = sminp_avg + sminp_vr(c,j) * rootfr(p,j)
+            end do
+
+            mm = sminn_avg / (AllocParamsInst%kmin_nuptake(ivt(p)) + sminn_avg)
+            mmp = sminp_avg / (AllocParamsInst%kmin_puptake(ivt(p)) + sminp_avg)
+
             ! Fine root uptake capacity should be correlated with FLNR
             !  Guo, L., Deng M., Yang S., Liu W., Wang X., Wang J., & Liu L. (2021). The coordination between leaf and fine root litter decomposition and the difference in their controlling factors. Global Ecology and Biogeography, 30, 2286–2296. https://doi.org/10.1111/geb.13384
-            active_n = maxroot_n * mm(p) * scale_q10 * scale_wtd * & 
+            active_n = maxroot_n * mm * scale_q10 * scale_wtd * & 
                        AllocParamsInst%compet_pft_sminn(ivt(p))
-            active_p = maxroot_p * mmp(p) * scale_q10 * scale_wtd * & 
+            active_p = maxroot_p * mmp * scale_q10 * scale_wtd * & 
                        AllocParamsInst%compet_pft_sminp(ivt(p))
 
             ! Assume the fungi uptake can obtain ~100% plant NP demand, but
@@ -1106,22 +1130,21 @@ contains
             ! plants are less likely to use fungi when NP is more abundant. 
             ! (The 100% factor is subject to modification by
             !  compet_pft_sminn & compet_pft_sminp)
+            ! Because fungi directly access organic nutrients, this term does not have M-M. 
             fungi_n = plant_ndemand(p) * AllocParamsInst%cpool_pft_sminn(ivt(p))
             fungi_p = plant_pdemand(p) * AllocParamsInst%cpool_pft_sminp(ivt(p))
 
             ! Since ericoid mycorrhizae is more specialized in organic nutrients
             ! than ectomycorrhizae, the fungi uptake should decline when more mineral
             ! nutrients become available.
-            ! Because fungi directly access organic nutrients, this term does not have M-M. 
             ! ECM associated with the trees access both organic and inorganic nutrients,
-            ! so, do not use this.
+            ! so, the decline should be less severe
             if (ivt(p) == nbrdlf_dcd_brl_shrub) then
-               plant_nabsorb(p) = fungi_n * (1. - mm(p)) + active_n * mm(p)
-               plant_pabsorb(p) = fungi_p * (1. - mmp(p)) + active_p * mmp(p)
+               plant_nabsorb(p) = fungi_n * nscarcity(p) + active_n * (1 - nscarcity(p))
+               plant_pabsorb(p) = fungi_p * pscarcity(p) + active_p * (1 - pscarcity(p))
             else
-               ! Average the two parts
-               plant_nabsorb(p) = (fungi_n + active_n) * 0.5_r8
-               plant_pabsorb(p) = (fungi_p + active_p) * 0.5_r8
+               plant_nabsorb(p) = fungi_n * nscarcity(p) * 0.8 + active_n * (1 - 0.8 * nscarcity(p))
+               plant_pabsorb(p) = fungi_p * pscarcity(p) * 0.8 + active_p * (1 - 0.8 * pscarcity(p))
             end if
          else
             plant_nabsorb(p) = plant_ndemand(p)
@@ -2324,8 +2347,8 @@ contains
          plant_nabsorb                => veg_nf%plant_nabsorb                 , & ! Input: [real(r8) (:)     ] fine root's ability to take up N (gN/m2/s)
          plant_pabsorb                => veg_pf%plant_pabsorb                 , & ! Input: [real(r8) (:)     ] fine root's ability to take up P
 
-         mm                           => cnstate_vars%mm_patch                , & ! Input: [real (r8) (:)     ] patch level Michaelis-Menten coefficient on N limitation
-         mmp                          => cnstate_vars%mmp_patch                & ! Input: [real (r8) (:)     ] patch level Michaelis-Menten coefficient on P limitation
+         nscarcity                    => cnstate_vars%nscarcity_patch         , & ! Input: [real (r8) (:)     ] scarcity of vegetation n-supply relative to c-supply
+         pscarcity                    => cnstate_vars%pscarcity_patch          & ! Input: [real (r8) (:)     ] abundance of vegetation p-supply relative to c-supply
 #endif
       )
 
@@ -2414,9 +2437,7 @@ contains
 
 #ifdef HUM_HOL
              if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
-                f1 = froot_leaf(ivt(p)) + min(mm(p), mmp(p)) * &
-                     AllocParamsInst%froot_leaf_slope(ivt(p))
-                f1 = max(f1, 0.1_r8)
+                f1 = froot_leaf(ivt(p)) * AllocParamsInst%froot_leaf_slope(ivt(p)) * max(nscarcity(p), pscarcity(p))
              end if
 #endif
 
@@ -2500,9 +2521,6 @@ contains
                end if
                plant_nalloc(p) = (plant_ndemand(p) + retransn_to_npool(p)) / r
 
-               !write (iulog, *) ivt(p), 'sminn_to_npool', sminn_to_npool(p), 'plant_ndemand', plant_ndemand(p), 'plant_ndemand/r', plant_ndemand(p) / r
-               !call shr_sys_flush(iulog)
-
                if ( carbon_only  .or.  carbonnitrogen_only ) then
                  r = 1.0_r8
                else
@@ -2522,13 +2540,7 @@ contains
                plant_nalloc(p) = sminn_to_npool(p) + retransn_to_npool(p)
                plant_palloc(p) = sminp_to_ppool(p) + retransp_to_ppool(p)
 
-               !write (iulog, *) ivt(p), 'sminn_to_npool', sminn_to_npool(p), 'plant_ndemand', plant_ndemand(p)
-               !call shr_sys_flush(iulog)
-
              end if
-
-            !write (iulog, *) ivt(p), 'fpi', fpi(c), 'fpg', fpg(c), 'fpg_patch', fpg_patch(p)
-            !call shr_sys_flush(iulog)
 
              ! calculate the associated carbon allocation, and the excess
              ! carbon flux that must be accounted for through downregulation

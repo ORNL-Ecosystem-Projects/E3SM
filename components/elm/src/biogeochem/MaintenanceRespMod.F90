@@ -139,7 +139,6 @@ contains
     real(r8):: q10   ! temperature dependence
     real(r8):: tc    ! temperature correction, 2m air temp (unitless)
     real(r8):: tcsoi(bounds%begc:bounds%endc,nlevgrnd) ! temperature correction by soil layer (unitless)
-    real(r8):: weight, weightp ! temporary hold for relationship between nutrient uptake and pathway and fine root maintenance respiration
     !-----------------------------------------------------------------------
 
     associate(                                                        &
@@ -178,8 +177,9 @@ contains
          grainn         =>    veg_ns%grainn       , & ! Output: [real(r8) (:)   ]  (kgN/m2) grain N
 
 #ifdef HUM_HOL
-         mm             => cnstate_vars%mm_patch  , & ! Input: [real (r8) (:)     ] patch level Michaelis-Menten coefficient on N limitation
-         mmp            => cnstate_vars%mmp_patch   & ! Input: [real (r8) (:)     ] patch level Michaelis-Menten coefficient on P limitation
+         nscarcity      => cnstate_vars%nscarcity_patch        , & ! Input: [real (r8) (:)     ] scarcity of vegetation n-supply relative to c-supply
+         pscarcity      => cnstate_vars%pscarcity_patch         & ! Input: [real (r8) (:)     ] abundance of vegetation p-supply relative to c-supply
+
 #endif
          )
 
@@ -289,25 +289,15 @@ contains
             end if
             br_mr = br_mr_pft(ivt(p))
 
-            ! increase by a factor due to transfer to fungi: 
-            ! the ratio is determined by relative uptake from fungi and mineral nutrients, 
-            ! see AllocationMod.F90
+            ! increase by a factor due to transfer to fungi, similar to active_n/p & fungi_n/p
+            ! partition in AllocationMod.F90
             if (.not. carbon_only) then
-               weight = AllocParamsInst%cpool_pft_sminn(ivt(p)) / & 
-                        AllocParamsInst%compet_pft_sminn(ivt(p))
-               weightp = AllocParamsInst%cpool_pft_sminp(ivt(p)) / & 
-                         AllocParamsInst%compet_pft_sminp(ivt(p))
-               if (ivt(p) == nbrdlf_dcd_brl_shrub) then
-                  ! fungi uptake declines
-                  weight = weight * (1._r8 - mm(p))
-                  weightp = weightp * (1._r8 - mmp(p))
-               end if
                if (carbonnitrogen_only) then
-                  br_mr = br_mr * (0.9_r8 + 0.5 * weight / 2._r8)
+                  br_mr = br_mr * (0.9_r8 + 0.5 * nscarcity(p))
                else if (carbonphosphorus_only) then
-                  br_mr = br_mr * (0.9_r8 + 0.5 * weightp / 2._r8)
+                  br_mr = br_mr * (0.9_r8 + 0.5 * pscarcity(p))
                else
-                  br_mr = br_mr * (0.9_r8 + 0.5 * (weight + weightp) / 2._r8)
+                  br_mr = br_mr * (0.9_r8 + 0.5 * (nscarcity(p) + pscarcity(p)) / 2._r8)
                end if
             end if
 #endif
