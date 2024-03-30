@@ -511,8 +511,7 @@ contains
     real(r8):: dayspyr
 
     ! local nutrient uptake pathways
-    real(r8):: active_n, active_p, fungi_n, fungi_p
-    real(r8):: maxroot_c, maxroot_n, maxroot_p
+    real(r8):: active_n, active_p, fungi_n, fungi_p, maxroot_n, maxroot_p
     real(r8):: sminn_avg, sminp_avg !temporary hold for root fraction weighted nutrient concentration over the plant profile
     real(r8):: mm, mmp !temporary hold for Michaelis-Menten limitation values
     real(r8):: callo, nallo, pallo !temporary hold for allometry values
@@ -646,6 +645,9 @@ contains
 
          npool                        => veg_ns%npool                        , & ! Input:  [real(r8) (:)   ]  (gN/m2) plant N pool storage
          ppool                        => veg_ps%ppool                        , & ! Input:  [real(r8) (:)   ]  (gN/m2) plant P pool storage
+
+         totvegn                      => veg_ns%totvegn                      , & ! Input:  [real(r8) (:)   ]  (gN/m2) total vegetation nitrogen (display + storage + xfer + npool)
+         totvegp                      => veg_ps%totvegp                      , & ! Input:  [real(r8) (:)   ]  (gP/m2) total vegetation phosphorus (display + storage + xfer + ppool)
 
          plant_nabsorb                => veg_nf%plant_nabsorb                 , & ! Input: [real(r8) (:)     ] fine root's ability to take up N (gN/m2/s)
          plant_pabsorb                => veg_pf%plant_pabsorb                 , & ! Input: [real(r8) (:)     ] fine root's ability to take up P
@@ -963,16 +965,18 @@ contains
             if (npool(p) >= cpool(p)) then
                nscarcity(p) = 0._r8
             else
-               nscarcity(p) = exp( - npool(p)/cpool(p) * callo / nallo )
+               ! cap at npool = 0
+               nscarcity(p) = min(exp( - npool(p)/cpool(p) * callo / nallo ), 1._r8)
             end if            
             if (ppool(p) >= cpool(p)) then
                pscarcity(p) = 0._r8
             else
-               pscarcity(p) = exp( - ppool(p)/cpool(p) * callo / pallo )
+               pscarcity(p) = min(exp( - ppool(p)/cpool(p) * callo / pallo ), 1._r8)
             end if
 
             ! pick the limiting one between N and P by applying max
-            f1 = froot_leaf(ivt(p)) * (1 + AllocParamsInst%froot_leaf_slope(ivt(p)) * max(nscarcity(p), pscarcity(p)))
+            f1 = froot_leaf(ivt(p)) * (1._r8 + &
+               AllocParamsInst%froot_leaf_slope(ivt(p)) * max(nscarcity(p), pscarcity(p)))
          end if
 #endif
 
@@ -1082,18 +1086,11 @@ contains
          if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
 
             ! Assume the fine root biomass can obtain equal to the total
-            ! weight of the nutrient inside the plant during 1 year, 
-            ! under ideal conditions. (this is of course scaled by
+            ! weight of the nutrient inside the plant (excluding labil pools)
+            ! during 1 year, under ideal conditions. (this is of course scaled by
             ! the compet_pft_sminn & compet_pft_sminp factors)
-
-            ! froot = froot
-            ! leaf = froot / froot_leaf
-            ! stem = froot / froot_leaf * stem_leaf
-            ! croot = froot / froot_leaf * stem_leaf * croot_stem
-            maxroot_c = frootc(p)*(1._r8 + 1._r8/f1*(1._r8 + f3*(1._r8+f2))) & 
-                  / 365._r8 / secspday
-            maxroot_n = maxroot_c * n_allometry(p) / c_allometry(p)
-            maxroot_p = maxroot_c * p_allometry(p) / c_allometry(p)
+            maxroot_n = (totvegn(p) - npool(p)) / 365._r8 / secspday
+            maxroot_p = (totvegp(p) - ppool(p)) / 365._r8 / secspday
 
             scale_q10 = AllocParamsInst%q10_uptake(ivt(p)) ** &
                ((t_soisno(c,3) - AllocParamsInst%tbase_uptake) / AllocParamsInst%scale_uptake)
@@ -1131,21 +1128,16 @@ contains
             ! (The 100% factor is subject to modification by
             !  compet_pft_sminn & compet_pft_sminp)
             ! Because fungi directly access organic nutrients, this term does not have M-M. 
-            fungi_n = plant_ndemand(p) * AllocParamsInst%cpool_pft_sminn(ivt(p))
-            fungi_p = plant_pdemand(p) * AllocParamsInst%cpool_pft_sminp(ivt(p))
+            fungi_n = plant_ndemand(p) * AllocParamsInst%cpool_pft_sminn(ivt(p)) * scale_q10
+            fungi_p = plant_pdemand(p) * AllocParamsInst%cpool_pft_sminp(ivt(p)) * scale_q10
 
             ! Since ericoid mycorrhizae is more specialized in organic nutrients
             ! than ectomycorrhizae, the fungi uptake should decline when more mineral
             ! nutrients become available.
             ! ECM associated with the trees access both organic and inorganic nutrients,
-            ! so, the decline should be less severe
-            if (ivt(p) == nbrdlf_dcd_brl_shrub) then
-               plant_nabsorb(p) = fungi_n * nscarcity(p) + active_n * (1 - nscarcity(p))
-               plant_pabsorb(p) = fungi_p * pscarcity(p) + active_p * (1 - pscarcity(p))
-            else
-               plant_nabsorb(p) = fungi_n * nscarcity(p) * 0.8 + active_n * (1 - 0.8 * nscarcity(p))
-               plant_pabsorb(p) = fungi_p * pscarcity(p) * 0.8 + active_p * (1 - 0.8 * pscarcity(p))
-            end if
+            ! so, the decline should be less severe (but perhaps already reflected in cpool_pft_sminn & sminp)
+            plant_nabsorb(p) = fungi_n * nscarcity(p) + active_n * (1 - nscarcity(p))
+            plant_pabsorb(p) = fungi_p * pscarcity(p) + active_p * (1 - pscarcity(p))
          else
             plant_nabsorb(p) = plant_ndemand(p)
             plant_pabsorb(p) = plant_pdemand(p)
@@ -1164,6 +1156,7 @@ contains
       call p2c(bounds, num_soilc, filter_soilc, &
            plant_pabsorb(bounds%begp:bounds%endp), &
            plant_pdemand_col(bounds%begc:bounds%endc))
+
 #else
       ! now use the p2c routine to get the column-averaged plant_ndemand
       call p2c(bounds, num_soilc, filter_soilc, &
@@ -1265,7 +1258,7 @@ contains
    real(r8):: cn_stoich_var=0.2    ! variability of CN ratio
    real(r8):: cp_stoich_var=0.4    ! variability of CP ratio
 
-
+   real(r8):: mm, mmp ! temporary hold for Michaelis-Menten function - microbes
    
    !-----------------------------------------------------------------------
 
@@ -1711,7 +1704,7 @@ contains
                 actual_immob_p_vr(c,:),                  & ! OUT
                 sminp_to_plant_vr(c,:),                  & ! OUT
                 supplement_to_sminp_vr(c,:))               ! OUT
-            
+
         else
 
            call PAllocationECAMIC(pci,dt,           & ! IN
@@ -3898,12 +3891,16 @@ contains
     real(r8) :: sum_no3_demand_scaled ! "" no3
     integer  :: j                     ! soil decomp layer loop
 
+    ! Michaelis-Menten competition with the plants
+    real(r8) :: mm_nh4, mm_no3
 
     do j = 1, nlevdecomp
 
+       mm_nh4 = 2._r8 * max(smin_nh4_vr(j), 0._r8) / (0.1_r8 + max(smin_nh4_vr(j), 0._r8))
+
        sum_nh4_demand        = col_plant_ndemand_vr(j) + potential_immob_vr(j) + pot_f_nit_vr(j)
        sum_nh4_demand_scaled = col_plant_ndemand_vr(j) * compet_plants_nh4 + &
-            potential_immob_vr(j)*compet_decomp_nh4 + pot_f_nit_vr(j)*compet_nit
+            potential_immob_vr(j)*compet_decomp_nh4 * mm_nh4 + pot_f_nit_vr(j)*compet_nit * mm_nh4
 
        if (sum_nh4_demand*dt < smin_nh4_vr(j)) then
           ! NH4 availability is not limiting immobilization or plant
@@ -3921,11 +3918,11 @@ contains
           if (sum_nh4_demand > 0.0_r8 .and. smin_nh4_vr(j) > 0.0_r8 &
                .and. sum_nh4_demand_scaled > 0.0_r8) then
              actual_immob_nh4_vr(j) = min((smin_nh4_vr(j)/dt)*(potential_immob_vr(j)* &
-                  compet_decomp_nh4 / sum_nh4_demand_scaled), potential_immob_vr(j))
+                  compet_decomp_nh4 * mm_nh4 / sum_nh4_demand_scaled), potential_immob_vr(j))
              smin_nh4_to_plant_vr(j) = min((smin_nh4_vr(j)/dt)*&
                   (col_plant_ndemand_vr(j)*compet_plants_nh4 / sum_nh4_demand_scaled), &
                   col_plant_ndemand_vr(j))
-             f_nit_vr(j) =  min((smin_nh4_vr(j)/dt)*(pot_f_nit_vr(j)*compet_nit / &
+             f_nit_vr(j) =  min((smin_nh4_vr(j)/dt)*(pot_f_nit_vr(j) * compet_nit * mm_nh4 / &
                   sum_nh4_demand_scaled), pot_f_nit_vr(j))
           else
              actual_immob_nh4_vr(j) = 0.0_r8
@@ -3946,12 +3943,15 @@ contains
        ! ------------------------------------------------------------------------
 
        ! next compete for no3
+       mm_no3 = 2._r8 * max(smin_no3_vr(j), 0._r8) / (0.1_r8 + max(smin_no3_vr(j), 0._r8))
+
        sum_no3_demand = (col_plant_ndemand_vr(j)-smin_nh4_to_plant_vr(j)) + &
             (potential_immob_vr(j)-actual_immob_nh4_vr(j)) + pot_f_denit_vr(j)
 
        sum_no3_demand_scaled = (col_plant_ndemand_vr(j)-smin_nh4_to_plant_vr(j)) &
-            * compet_plants_no3 + (potential_immob_vr(j)-actual_immob_nh4_vr(j))*compet_decomp_no3 &
-            + pot_f_denit_vr(j)*compet_denit
+            * compet_plants_no3 + & 
+            (potential_immob_vr(j)-actual_immob_nh4_vr(j))*compet_decomp_no3 * mm_no3 &
+            + pot_f_denit_vr(j)*compet_denit * mm_no3
 
        if (sum_no3_demand*dt < smin_no3_vr(j)) then
 
@@ -3970,13 +3970,13 @@ contains
           if (sum_no3_demand > 0.0_r8 .and. smin_no3_vr(j) > 0.0_r8 &
                .and. sum_no3_demand_scaled > 0.0_r8) then
              actual_immob_no3_vr(j) = min((smin_no3_vr(j)/dt)*((potential_immob_vr(j)- &
-                  actual_immob_nh4_vr(j))*compet_decomp_no3 / sum_no3_demand_scaled), &
+                  actual_immob_nh4_vr(j))*compet_decomp_no3 * mm_no3 / sum_no3_demand_scaled), &
                   potential_immob_vr(j)-actual_immob_nh4_vr(j))
              smin_no3_to_plant_vr(j) = min((smin_no3_vr(j)/dt) * &
                   ((col_plant_ndemand_vr(j)-smin_nh4_to_plant_vr(j)) * &
                   compet_plants_no3 / sum_no3_demand_scaled), &
                   col_plant_ndemand_vr(j)-smin_nh4_to_plant_vr(j))
-             f_denit_vr(j) =  min((smin_no3_vr(j)/dt)*(pot_f_denit_vr(j)*compet_denit / &
+             f_denit_vr(j) =  min((smin_no3_vr(j)/dt)*(pot_f_denit_vr(j)*compet_denit * mm_no3 / &
                   sum_no3_demand_scaled), pot_f_denit_vr(j))
           else
              actual_immob_no3_vr(j) = 0.0_r8
@@ -4022,8 +4022,11 @@ contains
     ! Locals
     real(r8) :: sum_pdemand          ! Total phos demand over all competitors
     integer  :: j                     ! soil decomp layer loop
+    real(r8) :: mmp ! Michaelis-Menten coefficient for P competition
 
     do j = 1, nlevdecomp
+
+       mmp = 2._r8 * max(solutionp_vr(j), 0._r8) / (1e-7 + max(solutionp_vr(j), 0._r8))
 
        sum_pdemand = col_plant_pdemand_vr(j) + potential_immob_p_vr(j)
 
@@ -4041,14 +4044,14 @@ contains
           actual_immob_p_vr(j) = potential_immob_p_vr(j)
           sminp_to_plant_vr(j) =  col_plant_pdemand_vr(j)
           supplement_to_sminp_vr(j) = sum_pdemand - (solutionp_vr(j)/dt)
-          
+ 
        else
           ! P availability can not satisfy the sum of immobilization and
           ! plant growth demands, so these two demands compete for
           ! available soil mineral solution P resource.
 
           if (sum_pdemand > 0.0_r8 .and. solutionp_vr(j) >0._r8) then
-             actual_immob_p_vr(j) = (solutionp_vr(j)/dt)*(potential_immob_p_vr(j) / sum_pdemand)
+             actual_immob_p_vr(j) = min((solutionp_vr(j)/dt)*(potential_immob_p_vr(j) * mmp / sum_pdemand), potential_immob_p_vr(j))
           else
              actual_immob_p_vr(j) = 0.0_r8
           end if

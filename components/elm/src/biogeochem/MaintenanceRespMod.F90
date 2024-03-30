@@ -291,14 +291,17 @@ contains
 
             ! increase by a factor due to transfer to fungi, similar to active_n/p & fungi_n/p
             ! partition in AllocationMod.F90
-            if (.not. carbon_only) then
+            if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
                if (carbonnitrogen_only) then
-                  br_mr = br_mr * (0.9_r8 + 0.5 * nscarcity(p))
+                  br_mr = br_mr * (0.7_r8 + nscarcity(p))
                else if (carbonphosphorus_only) then
-                  br_mr = br_mr * (0.9_r8 + 0.5 * pscarcity(p))
+                  br_mr = br_mr * (0.7_r8 + pscarcity(p))
                else
-                  br_mr = br_mr * (0.9_r8 + 0.5 * (nscarcity(p) + pscarcity(p)) / 2._r8)
-               end if
+
+                  write (iulog, *) 'br_mr', p, ivt(p), br_mr, br_mr * (0.7_r8 + (nscarcity(p) + pscarcity(p)) / 2._r8)
+
+                  br_mr = br_mr * (0.7_r8 + (nscarcity(p) + pscarcity(p)) / 2._r8)
+               end if          
             end if
 #endif
             froot_mr(p) = froot_mr(p) + frootn(p)*br_mr*tcsoi(c,j)*rootfr(p,j)
