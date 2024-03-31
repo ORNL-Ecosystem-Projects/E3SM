@@ -517,6 +517,7 @@ contains
     real(r8):: callo, nallo, pallo !temporary hold for allometry values
     real(r8):: scale_q10 !temporary hold for Q10-scalar on uptake rate
     real(r8):: scale_wtd !temporary hold for water table inhibition on uptake rate
+    real(r8):: frac_fungi!temporary hold for fungi uptake fraction
 
   !-----------------------------------------------------------------------
 
@@ -974,9 +975,14 @@ contains
                pscarcity(p) = min(exp( - ppool(p)/cpool(p) * callo / pallo ), 1._r8)
             end if
 
-            ! pick the limiting one between N and P by applying max
-            f1 = froot_leaf(ivt(p)) * (1._r8 + &
-               AllocParamsInst%froot_leaf_slope(ivt(p)) * max(nscarcity(p), pscarcity(p)))
+            ! baseline: coldest chamber: nscarcity = pscaricty == 1
+            ! as it gets warmer, nscarcity & pscaricty -> 0
+            ! positive slope: more roots @ warming/more nutrients
+            ! negative slope: less roots @ warming/more nutrients
+            ! (pick the limiting one between N and P by applying max)
+            f1 = froot_leaf(ivt(p)) * (1._r8 + & 
+               max(AllocParamsInst%froot_leaf_slope(ivt(p)) * & 
+                     (1._r8 - max(nscarcity(p), pscarcity(p))), -0.95_r8))
          end if
 #endif
 
@@ -1122,22 +1128,28 @@ contains
             active_p = maxroot_p * mmp * scale_q10 * scale_wtd * & 
                        AllocParamsInst%compet_pft_sminp(ivt(p))
 
-            ! Assume the fungi uptake can obtain ~100% plant NP demand, but
-            ! is >100% when NP is poor, and <100% when NP is abundant. Hence,
-            ! plants are less likely to use fungi when NP is more abundant. 
-            ! (The 100% factor is subject to modification by
-            !  compet_pft_sminn & compet_pft_sminp)
+            ! Assume the fungi uptake can obtain a fraction of plant NP demand
+            ! (the fraction = compet_pft_sminn / compet_pft_sminp)
             ! Because fungi directly access organic nutrients, this term does not have M-M. 
             fungi_n = plant_ndemand(p) * AllocParamsInst%cpool_pft_sminn(ivt(p)) * scale_q10
             fungi_p = plant_pdemand(p) * AllocParamsInst%cpool_pft_sminp(ivt(p)) * scale_q10
 
-            ! Since ericoid mycorrhizae is more specialized in organic nutrients
-            ! than ectomycorrhizae, the fungi uptake should decline when more mineral
-            ! nutrients become available.
-            ! ECM associated with the trees access both organic and inorganic nutrients,
-            ! so, the decline should be less severe (but perhaps already reflected in cpool_pft_sminn & sminp)
-            plant_nabsorb(p) = fungi_n * nscarcity(p) + active_n * (1 - nscarcity(p))
-            plant_pabsorb(p) = fungi_p * pscarcity(p) + active_p * (1 - pscarcity(p))
+            ! For shrub, NP more abundant -> less ErM -> lower fungi uptake
+            ! For trees, NP more abundant -> more ECM -> higher fungi uptake
+            if (carbonnitrogen_only) then
+               frac_fungi = nscarcity(p)
+            else if (carbonphosphorus_only) then
+               frac_fungi = pscarcity(p)
+            else
+               frac_fungi = max(nscarcity(p), pscarcity(p))
+            end if
+            if (ivt(p)  == nbrdlf_dcd_brl_shrub) then
+               frac_fungi = min(3 * frac_fungi, 0.95_r8)
+            else
+               frac_fungi = 1 - min(3 * frac_fungi, 0.95_r8)
+            end if
+            plant_nabsorb(p) = fungi_n * frac_fungi + active_n * (1 - frac_fungi)
+            plant_pabsorb(p) = fungi_p * frac_fungi + active_p * (1 - frac_fungi)
          else
             plant_nabsorb(p) = plant_ndemand(p)
             plant_pabsorb(p) = plant_pdemand(p)
@@ -1258,7 +1270,6 @@ contains
    real(r8):: cn_stoich_var=0.2    ! variability of CN ratio
    real(r8):: cp_stoich_var=0.4    ! variability of CP ratio
 
-   real(r8):: mm, mmp ! temporary hold for Michaelis-Menten function - microbes
    
    !-----------------------------------------------------------------------
 
@@ -1429,7 +1440,7 @@ contains
               ! to scale up to column
               plant_ndemand_col(c) = 0._r8
               plant_pdemand_col(c) = 0._r8
-              
+
               ! We fill the vertically resolved array to simplify some jointly used code
               do j = 1, nlevdecomp
 
@@ -2430,7 +2441,14 @@ contains
 
 #ifdef HUM_HOL
              if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
-                f1 = froot_leaf(ivt(p)) * AllocParamsInst%froot_leaf_slope(ivt(p)) * max(nscarcity(p), pscarcity(p))
+               ! baseline: coldest chamber: nscarcity = pscaricty == 1
+               ! as it gets warmer, nscarcity & pscaricty -> 0
+               ! positive slope: more roots @ warming/more nutrients
+               ! negative slope: less roots @ warming/more nutrients
+               ! (pick the limiting one between N and P by applying max)
+               f1 = froot_leaf(ivt(p)) * (1._r8 + & 
+                  max(AllocParamsInst%froot_leaf_slope(ivt(p)) * & 
+                        (1._r8 - max(nscarcity(p), pscarcity(p))), -0.95_r8))
              end if
 #endif
 

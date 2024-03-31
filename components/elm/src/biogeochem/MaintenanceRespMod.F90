@@ -139,6 +139,7 @@ contains
     real(r8):: q10   ! temperature dependence
     real(r8):: tc    ! temperature correction, 2m air temp (unitless)
     real(r8):: tcsoi(bounds%begc:bounds%endc,nlevgrnd) ! temperature correction by soil layer (unitless)
+    real(r8):: frac_fungi!temporary hold for fungi uptake fraction
     !-----------------------------------------------------------------------
 
     associate(                                                        &
@@ -179,7 +180,6 @@ contains
 #ifdef HUM_HOL
          nscarcity      => cnstate_vars%nscarcity_patch        , & ! Input: [real (r8) (:)     ] scarcity of vegetation n-supply relative to c-supply
          pscarcity      => cnstate_vars%pscarcity_patch         & ! Input: [real (r8) (:)     ] abundance of vegetation p-supply relative to c-supply
-
 #endif
          )
 
@@ -292,16 +292,24 @@ contains
             ! increase by a factor due to transfer to fungi, similar to active_n/p & fungi_n/p
             ! partition in AllocationMod.F90
             if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
+
+               ! For shrub, NP more abundant -> less ErM -> lower fungi uptake
+               ! For trees, NP more abundant -> more ECM -> higher fungi uptake
                if (carbonnitrogen_only) then
-                  br_mr = br_mr * (0.7_r8 + nscarcity(p))
+                  frac_fungi = nscarcity(p)
                else if (carbonphosphorus_only) then
-                  br_mr = br_mr * (0.7_r8 + pscarcity(p))
+                  frac_fungi = pscarcity(p)
                else
-
-                  write (iulog, *) 'br_mr', p, ivt(p), br_mr, br_mr * (0.7_r8 + (nscarcity(p) + pscarcity(p)) / 2._r8)
-
-                  br_mr = br_mr * (0.7_r8 + (nscarcity(p) + pscarcity(p)) / 2._r8)
-               end if          
+                  frac_fungi = max(nscarcity(p), pscarcity(p))
+               end if
+               if (ivt(p)  == nbrdlf_dcd_brl_shrub) then
+                  frac_fungi = min(3 * frac_fungi, 0.95_r8)
+               else
+                  frac_fungi = 1 - min(3 * frac_fungi, 0.95_r8)
+               end if
+               ! Assume fungi will increase MR by 20% if 100% dependent on them
+               ! if no need to send to fungi at all, MR will be low by 20%
+               br_mr = br_mr * (0.8_r8 + 0.4_r8 * frac_fungi)
             end if
 #endif
             froot_mr(p) = froot_mr(p) + frootn(p)*br_mr*tcsoi(c,j)*rootfr(p,j)
