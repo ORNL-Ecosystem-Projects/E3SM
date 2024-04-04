@@ -517,6 +517,7 @@ contains
     real(r8):: callo, nallo, pallo !temporary hold for allometry values
     real(r8):: scale_q10 !temporary hold for Q10-scalar on uptake rate
     real(r8):: scale_wtd !temporary hold for water table inhibition on uptake rate
+    real(r8):: ncap, pcap !cap on npool & ppool sizes
     real(r8):: scale_npool, scale_ppool !temporary hold for allometry limit on uptake rate
     real(r8):: frac_fungi!temporary hold for fungi uptake fraction
 
@@ -647,8 +648,8 @@ contains
          npool                        => veg_ns%npool                        , & ! Input:  [real(r8) (:)   ]  (gN/m2) plant N pool storage
          ppool                        => veg_ps%ppool                        , & ! Input:  [real(r8) (:)   ]  (gN/m2) plant P pool storage
 
-         totvegn                      => veg_ns%totvegn                      , & ! Input:  [real(r8) (:)   ]  (gN/m2) total vegetation nitrogen (display + storage + xfer + npool)
-         totvegp                      => veg_ps%totvegp                      , & ! Input:  [real(r8) (:)   ]  (gP/m2) total vegetation phosphorus (display + storage + xfer + ppool)
+         totvegn                      => veg_ns%totvegn                        , & ! Input:  [real (r8) (:)   ]
+         totvegp                      => veg_ps%totvegp                        , & ! Input:  [real (r8) (:)   ]
 
          plant_nabsorb                => veg_nf%plant_nabsorb                 , & ! Input: [real(r8) (:)     ] fine root's ability to take up N (gN/m2/s)
          plant_pabsorb                => veg_pf%plant_pabsorb                 , & ! Input: [real(r8) (:)     ] fine root's ability to take up P
@@ -1127,14 +1128,19 @@ contains
             plant_nfungi(p) = fungi_n * frac_fungi
             plant_pfungi(p) = fungi_p * frac_fungi
 
-            ! When N/PPOOL is too big compared to CPOOL, scale down absorption
-            ! Cap at 1.5 times allometry
-            if (npool(p) * c_allometry(p) > cpool(p) * n_allometry(p)) then
-               scale_npool = min(max(3._r8 - npool(p)/cpool(p)*c_allometry(p)/n_allometry(p)*2._r8, 0._r8), 1._r8)
+            ! When N/PPOOL is too big compared to vegetation requirement, scale down absorption
+            ! Begin scaling down at 60% totvegn, cap at 100% totvegn
+            if (npool(p) > 0.6*totvegn(p)) then
+               scale_npool = min(max(2.5_r8 - npool(p)/totvegn(p)*2.5_r8, 0._r8), 2.5_r8)
+            else
+               scale_npool = 1._r8
             end if
-            if (ppool(p) * c_allometry(p) > cpool(p) * p_allometry(p)) then
-               scale_ppool = min(max(3._r8 - ppool(p)/cpool(p)*c_allometry(p)/p_allometry(p)*2._r8, 0._r8), 1._r8)
+            if (ppool(p) > 0.6*totvegp(p)) then
+               scale_ppool = min(max(2.5_r8 - ppool(p)/totvegp(p)*2.5_r8, 0._r8), 2.5_r8)
+            else
+               scale_ppool = 1._r8
             end if
+
             plant_nabsorb(p) = scale_npool * plant_nabsorb(p)
             plant_pabsorb(p) = scale_ppool * plant_pabsorb(p)
          else
