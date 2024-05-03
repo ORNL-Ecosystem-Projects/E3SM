@@ -178,6 +178,7 @@ contains
          grainn         =>    veg_ns%grainn       , & ! Output: [real(r8) (:)   ]  (kgN/m2) grain N
 
 #ifdef HUM_HOL
+         froot_leaf     =>    veg_vp%froot_leaf   , & ! Input:  [real(r8) (:)   ]  allocation parameter: new fine root C per new leaf C (gC/gC)
          zwt_root       => cnstate_vars%zwt_root_patch  & ! Input: [real (r8) (:)     ] water table inhibition of fine root growth related to fungi uptake
 #endif
          )
@@ -294,7 +295,7 @@ contains
 
                ! For shrub, NP more abundant -> less ErM -> lower fungi uptake
                ! For trees, NP more abundant -> more ECM -> higher fungi uptake
-               frac_fungi = 1._r8 - (zwt_root(p) - 0.5) / 1.5
+               frac_fungi = 1._r8 - zwt_root(p) * froot_leaf (ivt(p)) / 1.5_r8
                frac_fungi = min(max(frac_fungi, 0._r8), 1._r8)
                ! Assume fungi will increase MR by 20% if 100% dependent on them
                ! if no need to send to fungi at all, MR will be low by 20%

@@ -520,6 +520,7 @@ contains
     real(r8):: ncap, pcap !cap on npool & ppool sizes
     real(r8):: scale_npool, scale_ppool !temporary hold for allometry limit on uptake rate
     real(r8):: frac_fungi!temporary hold for fungi uptake fraction
+    real(r8):: leaf_to_biomass!temporary variable to LEAFC_ALLOC:TOTVEGC_ABG
 
   !-----------------------------------------------------------------------
 
@@ -953,12 +954,30 @@ contains
 
 
 #ifdef HUM_HOL
-         if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
-            ! relate the amount of roots growth to water table depth
-            ! The slope parameter only makes sense between 0.1 and 0.8
-            zwt_root(p) = exp(zwt(c)/0.3_r8*AllocParamsInst%froot_leaf_slope(ivt(p)))
-            f1 = froot_leaf(ivt(p)) * max(zwt_root(p), 0.1_r8)
+         !if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
+
+         ! relate the amount of roots growth to water table depth
+         !   if (ivt(p) == ndllf_evr_brl_tree) then
+         !      leaf_to_biomass = 0.035
+         !   else if (ivt(p) == ndllf_dcd_brl_tree) then
+         !      leaf_to_biomass = 0.016
+         !   else if (ivt(p) == nbrdlf_dcd_brl_shrub) then
+         !      leaf_to_biomass = 0.045
+         !   end if
+         !end if
+
+         ! Murphy, M. T., & Moore, T. R. (2010). Linking root production to aboveground plant characteristics and water table in a temperate bog. Plant and Soil, 336(1), 219–231. https://doi.org/10.1007/s11104-010-0468-1
+         if ((ivt(p) == nbrdlf_dcd_brl_shrub) .and. (.not. carbon_only)) then
+            leaf_to_biomass = 0.045
+            zwt_root(p) = max(10**(1.4_r8 * zwt(c) - 1.33) / 1.37_r8 / leaf_to_biomass, 0.5)
+            f1 = zwt_root(p) * froot_leaf(ivt(p))
+            !! The slope parameter only makes sense between 0.1 and 0.8
+            !zwt_root(p) = exp(zwt(c)/0.3_r8*AllocParamsInst%froot_leaf_slope(ivt(p)))
+            !f1 = froot_leaf(ivt(p)) * max(zwt_root(p), 0.1_r8)
+         else
+            zwt_root(p) = 1._r8
          end if
+         f1 = zwt_root(p) * froot_leaf(ivt(p))
 #endif
 
          ! based on available C, use constant allometric relationships to
@@ -1118,7 +1137,7 @@ contains
 
             ! For shrub, NP more abundant -> less ErM -> lower fungi uptake
             ! For trees, NP more abundant -> more ECM -> higher fungi uptake
-            frac_fungi = 1._r8 - (zwt_root(p) - 0.5) / 1.5
+            frac_fungi = 1._r8 - zwt_root(p) * froot_leaf (ivt(p)) / 1.5_r8
             frac_fungi = min(max(frac_fungi, 0._r8), 1._r8)
 
             plant_nabsorb(p) = fungi_n * frac_fungi + active_n * (1 - frac_fungi)
@@ -2426,8 +2445,11 @@ contains
              f2 = croot_stem(ivt(p))
 
 #ifdef HUM_HOL
+             !if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
+             !  f1 = froot_leaf(ivt(p)) * max(zwt_root(p), 0.1_r8)
+             !end if
              if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
-               f1 = froot_leaf(ivt(p)) * max(zwt_root(p), 0.1_r8)
+                f1 = zwt_root(p) * froot_leaf(ivt(p))
              end if
 #endif
 
