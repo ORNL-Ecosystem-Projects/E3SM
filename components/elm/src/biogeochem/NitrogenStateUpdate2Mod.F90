@@ -59,7 +59,6 @@ contains
          do j = 1, nlevdecomp
             do fc = 1,num_soilc
                c = filter_soilc(fc)
-
                col_ns%decomp_npools_vr(c,j,i_met_lit) = &
                     col_ns%decomp_npools_vr(c,j,i_met_lit) + col_nf%gap_mortality_n_to_litr_met_n(c,j) * dt
                col_ns%decomp_npools_vr(c,j,i_cel_lit) = &

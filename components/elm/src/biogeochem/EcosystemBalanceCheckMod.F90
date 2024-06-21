@@ -409,12 +409,12 @@ contains
       err_found = .false.
       ! column loop
       do fc = 1,num_soilc
-         c=filter_soilc(fc)
+         c = filter_soilc(fc)
 
          ! calculate the total column-level nitrogen storage, for mass conservation check
          col_endnb(c) = totcoln(c)
 
-         if(use_fates) then
+         if (use_fates) then
 
             ! calculate total column-level inputs
             ! In FATES the nfix sent to the plant, if any, is not contained in
@@ -489,7 +489,7 @@ contains
          col_noutputs(c) = col_noutputs(c) + &
                col_prod1n_loss(c) + col_prod10n_loss(c) + col_prod100n_loss(c)
 
-         if(use_alquimia) col_noutputs(c) = col_noutputs(c) + col_nf%DON_runoff(c)
+         if (use_alquimia) col_noutputs(c) = col_noutputs(c) + col_nf%DON_runoff(c)
 
          col_noutputs(c) = col_noutputs(c) + col_prod1n_loss(c)
          

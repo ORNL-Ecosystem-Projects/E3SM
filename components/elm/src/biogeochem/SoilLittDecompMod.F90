@@ -45,7 +45,7 @@ module SoilLittDecompMod
   !
   ! !PUBLIC MEMBER FUNCTIONS:
 
-   public :: readSoilLittDecompParams
+  public :: readSoilLittDecompParams
   public :: SoilLittDecompAlloc
   ! pflotran
   public :: SoilLittDecompAlloc2
@@ -146,7 +146,7 @@ contains
     character(len=256) :: event
     !-----------------------------------------------------------------------
 
-    associate(                                                                                           &
+    associate(                                                          &
          cascade_donor_pool               =>    decomp_cascade_con%cascade_donor_pool                  , & ! Input:  [integer  (:)     ]  which pool is C taken from for a given decomposition step
          cascade_receiver_pool            =>    decomp_cascade_con%cascade_receiver_pool               , & ! Input:  [integer  (:)     ]  which pool is C added to for a given decomposition step
          floating_cn_ratio_decomp_pools   =>    decomp_cascade_con%floating_cn_ratio_decomp_pools      , & ! Input:  [logical  (:)     ]  TRUE => pool has fixed C:N ratio
@@ -190,17 +190,20 @@ contains
          decomp_k                         =>    col_cf%decomp_k                           , & ! Output: [real(r8) (:,:,:) ]  rate constant for decomposition (1./sec)
          phr_vr                           =>    col_cf%phr_vr                             , & ! Output: [real(r8) (:,:)   ]  potential HR (gC/m3/s)
          fphr                             =>    col_cf%fphr                               , & ! Output: [real(r8) (:,:)   ]  fraction of potential SOM + LITTER heterotrophic
-         pmnf_decomp_cascade              =>    col_nf%pmnf_decomp_cascade                  , &
+         pmnf_decomp_cascade              =>    col_nf%pmnf_decomp_cascade                , &
          pmpf_decomp_cascade              =>    col_pf%pmpf_decomp_cascade                , &
-         soil_n_immob_flux                =>    col_nf%soil_n_immob_flux                    , &
-         soil_n_immob_flux_vr             =>    col_nf%soil_n_immob_flux_vr                 , &
-         soil_n_grossmin_flux             =>    col_nf%soil_n_grossmin_flux                 , &
+         soil_n_immob_flux                =>    col_nf%soil_n_immob_flux                  , &
+         soil_n_immob_flux_vr             =>    col_nf%soil_n_immob_flux_vr               , &
+         soil_n_grossmin_flux             =>    col_nf%soil_n_grossmin_flux               , &
          soil_p_immob_flux                =>    col_pf%soil_p_immob_flux                  , &
          soil_p_immob_flux_vr             =>    col_pf%soil_p_immob_flux_vr               , &
          soil_p_grossmin_flux             =>    col_pf%soil_p_grossmin_flux               , &
-         actual_immob_vr                  =>    col_nf%actual_immob_vr                  , &
-         actual_immob_p_vr                =>    col_pf%actual_immob_p_vr                &
-         )
+         actual_immob_vr                  =>    col_nf%actual_immob_vr                    , &
+         actual_immob_p_vr                =>    col_pf%actual_immob_p_vr                  , &
+
+         som_n_to_fungi_vr                =>    col_nf%som_n_to_fungi_vr                  , &
+         som_p_to_fungi_vr                =>    col_pf%som_p_to_fungi_vr                  &
+      )
 
       !-------------------------------------------------------------------------------------------------
       ! call decomp_rate_constants_bgc() or decomp_rate_constants_cn(): now called in EcosystemDynNoLeaching1
@@ -219,9 +222,17 @@ contains
             do j = 1,nlevdecomp
                do fc = 1,num_soilc
                   c = filter_soilc(fc)
+#ifdef HUM_HOL
+                  if ( (decomp_npools_vr(c,j,l) - som_n_to_fungi_vr(c,j,l)*dtime) > 0._r8 ) then
+                     ! Reduce the litter nitrogen pool by fungi uptake based on the idea 
+                     ! that fungi outcompete saprotrophs in uptaking litter nitrogen
+                     cn_decomp_pools(c,j,l) = decomp_cpools_vr(c,j,l) / (decomp_npools_vr(c,j,l) - som_n_to_fungi_vr(c,j,l)*dtime)
+                  end if
+#else
                   if ( decomp_npools_vr(c,j,l) > 0._r8 ) then
                      cn_decomp_pools(c,j,l) = decomp_cpools_vr(c,j,l) / decomp_npools_vr(c,j,l)
                   end if
+#endif
                end do
             end do
          else
@@ -240,9 +251,17 @@ contains
             do j = 1,nlevdecomp
                do fc = 1,num_soilc
                   c = filter_soilc(fc)
+#ifdef HUM_HOL
+                  if ( (decomp_ppools_vr(c,j,l) - som_p_to_fungi_vr(c,j,l)*dtime) > 0._r8 ) then
+                     ! Reduce the litter phosphorus pool by fungi uptake based on the idea 
+                     ! that fungi outcompete saprotrophs in uptaking litter phosphorus
+                     cp_decomp_pools(c,j,l) = decomp_cpools_vr(c,j,l) / (decomp_ppools_vr(c,j,l) - som_p_to_fungi_vr(c,j,l)*dtime)
+                  end if
+#else
                   if ( decomp_ppools_vr(c,j,l) > 0._r8 ) then
                      cp_decomp_pools(c,j,l) = decomp_cpools_vr(c,j,l) / decomp_ppools_vr(c,j,l)
                   end if
+#endif
                end do
             end do
          else
@@ -278,12 +297,14 @@ contains
                        * decomp_k(c,j,cascade_donor_pool(k))  * pathfrac_decomp_cascade(c,j,k)
                   if ( .not. floating_cn_ratio_decomp_pools(cascade_receiver_pool(k)) ) then  !! not transition of cwd to litter
 
-                     if (cascade_receiver_pool(k) /= i_atm ) then  ! not 100% respiration
+                     if ( cascade_receiver_pool(k) /= i_atm ) then  ! not 100% respiration
                         ratio = 0._r8
 
                         if (decomp_npools_vr(c,j,cascade_donor_pool(k)) > 0._r8) then
                            ratio = cn_decomp_pools(c,j,cascade_receiver_pool(k))/cn_decomp_pools(c,j,cascade_donor_pool(k))
                         endif
+                        ! this equation is actually: 
+                        ! C_{transferred} / CN_{receiver} - C_{lost} / CN_{donor}
                         pmnf_decomp_cascade(c,j,k) = (p_decomp_cpool_loss(c,j,k) * (1.0_r8 - rf_decomp_cascade(c,j,k) - ratio) &
                              / cn_decomp_pools(c,j,cascade_receiver_pool(k)) )
 
@@ -396,6 +417,7 @@ contains
                cnstate_vars,                                        &
                soilstate_vars, dtime,                               &
                alm_fates)
+
       call t_stop_lnd(event)
 
 
@@ -403,11 +425,11 @@ contains
       ! resolution of plant/heterotroph  competition for mineral N
 
 
-          !-------------------------------------------------------------------------------------------------
-          ! delete c:n,c:p ratios calculation, they have been calculated at the beginning of this subroutine
-          !-------------------------------------------------------------------------------------------------
+      !-------------------------------------------------------------------------------------------------
+      ! delete c:n,c:p ratios calculation, they have been calculated at the beginning of this subroutine
+      !-------------------------------------------------------------------------------------------------
 
-          ! upon return from CNAllocation, the fraction of potential immobilization
+      ! upon return from CNAllocation, the fraction of potential immobilization
       ! has been set (cnstate_vars%fpi_vr_col). now finish the decomp calculations.
       ! Only the immobilization steps are limited by fpi_vr (pmnf > 0)
       ! Also calculate denitrification losses as a simple proportion
@@ -661,14 +683,14 @@ contains
          sminn_vr                         =>    col_ns%sminn_vr                        , &
          smin_no3_vr                      =>    col_ns%smin_no3_vr                     , &
          smin_nh4_vr                      =>    col_ns%smin_nh4_vr                       &
-         )
+      )
 
       ! set time steps
-            !------------------------------------------------------------------
-            ! 'call decomp_vertprofiles()' moved to EcosystemDynNoLeaching1
-            !------------------------------------------------------------------
-            smin_nh4_to_plant_vr_loc(:,:) = 0._r8
-            smin_no3_to_plant_vr_loc(:,:) = 0._r8
+      !------------------------------------------------------------------
+      ! 'call decomp_vertprofiles()' moved to EcosystemDynNoLeaching1
+      !------------------------------------------------------------------
+      smin_nh4_to_plant_vr_loc(:,:) = 0._r8
+      smin_no3_to_plant_vr_loc(:,:) = 0._r8
 
       ! Alquimia needs to correct for N or P limitation being turned off because it skips the calculation in SoilLittDecompAlloc
       if(use_alquimia) then 
@@ -682,14 +704,15 @@ contains
                   if(potential_immob_vr(c,j)>0.0) then
                      ! For now, supplementing with potential immobilization value because only supplementing shortfall might underestimate
                      supplement_to_sminn_vr(c,j) = supplement_to_sminn_vr(c,j) + (potential_immob_vr(c,j) - actual_immob_vr(c,j))
-                  endif
+                  end if
                   ! Supplement to immobilization is added back for next time step but supplement to plant N is only given to the plant, not soil,
                   ! because we are skipping the subtraction of plant N from smin_nh4 in NitrogenStateUpdate1Mod
                   smin_nh4_vr(c,j) = smin_nh4_vr(c,j) + (potential_immob_vr(c,j) - actual_immob_vr(c,j))*dt
                end do
             end do
-         endif
-         if( cnallocate_carbon_only() .or. cnallocate_carbonnitrogen_only() .or. .true.) then ! Always on because PFLOTRAN doesn't have P yet
+         end if
+
+         if ( cnallocate_carbon_only() .or. cnallocate_carbonnitrogen_only() .or. .true.) then ! Always on because PFLOTRAN doesn't have P yet
             do fc=1,num_soilc
                c = filter_soilc(fc)
                sminp_to_plant(c) = 0.0_r8
@@ -697,21 +720,22 @@ contains
                   supplement_to_sminp_vr(c,j) = col_plant_pdemand_vr(c,j) - sminp_to_plant_vr(c,j)
                   sminp_to_plant_vr(c,j)       = sminp_to_plant_vr(c,j) + supplement_to_sminp_vr(c,j)
                   sminp_to_plant(c) = sminp_to_plant(c) + sminp_to_plant_vr(c,j)*dzsoi_decomp(j)
-               enddo
-            fpg_p(c) = 1.0_r8
-            enddo
-         endif
+               end do
+               fpg_p(c) = 1.0_r8
+            end do
+         end if
+
          do fc=1,num_soilc
             c = filter_soilc(fc)
             do j = 1, nlevdecomp    
                sminn_to_plant_vr(c,j) = smin_no3_to_plant_vr(c,j) + smin_nh4_to_plant_vr(c,j)
                sminn_vr(c,j) = col_ns%smin_nh4_vr(c,j) + col_ns%smin_no3_vr(c,j)
-            enddo
-         enddo
-      endif
+            end do
+         end do
+      end if
 
       ! MUST have already updated needed bgc variables from PFLOTRAN by this point
-      if((use_elm_interface.and.use_pflotran.and.pf_cmode) .or. use_alquimia) then
+      if ((use_elm_interface .and. use_pflotran .and. pf_cmode) .or. use_alquimia) then
          ! fpg calculation
          do fc=1,num_soilc
             c = filter_soilc(fc)
@@ -720,6 +744,7 @@ contains
                sminn_to_plant(c)    = sminn_to_plant(c) + sminn_to_plant_vr(c,j) * dzsoi_decomp(j)
             end do
          end do
+
          do fc=1,num_soilc
             c = filter_soilc(fc)
             ! calculate the fraction of potential growth that can be
@@ -747,6 +772,7 @@ contains
                end if
             end do
          end do
+
          do fc=1,num_soilc
             c = filter_soilc(fc)
             if (potential_immob(c) > 0.0_r8) then
@@ -756,7 +782,6 @@ contains
                fpi(c) = 1.0_r8
             end if
          end do
-
 
          if (use_lch4) then
             ! Add up potential hr for methane calculations

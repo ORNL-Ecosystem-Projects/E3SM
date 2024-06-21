@@ -129,16 +129,15 @@ contains
     !-----------------------------------------------------------------------
 
     associate(                                                                                           &
-         ivt                   => veg_pp%itype                                , & ! Input:  [integer  (:)     ]  pft vegetation type
+         ivt                   => veg_pp%itype                             , & ! Input:  [integer  (:)     ]  pft vegetation type
 
-         woody                 => veg_vp%woody                         , & ! Input:  [real(r8) (:)     ]  binary flag for woody lifeform (1=woody, 0=not woody)
+         woody                 => veg_vp%woody                             , & ! Input:  [real(r8) (:)     ]  binary flag for woody lifeform (1=woody, 0=not woody)
 
          cascade_donor_pool    => decomp_cascade_con%cascade_donor_pool    , & ! Input:  [integer  (:)     ]  which pool is C taken from for a given decomposition step
          cascade_receiver_pool => decomp_cascade_con%cascade_receiver_pool , & ! Input:  [integer  (:)     ]  which pool is C added to for a given decomposition step
 
          ndep_prof             => cnstate_vars%ndep_prof_col               , & ! Input:  [real(r8) (:,:)   ]  profile over which N deposition is distributed through column (1/m)
          nfixation_prof        => cnstate_vars%nfixation_prof_col           & ! Input:  [real(r8) (:,:)   ]  profile over which N fixation is distributed through column (1/m)
-
          )
 
       ! column-level fluxes
@@ -148,14 +147,14 @@ contains
          do j = 1, nlevdecomp
             do fc = 1,num_soilc
                c = filter_soilc(fc)
-               
+
                ! N deposition and fixation (put all into NH4 pool)
                col_ns%smin_nh4_vr(c,j) = col_ns%smin_nh4_vr(c,j) + col_nf%ndep_to_sminn(c)*dt * ndep_prof(c,j)
                col_ns%smin_nh4_vr(c,j) = col_ns%smin_nh4_vr(c,j) + col_nf%nfix_to_sminn(c)*dt * nfixation_prof(c,j)
 
                ! plant to litter fluxes
                ! phenology and dynamic landcover fluxes
-               if(.not.use_fates) then
+               if (.not. use_fates) then
                   col_nf%decomp_npools_sourcesink(c,j,i_met_lit) = &
                        col_nf%phenology_n_to_litr_met_n(c,j) * dt
 
@@ -164,6 +163,20 @@ contains
 
                   col_nf%decomp_npools_sourcesink(c,j,i_lig_lit) = &
                        col_nf%phenology_n_to_litr_lig_n(c,j) * dt
+#ifdef HUM_HOL
+                  ! mycorrhizal fungi uptake fluxes
+                  col_nf%decomp_npools_sourcesink(c,j,i_met_lit) = &
+                     col_nf%decomp_npools_sourcesink(c,j,i_met_lit) - &
+                     col_nf%som_n_to_fungi_vr(c,j,i_met_lit) * dt
+
+                  col_nf%decomp_npools_sourcesink(c,j,i_cel_lit) = &
+                     col_nf%decomp_npools_sourcesink(c,j,i_cel_lit) - &
+                     col_nf%som_n_to_fungi_vr(c,j,i_cel_lit) * dt
+
+                  col_nf%decomp_npools_sourcesink(c,j,i_lig_lit) = &
+                     col_nf%decomp_npools_sourcesink(c,j,i_lig_lit) - &
+                     col_nf%som_n_to_fungi_vr(c,j,i_lig_lit) * dt
+#endif
                end if
             end do
          end do
@@ -349,6 +362,11 @@ contains
               ! deployment from retranslocation pool
               veg_ns%npool(p)    = veg_ns%npool(p)    + veg_nf%retransn_to_npool(p)*dt
               veg_ns%retransn(p) = veg_ns%retransn(p) - veg_nf%retransn_to_npool(p)*dt
+
+#ifdef HUM_HOL
+              ! deployment from fungi uptake pool
+              veg_ns%npool(p) = veg_ns%npool(p) + veg_nf%fungi_som_to_npool(p)*dt
+#endif
 
               ! allocation fluxes
               veg_ns%npool(p)           = veg_ns%npool(p)          - veg_nf%npool_to_leafn(p)*dt

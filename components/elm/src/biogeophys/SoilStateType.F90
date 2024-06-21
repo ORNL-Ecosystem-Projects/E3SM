@@ -95,7 +95,7 @@ module SoilStateType
    contains
 
      procedure, public  :: Init
-     procedure, public :: InitAllocate
+     procedure, public  :: InitAllocate
      procedure, private :: InitHistory
      procedure, private :: InitCold
      procedure, public  :: Restart

@@ -501,7 +501,6 @@ contains
          endif
 
       end do  ! i_type
-
     end associate
 
   end subroutine SoilLittVertTransp

@@ -13,7 +13,7 @@ module VegetationDataType
   use abortutils      , only : endrun
   use elm_time_manager, only : is_restart, get_nstep, is_first_restart_step 
   use elm_varpar      , only : nlevsno, nlevgrnd, nlevlak, nlevurb, nlevcan, crop_prog
-  use elm_varpar      , only : nlevdecomp, nlevdecomp_full
+  use elm_varpar      , only : nlevdecomp, nlevdecomp_full, ndecomp_pools
   use elm_varcon      , only : spval, ispval, sb
   use elm_varcon      , only : c13ratio, c14ratio
   use landunit_varcon , only : istsoil, istcrop
@@ -36,8 +36,9 @@ module VegetationDataType
   use ColumnDataType            , only : column_carbon_state, column_carbon_flux
   use ColumnDataType            , only : column_nitrogen_state, column_nitrogen_flux
   use ColumnDataType            , only : column_phosphorus_state, column_phosphorus_flux
-  use timeInfoMod , only : nstep_mod 
-  use dynSubgridControlMod, only : get_do_harvest 
+  use timeInfoMod               , only : nstep_mod 
+  use dynSubgridControlMod      , only : get_do_harvest 
+  use CNDecompCascadeConType    , only : decomp_cascade_con
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -105,7 +106,7 @@ module VegetationDataType
     real(r8), pointer :: begwb        (:) => null() ! water mass begining of the time step
     real(r8), pointer :: endwb        (:) => null() ! water mass end of the time step
     real(r8), pointer :: errh2o       (:) => null() ! water conservation error (mm H2O)
-    real(r8), pointer :: h2o_moss_wc    (:) => null() ! Total water content of Sphagnum moss (relative to dry mass (relative to dry mass))
+    real(r8), pointer :: h2o_moss_wc  (:) => null() ! Total water content of Sphagnum moss (relative to dry mass (relative to dry mass))
     real(r8), pointer :: h2o_moss_inter (:) => null() ! Internal water content of Sphagnum moss (relative to dry mass (relative to dry mass))
   contains
     procedure, public :: Init    => veg_ws_init
@@ -153,7 +154,6 @@ module VegetationDataType
     real(r8), pointer :: totvegc            (:) => null() ! (gC/m2) total vegetation carbon, excluding cpool
     real(r8), pointer :: totpftc            (:) => null() ! (gC/m2) total patch-level carbon, including cpool
     real(r8), pointer :: totvegc_abg        (:) => null() ! (gC/m2) total above vegetation carbon, excluding cpool
-    real(r8), pointer :: osm_inhib          (:) => null() ! osm_inhib
     real(r8), pointer :: begcb              (:) => null() ! patch carbon mass, beginning of time step (gC/m**2)
     real(r8), pointer :: endcb              (:) => null() ! patch carbon mass, end of time step (gC/m**2)
     real(r8), pointer :: errcb              (:) => null() ! patch carbon balance error for the timestep (gC/m**2)
@@ -388,6 +388,8 @@ module VegetationDataType
 
     real(r8), pointer :: qflx_over_supply_patch   (:)   => null()   ! over supplied irrigation
     integer , pointer :: n_irrig_steps_left (:)   => null() ! number of time steps for which we still need to irrigate today (if 0, ignore)
+    real(r8), pointer :: osm_inhib                (:)   => null()   ! osm_inhib
+    real(r8), pointer :: floodf                   (:)   => null()   ! floodf
 
   contains
     procedure, public :: Init    => veg_wf_init
@@ -554,6 +556,7 @@ module VegetationDataType
     real(r8), pointer :: cpool_to_deadcrootc                 (:) => null()    ! allocation to dead coarse root C (gC/m2/s)
     real(r8), pointer :: cpool_to_deadcrootc_storage         (:) => null()    ! allocation to dead coarse root C storage (gC/m2/s)
     real(r8), pointer :: cpool_to_gresp_storage              (:) => null()    ! allocation to growth respiration storage (gC/m2/s)
+    real(r8), pointer :: cpool_to_fungi                      (:) => null()    ! allocation to mycorrhizal fungi in exchange for nutrients uptake
 
     ! growth respiration fluxes
     real(r8), pointer :: xsmrpool_to_atm                     (:) => null()    ! excess MR pool harvest mortality (gC/m2/s)
@@ -834,7 +837,11 @@ module VegetationDataType
     real(r8), pointer :: dwt_seedn_to_npool                  (:)   => null()  ! (gN/m2/s) seed source to PFT level
     ! Misc
     real(r8), pointer :: plant_ndemand                       (:)   => null()  ! N flux required to support initial GPP (gN/m2/s)
-    real(r8), pointer :: plant_nabsorb                       (:)   => null()  ! pft-level plant N demand absorbable by root biomass (gN/m2/s)
+    real(r8), pointer :: plant_ndemand_pot                   (:)   => null()  ! pft-level potential mineral N uptake (gN/m2/s)
+    real(r8), pointer :: froot_ndemand_pot                   (:)   => null()  ! pft-level potential mineral N uptake by fine root (gN/m2/s)
+    real(r8), pointer :: fungi_ndemand_pot                   (:)   => null()  ! pft-level potential mineral N uptake by mycorrhizal fungi (gN/m2/s)
+    real(r8), pointer :: fungi_som_ndemand                   (:,:) => null()  ! pft-level soil organic N uptake by mycorrhizal fungi (gN/m2/s)
+    real(r8), pointer :: fungi_som_to_npool                  (:)   => null()  ! pft-level soil organic N uptake by mycorrhizal fungi (gN/m2/s)
     real(r8), pointer :: avail_retransn                      (:)   => null()  ! N flux available from retranslocation pool (gN/m2/s)
     real(r8), pointer :: plant_nalloc                        (:)   => null()  ! total allocated N flux (gN/m2/s)
     real(r8), pointer :: smin_no3_to_plant                   (:)   => null()  ! pft level plant uptake of soil NO3 (gN/m2/s) BGC mode
@@ -1005,7 +1012,11 @@ module VegetationDataType
     real(r8), pointer :: dwt_crop_productp_gain              (:)     ! (gP/m2/s) addition to crop product pool from landcover change; even though this is a patch-level flux, it is expressed per unit GRIDCELL area
     real(r8), pointer :: dwt_seedp_to_ppool                  (:)     ! (gP/m2/s) seed source to PFT-level
     real(r8), pointer :: plant_pdemand                       (:)     ! P flux required to support initial GPP (gP/m2/s)
-    real(r8), pointer :: plant_pabsorb                       (:)     ! P flux that can be absorbed by fine root biomass (gP/m2/s)
+    real(r8), pointer :: plant_pdemand_pot                   (:)     ! pft-level potential mineral P uptake (gN/m2/s)
+    real(r8), pointer :: froot_pdemand_pot                   (:)     ! pft-level potential mineral P uptake by fine root (gN/m2/s)
+    real(r8), pointer :: fungi_pdemand_pot                   (:)     ! pft-level potential mineral P uptake by mycorrhizal fungi (gN/m2/s)
+    real(r8), pointer :: fungi_som_pdemand                   (:,:)   ! pft-level soil organic P uptake by mycorrhizal fungi (gN/m2/s)
+    real(r8), pointer :: fungi_som_to_ppool                  (:)     ! pft-level soil organic P uptake by mycorrhizal fungi (gN/m2/s)
     real(r8), pointer :: avail_retransp                      (:)     ! P flux available from retranslocation pool (gP/m2/s)
     real(r8), pointer :: plant_palloc                        (:)     ! total allocated P flux (gP/m2/s)
     real(r8), pointer :: sminp_to_plant                      (:)     ! plant p uptake (gP/m2/s)
@@ -1986,7 +1997,6 @@ module VegetationDataType
        allocate(this%grainc_xfer        (begp :endp))   ;  this%grainc_xfer        (:)   = spval
        allocate(this%woodc              (begp :endp))   ;  this%woodc              (:)   = spval
        allocate(this%totvegc_abg        (begp :endp))   ;  this%totvegc_abg        (:)   = spval
-       allocate(this%osm_inhib          (begp :endp))   ;  this%osm_inhib          (:)   = spval
     endif  !  not use_fates
 
     allocate(this%begcb              (begp :endp))   ;  this%begcb              (:) = spval
@@ -2159,11 +2169,6 @@ module VegetationDataType
             avgflag='A', long_name='total aboveground vegetation carbon, excluding cpool', &
             ptr_patch=this%totvegc_abg)
 
-     !   this%osm_inhib(begc:endc) = spval
-     !   call hist_addfld1d (fname='OSM_INHIB',  units=' ',  &
-     !        avgflag='A', long_name='Factor to reduce growth due to salinity stress', &
-     !        ptr_col=this%osm_inhib)
-            
        ! end of c12 block
 
     else if ( carbon_type == 'c13' ) then
@@ -5473,6 +5478,9 @@ module VegetationDataType
     allocate(this%qflx_over_supply_patch   (begp:endp))              ; this%qflx_over_supply_patch   (:)   = spval
     allocate(this%n_irrig_steps_left       (begp:endp))              ; this%n_irrig_steps_left       (:)   = 0
 
+    allocate(this%osm_inhib                (begp:endp))              ;         this%osm_inhib                (:) = spval
+    allocate(this%floodf                   (begp:endp))              ;         this%floodf                   (:) = spval
+
     !-----------------------------------------------------------------------
     ! initialize history fields for select members of veg_wf
     !-----------------------------------------------------------------------
@@ -5846,6 +5854,7 @@ module VegetationDataType
        allocate(this%cpool_to_deadcrootc                 (begp:endp)) ;    this%cpool_to_deadcrootc                  (:) = spval
        allocate(this%cpool_to_deadcrootc_storage         (begp:endp)) ;    this%cpool_to_deadcrootc_storage          (:) = spval
        allocate(this%cpool_to_gresp_storage              (begp:endp)) ;    this%cpool_to_gresp_storage               (:) = spval
+       allocate(this%cpool_to_fungi                      (begp:endp)) ;    this%cpool_to_fungi                       (:) = spval
        allocate(this%xsmrpool_to_atm                     (begp:endp)) ;    this%xsmrpool_to_atm                      (:) = spval
        allocate(this%cpool_leaf_gr                       (begp:endp)) ;    this%cpool_leaf_gr                        (:) = spval
        allocate(this%cpool_leaf_storage_gr               (begp:endp)) ;    this%cpool_leaf_storage_gr                (:) = spval
@@ -6449,6 +6458,11 @@ module VegetationDataType
        call hist_addfld1d (fname='CPOOL_TO_GRESP_STORAGE', units='gC/m^2/s', &
             avgflag='A', long_name='allocation to growth respiration storage', &
             ptr_patch=this%cpool_to_gresp_storage, default='inactive')
+
+       this%cpool_to_fungi(begp:endp) = spval
+       call hist_addfld1d (fname='CPOOL_TO_FUNGI', units='gC/m^2/s', &
+            avgflag='A', long_name='allocation to mycorrhizal fungi in exchange for nutrients uptake', &
+            ptr_patch=this%cpool_to_fungi, default='inactive')
 
        this%cpool_leaf_gr(begp:endp) = spval
        call hist_addfld1d (fname='CPOOL_LEAF_GR', units='gC/m^2/s', &
@@ -8711,7 +8725,8 @@ module VegetationDataType
           this%cpool_to_deadcrootc(i)                 = value_patch
           this%cpool_to_deadcrootc_storage(i)         = value_patch
           this%cpool_to_gresp_storage(i)              = value_patch
-          
+          this%cpool_to_fungi(i)                      = value_patch
+
           this%cpool_livestem_gr(i)                   = value_patch
           this%cpool_livestem_storage_gr(i)           = value_patch
           this%transfer_livestem_gr(i)                = value_patch
@@ -8831,10 +8846,13 @@ module VegetationDataType
     integer, intent(in) :: begp,endp
     !
     ! !LOCAL VARIABLES:
-    integer :: p,c,l
+    integer :: p,c,l,k
     integer :: fp                                        ! filter indices
     integer :: num_special_patch                         ! number of good values in special_patch filter
     integer :: special_patch(endp-begp+1)  ! special landunit filter - patches
+    character(24)     :: fieldname
+    character(100)    :: longname
+    real(r8), pointer :: data1dptr(:)   ! temp. pointer for slicing larger arrays
     !------------------------------------------------------------------------
 
     !-----------------------------------------------------------------------
@@ -8986,7 +9004,11 @@ module VegetationDataType
     allocate(this%dwt_crop_productn_gain              (begp:endp)) ; this%dwt_crop_productn_gain              (:) = spval
     allocate(this%dwt_seedn_to_npool                  (begp:endp)) ; this%dwt_seedn_to_npool                  (:) = spval
     allocate(this%plant_ndemand                       (begp:endp)) ; this%plant_ndemand                       (:) = spval
-    allocate(this%plant_nabsorb                       (begp:endp)) ; this%plant_nabsorb                       (:) = spval
+    allocate(this%plant_ndemand_pot                   (begp:endp)) ; this%plant_ndemand_pot                   (:) = spval
+    allocate(this%froot_ndemand_pot                   (begp:endp)) ; this%froot_ndemand_pot                   (:) = spval
+    allocate(this%fungi_ndemand_pot                   (begp:endp)) ; this%fungi_ndemand_pot                   (:) = spval
+    allocate(this%fungi_som_ndemand                   (begp:endp,1:ndecomp_pools)) ; this%fungi_som_ndemand                   (:,:) = spval
+    allocate(this%fungi_som_to_npool                  (begp:endp)) ; this%fungi_som_to_npool                  (:)   = spval
     allocate(this%smin_no3_to_plant_vr                (begp:endp,1:nlevdecomp_full)) ; this%smin_no3_to_plant_vr(:,:) = spval
     allocate(this%smin_nh4_to_plant_vr                (begp:endp,1:nlevdecomp_full)); this%smin_nh4_to_plant_vr(:,:) = spval
     allocate(this%avail_retransn                      (begp:endp)) ; this%avail_retransn                      (:) = spval
@@ -9474,10 +9496,34 @@ module VegetationDataType
          avgflag='A', long_name='N flux required to support initial GPP', &
          ptr_patch=this%plant_ndemand)
 
-    this%plant_nabsorb(begp:endp) = spval
-    call hist_addfld1d (fname='PLANT_NABSORB', units='gN/m^2/s', &
-         avgflag='A', long_name='N flux that can be absorbed by fine root biomass', &
-         ptr_patch=this%plant_nabsorb)
+    this%plant_ndemand_pot(begp:endp) = spval
+    call hist_addfld1d (fname='PLANT_NDEMAND_POT', units='gN/m^2/s', &
+         avgflag='A', long_name='pft-level potential mineral N uptake', &
+         ptr_patch=this%plant_ndemand_pot)
+
+    this%froot_ndemand_pot(begp:endp) = spval
+    call hist_addfld1d (fname='FROOT_NDEMAND_POT', units='gN/m^2/s', &
+         avgflag='A', long_name='pft-level potential mineral N uptake by fine root', &
+         ptr_patch=this%froot_ndemand_pot)
+
+    this%fungi_ndemand_pot(begp:endp) = spval
+    call hist_addfld1d (fname='FUNGI_NDEMAND_POT', units='gN/m^2/s', &
+         avgflag='A', long_name='pft-level potential mineral N uptake by mycorrhizal fungi', &
+         ptr_patch=this%fungi_ndemand_pot)
+
+    do k = 1, ndecomp_pools
+        this%fungi_som_ndemand(begp:endp,k) = spval
+        data1dptr => this%fungi_som_ndemand(:,k)
+        fieldname = 'FUNGI_'//trim(decomp_cascade_con%decomp_pool_name_history(k))//'_NDEMAND'
+        longname = 'pft-level soil '//trim(decomp_cascade_con%decomp_pool_name_history(k))//' N uptake by mycorrhizal fungi'
+        call hist_addfld1d (fname=fieldname, units='gN/m^2/s', &
+            avgflag='A', long_name=longname, ptr_patch=data1dptr)
+    end do
+
+    this%fungi_som_to_npool(begp:endp) = spval
+    call hist_addfld1d (fname='FUNGI_SOM_TO_NPOOL', units='gN/m^2/s', &
+         avgflag='A', long_name='pft-level soil organic N uptake by mycorrhizal fungi', &
+         ptr_patch=this%fungi_som_to_npool, default='inactive')
 
     this%avail_retransn(begp:endp) = spval
     call hist_addfld1d (fname='AVAIL_RETRANSN', units='gN/m^2/s', &
@@ -9552,10 +9598,14 @@ module VegetationDataType
        end if
 
        if (lun_pp%ifspecial(l)) then
-          this%plant_ndemand(p)  = spval
-          this%plant_nabsorb(p)  = spval
-          this%avail_retransn(p) = spval
-          this%plant_nalloc(p)   = spval
+          this%plant_ndemand(p)      = spval
+          this%plant_ndemand_pot(p)  = spval
+          this%froot_ndemand_pot(p)  = spval
+          this%fungi_ndemand_pot(p)  = spval
+          this%fungi_som_ndemand(p,:)= spval
+          this%fungi_som_to_npool(p) = spval
+          this%avail_retransn(p)     = spval
+          this%plant_nalloc(p)       = spval
        end if
     end do
 
@@ -9577,6 +9627,9 @@ module VegetationDataType
     !
     ! !LOCAL VARIABLES:
     logical :: readvar      ! determine if variable is on initial file
+    integer :: k
+    character(24)     :: fieldname
+    real(r8), pointer :: data1dptr(:)   ! temp. pointer for slicing larger arrays
     !------------------------------------------------------------------------
     if (crop_prog) then
        call restartvar(ncid=ncid, flag=flag, varname='fert_counter', xtype=ncd_double,  &
@@ -9635,10 +9688,33 @@ module VegetationDataType
          long_name='', units='', &
          interpinic_flag='interp', readvar=readvar, data=this%plant_ndemand)
 
-    call restartvar(ncid=ncid, flag=flag, varname='plant_nabsorb', xtype=ncd_double,  &
+    call restartvar(ncid=ncid, flag=flag, varname='plant_ndemand_pot', xtype=ncd_double,  &
          dim1name='pft', &
          long_name='', units='', &
-         interpinic_flag='interp', readvar=readvar, data=this%plant_nabsorb)
+         interpinic_flag='interp', readvar=readvar, data=this%plant_ndemand_pot)
+
+    call restartvar(ncid=ncid, flag=flag, varname='froot_ndemand_pot', xtype=ncd_double,  &
+         dim1name='pft', &
+         long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%froot_ndemand_pot)
+
+    call restartvar(ncid=ncid, flag=flag, varname='fungi_ndemand_pot', xtype=ncd_double,  &
+         dim1name='pft', &
+         long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%fungi_ndemand_pot)
+
+    do k = 1, ndecomp_pools
+        data1dptr => this%fungi_som_ndemand(:,k)
+        fieldname = 'fungi_'//trim(decomp_cascade_con%decomp_pool_name_restart(k))//'_ndemand'
+        call restartvar(ncid=ncid, flag=flag, varname=fieldname, xtype=ncd_double,  &
+           dim1name='pft', long_name='', units='', &
+           interpinic_flag='interp', readvar=readvar, data=data1dptr)
+    end do
+
+    call restartvar(ncid=ncid, flag=flag, varname='fungi_som_to_npool', xtype=ncd_double,  &
+         dim1name='pft', &
+         long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%fungi_som_to_npool)
 
     call restartvar(ncid=ncid, flag=flag, varname='avail_retransn', xtype=ncd_double,  &
          dim1name='pft', &
@@ -9697,7 +9773,6 @@ module VegetationDataType
        this%hrv_deadcrootn_to_litter(i)            = value_patch
        this%hrv_retransn_to_litter(i)              = value_patch
        this%hrv_npool_to_litter(i)                 = value_patch
-
 
        this%leafn_xfer_to_leafn(i)                 = value_patch
        this%frootn_xfer_to_frootn(i)               = value_patch
@@ -9793,7 +9868,8 @@ module VegetationDataType
        ! total N deployment (from sminn and retranslocated N pool) (NDEPLOY)
        this%ndeploy(p) = &
             this%sminn_to_npool(p) + &
-            this%retransn_to_npool(p)
+            this%retransn_to_npool(p) + &
+            this%fungi_som_to_npool(p)
 
        ! pft-level wood harvest
        this%wood_harvestn(p) = &
@@ -9892,6 +9968,7 @@ module VegetationDataType
            this%hrv_deadcrootn_to_litter(p)        + &
            this%hrv_deadcrootn_storage_to_litter(p)+ &
            this%hrv_deadcrootn_xfer_to_litter(p)
+
       if (crop_prog) then
          this%sen_nloss_litter(p) = &
              this%livestemn_to_litter(p)            + &
@@ -9937,10 +10014,13 @@ module VegetationDataType
     integer, intent(in) :: begp,endp
     !
     ! !LOCAL VARIABLES:
-    integer :: p,l                         ! indices
+    integer :: p,l,k                       ! indices
     integer :: fp                          ! filter indices
     integer :: num_special_patch           ! number of good values in special_patch filter
     integer :: special_patch(endp-begp+1)  ! special landunit filter - patches
+    character(24)     :: fieldname
+    character(100)    :: longname
+    real(r8), pointer :: data1dptr(:)      ! temp. pointer for slicing larger arrays
     !------------------------------------------------------------------------
 
     !-----------------------------------------------------------------------
@@ -10089,7 +10169,11 @@ module VegetationDataType
     allocate(this%dwt_crop_productp_gain              (begp:endp)) ; this%dwt_crop_productp_gain              (:) = spval
     allocate(this%dwt_seedp_to_ppool                  (begp:endp)) ; this%dwt_seedp_to_ppool                  (:) = spval
     allocate(this%plant_pdemand                       (begp:endp)) ; this%plant_pdemand                       (:) = spval
-    allocate(this%plant_pabsorb                       (begp:endp)) ; this%plant_pabsorb                       (:) = spval
+    allocate(this%plant_pdemand_pot                   (begp:endp)) ; this%plant_pdemand_pot                   (:) = spval
+    allocate(this%froot_pdemand_pot                   (begp:endp)) ; this%froot_pdemand_pot                   (:) = spval
+    allocate(this%fungi_pdemand_pot                   (begp:endp)) ; this%fungi_pdemand_pot                   (:) = spval
+    allocate(this%fungi_som_pdemand                   (begp:endp,1:ndecomp_pools)) ; this%fungi_som_pdemand                   (:,:) = spval
+    allocate(this%fungi_som_to_ppool                  (begp:endp)) ; this%fungi_som_to_ppool                  (:)   = spval
     allocate(this%avail_retransp                      (begp:endp)) ; this%avail_retransp                      (:) = spval
     allocate(this%plant_palloc                        (begp:endp)) ; this%plant_palloc                        (:) = spval
     allocate(this%sminp_to_plant                      (begp:endp)) ; this%sminp_to_plant                      (:) = spval
@@ -10589,10 +10673,34 @@ module VegetationDataType
          avgflag='A', long_name='P flux required to support initial GPP', &
          ptr_patch=this%plant_pdemand)
 
-    this%plant_pabsorb(begp:endp) = spval
-    call hist_addfld1d (fname='PLANT_PABSORB', units='gP/m^2/s', &
-         avgflag='A', long_name='P flux that can be absorbed by fine root biomass', &
-         ptr_patch=this%plant_pabsorb)
+    this%plant_pdemand_pot(begp:endp) = spval
+    call hist_addfld1d (fname='PLANT_PDEMAND_POT', units='gP/m^2/s', &
+         avgflag='A', long_name='pft-level potential mineral P uptake', &
+         ptr_patch=this%plant_pdemand_pot)
+
+    this%froot_pdemand_pot(begp:endp) = spval
+    call hist_addfld1d (fname='FROOT_PDEMAND_POT', units='gP/m^2/s', &
+         avgflag='A', long_name='pft-level potential mineral P uptake by fine root', &
+         ptr_patch=this%froot_pdemand_pot)
+
+    this%fungi_pdemand_pot(begp:endp) = spval
+    call hist_addfld1d (fname='FUNGI_PDEMAND_POT', units='gP/m^2/s', &
+         avgflag='A', long_name='pft-level potential mineral P uptake by mycorrhizal fungi', &
+         ptr_patch=this%fungi_pdemand_pot)
+
+    do k = 1,ndecomp_pools
+        this%fungi_som_pdemand(begp:endp,k) = spval
+        data1dptr => this%fungi_som_pdemand(:,k)
+        fieldname = 'FUNGI_'//trim(decomp_cascade_con%decomp_pool_name_history(k))//'_PDEMAND'
+        longname = 'pft-level soil '//trim(decomp_cascade_con%decomp_pool_name_history(k))//' P uptake by mycorrhizal fungi'
+        call hist_addfld1d (fname=fieldname, units='gP/m^2/s', &
+            avgflag='A', long_name=longname, ptr_patch=data1dptr)
+    end do
+
+    this%fungi_som_to_ppool(begp:endp) = spval
+    call hist_addfld1d (fname='FUNGI_SOM_TO_PPOOL', units='gP/m^2/s', &
+         avgflag='A', long_name='P flux available from retranslocation pool', &
+         ptr_patch=this%fungi_som_to_ppool, default='active')
 
     this%avail_retransp(begp:endp) = spval
     call hist_addfld1d (fname='AVAIL_RETRANSP', units='gP/m^2/s', &
@@ -10634,7 +10742,11 @@ module VegetationDataType
 
        if (lun_pp%ifspecial(l)) then
           this%plant_pdemand(p)  = spval
-          this%plant_pabsorb(p)  = spval
+          this%plant_pdemand_pot(p)  = spval
+          this%froot_pdemand_pot(p)  = spval
+          this%fungi_pdemand_pot(p)  = spval
+          this%fungi_som_pdemand(p,:) = spval
+          this%fungi_som_to_ppool(p) = spval
           this%avail_retransp(p) = spval
           this%plant_palloc(p)   = spval
        end if
@@ -10657,8 +10769,10 @@ module VegetationDataType
     character(len=*)  , intent(in)     :: flag   !'read' or 'write'
     !
     ! !LOCAL VARIABLES:
-    integer :: j,c ! indices
+    integer :: j,c,k ! indices
     logical :: readvar      ! determine if variable is on initial file
+    character(24)     :: fieldname
+    real(r8), pointer :: data1dptr(:)   ! temp. pointer for slicing larger arrays
     !------------------------------------------------------------------------
 
     if (crop_prog) then
@@ -10720,10 +10834,33 @@ module VegetationDataType
          long_name='', units='', &
          interpinic_flag='interp', readvar=readvar, data=this%plant_pdemand)
 
-    call restartvar(ncid=ncid, flag=flag, varname='plant_pabsorb', xtype=ncd_double,  &
+    call restartvar(ncid=ncid, flag=flag, varname='plant_pdemand_pot', xtype=ncd_double,  &
          dim1name='pft', &
          long_name='', units='', &
-         interpinic_flag='interp', readvar=readvar, data=this%plant_pabsorb)
+         interpinic_flag='interp', readvar=readvar, data=this%plant_pdemand_pot)
+
+    call restartvar(ncid=ncid, flag=flag, varname='froot_pdemand_pot', xtype=ncd_double,  &
+         dim1name='pft', &
+         long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%froot_pdemand_pot)
+
+    call restartvar(ncid=ncid, flag=flag, varname='fungi_pdemand_pot', xtype=ncd_double,  &
+         dim1name='pft', &
+         long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%fungi_pdemand_pot)
+
+    do k = 1, ndecomp_pools
+        data1dptr => this%fungi_som_pdemand(:,k)
+        fieldname = 'fungi_'//trim(decomp_cascade_con%decomp_pool_name_restart(k))//'_pdemand'
+        call restartvar(ncid=ncid, flag=flag, varname=fieldname, xtype=ncd_double,  &
+           dim1name='pft', long_name='', units='', &
+           interpinic_flag='interp', readvar=readvar, data=data1dptr)
+    end do
+
+    call restartvar(ncid=ncid, flag=flag, varname='fungi_som_to_ppool', xtype=ncd_double,  &
+         dim1name='pft', &
+         long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%fungi_som_to_ppool)
 
     call restartvar(ncid=ncid, flag=flag, varname='avail_retransp', xtype=ncd_double,  &
          dim1name='pft', &

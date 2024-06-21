@@ -9,16 +9,18 @@ module AllocationMod
   use shr_kind_mod        , only : r8 => shr_kind_r8
   use shr_sys_mod         , only : shr_sys_flush
   use shr_log_mod         , only : errMsg => shr_log_errMsg
-  use elm_varcon          , only : dzsoi_decomp
+  use elm_varcon          , only : dzsoi_decomp, tfrz
   use elm_varctl          , only : use_c13, use_c14, spinup_state
   use elm_varctl          , only : nyears_ad_carbon_only
   use elm_varctl          , only : use_fates
+  use elm_varpar          , only : i_met_lit, i_cel_lit, i_lig_lit, ndecomp_pools
   use abortutils          , only : endrun
   use decompMod           , only : bounds_type
   use subgridAveMod       , only : p2c
   use SharedParamsMod     , only : ParamsShareInst
   use CanopyStateType     , only : canopystate_type
   use SoilHydrologyType   , only : soilhydrology_type
+  use atm2lndType         , only : atm2lnd_type
   !!! add phosphorus
   use CNStateType                   , only : cnstate_type
   use PhotosynthesisType            , only : photosyns_type
@@ -40,11 +42,11 @@ module AllocationMod
   use elm_varctl          , only : NFIX_PTASE_plant
   use ELMFatesInterfaceMod  , only : hlm_fates_interface_type
   use elm_varctl      , only: iulog
-  use elm_varctl      , only : carbon_only          
-  use elm_varctl      , only : carbonnitrogen_only  
+  use elm_varctl      , only : carbon_only
+  use elm_varctl      , only : carbonnitrogen_only
   use elm_varctl      , only : carbonphosphorus_only
   use shr_infnan_mod  , only: nan => shr_infnan_nan, assignment(=)
-  use pftvarcon       , only: ndllf_evr_brl_tree, ndllf_dcd_brl_tree, nbrdlf_dcd_brl_shrub, nc3_arctic_grass
+  use pftvarcon       , only: ndllf_evr_brl_tree, ndllf_dcd_brl_tree, nbrdlf_dcd_brl_shrub, nc3_arctic_grass, humhol_ht
 
   !
   implicit none
@@ -78,18 +80,30 @@ module AllocationMod
      real(r8), pointer :: compet_nit        => null() ! (unitless) relative competitiveness of nitrifiers for NH4
 
 #ifdef HUM_HOL
-     real(r8), pointer :: compet_pft_sminn(:) => null() ! (gN/gC) the tangent value of nitrogen uptake per unit fine root biomass if the N-limitation factor (fpi_pft) is infinity
-     real(r8), pointer :: compet_pft_sminp(:) => null() ! (gP/gC) the tangent value of phosphorus uptake per unit fine root biomass if the N-limitation factor (fpi_pft) is infinity
-
-     real(r8), pointer :: cpool_pft_sminn(:)  => null() ! (unitless) the scaling factor on plant_ndemand(p) representing mycorrhizae's ability to amplify plant capability
-     real(r8), pointer :: cpool_pft_sminp(:)  => null() ! (unitless) the scaling factor on plant_pdemand(p) representing mycorrhizae's ability to amplify plant capability
-
-     real(r8), pointer :: q10_uptake(:)       => null() ! (unitless) Q10 base constant for temperature sensitivity of uptake
-     real(r8), pointer :: tbase_uptake        => null() ! (K) base temperature for Q10 temperature sensitivity of uptake
-     real(r8), pointer :: scale_uptake        => null() ! (unitless) scale factors for Q10 temperature sensitivity of uptake
-     real(r8), pointer :: kmin_nuptake(:)     => null() ! (gN m-2) half saturation point for N uptake in Michaelis-Menten
-     real(r8), pointer :: kmin_puptake(:)     => null() ! (gP m-2) half saturation point for P uptake in Michaelis-Menten
-     real(r8), pointer :: froot_leaf_slope(:) => null() ! (unitless) sensitivity of froot_leaf to Michaelis-Menten limitation
+     real(r8), pointer :: zwt_froot_a(:) => null() ! sensitivity of fine root allocation to water table depth
+     real(r8), pointer :: froot_radius(:) => null() ! (cm) fine root radious
+     real(r8), pointer :: froot_density(:) => null() ! (gC cm-3) fine root density
+     real(r8), pointer :: vmax_froot_n(:) => null() ! (gN cm-2 s-1) maximum N uptake rate per unit area of fine root
+     real(r8), pointer :: vmax_froot_p(:) => null() ! (gP cm-2 s-1) maximum P uptake rate per unit area of fine root
+     real(r8), pointer :: km_froot_n => null() ! (gN m-3) half saturation point for N uptake rate by fine root
+     real(r8), pointer :: km_froot_p => null() ! (gP m-3) half saturation point for P uptake rate by fine root
+     real(r8), pointer :: q10_upt => null() ! Q10 for temperature sensitivity of nutrient uptake by fine root
+     real(r8), pointer :: swc_opt => null() ! (m3 m-3) optimal volumetric soil water content for mycorrhizal growth
+     real(r8), pointer :: alpha_fpg => null() ! (unitless) scaling factor controlling the influence of nutrient limitation factor on nutrient uptake
+     real(r8), pointer :: zwt_fungi_a(:) => null() ! sensitivity of fungal inhibition to water table depth
+     real(r8), pointer :: zwt_fungi_b(:) => null() ! sensitivity of fungal inhibition to water table depth
+     real(r8), pointer :: zwt_fungi_c => null() ! sensitivity of fungal inhibition to soil nutrients concentration
+     real(r8), pointer :: zwt_fungi_d => null() ! sensitivity of fungal inhibition to soil N concentration
+     real(r8), pointer :: zwt_fungi_e => null() ! sensitivity of fungal inhibition to soil P concentration
+     real(r8), pointer :: vmax_fungi_din(:) => null() ! (gN g-1 s-1) maximum N uptake rate per unit biomass of fungi-colonized fine root
+     real(r8), pointer :: vmax_fungi_dip(:) => null() ! (gP g-1 s-1) maximum P uptake rate per unit biomass of fungi-colonized fine root
+     real(r8), pointer :: km_fungi_din => null() ! (gN m-3) half saturation point for N uptake rate by fungi-colonized fine root
+     real(r8), pointer :: km_fungi_dip => null() ! (gP m-3) half saturation point for P uptake rate by fungi-colonized fine root
+     real(r8), pointer :: km_nsc => null() ! half saturation parameter for plant carbohydrate excess
+     real(r8), pointer :: vmax_fungi_son(:) => null() ! (gN gC-1 s-1) maximum fungal organic nutrient uptake rate per unit available excess plant nonstructural carbon
+     real(r8), pointer :: vmax_fungi_sop(:) => null() ! (gP gC-1 s-1) maximum fungal organic nutrient uptake rate per unit available excess plant nonstructural carbon
+     real(r8), pointer :: fungi_cost_n => null() ! (gC gN-1) carbon cost per unit fungi mined nitrogen
+     real(r8), pointer :: fungi_cost_p => null() ! (gC gP-1) carbon cost per unit fungi mined phosphorus
 #endif
 
   end type AllocParamsType
@@ -134,8 +148,8 @@ module AllocationMod
                                        ! to toggle and update which processes are active.
                                        ! This will get set to false
                                        ! after ad_carbon_only is complete.
-  
-   
+
+
   logical :: crop_supln  = .false.    !Prognostic crop receives supplemental Nitrogen
   
   real(r8), allocatable,target :: veg_rootc_bigleaf(:,:)        ! column-level fine-root biomas kgc/m3
@@ -229,55 +243,125 @@ contains
     call ncd_inqdid(ncid,'pft',dimid)
     call ncd_inqdlen(ncid,dimid,npft)
 
-    allocate(AllocParamsInst%compet_pft_sminn(0:npft))
-    allocate(AllocParamsInst%compet_pft_sminp(0:npft))
-    allocate(AllocParamsInst%cpool_pft_sminn(0:npft))
-    allocate(AllocParamsInst%cpool_pft_sminp(0:npft))
-    allocate(AllocParamsInst%q10_uptake(0:npft))
-    allocate(AllocParamsInst%tbase_uptake)
-    allocate(AllocParamsInst%scale_uptake)
-    allocate(AllocParamsInst%kmin_nuptake(0:npft))
-    allocate(AllocParamsInst%kmin_puptake(0:npft))
-    allocate(AllocParamsInst%froot_leaf_slope(0:npft))
+    allocate(AllocParamsInst%zwt_froot_a(0:npft))
+    allocate(AllocParamsInst%froot_radius(0:npft))
+    allocate(AllocParamsInst%froot_density(0:npft))
+    allocate(AllocParamsInst%vmax_froot_n(0:npft))
+    allocate(AllocParamsInst%vmax_froot_p(0:npft))
+    allocate(AllocParamsInst%km_froot_n)
+    allocate(AllocParamsInst%km_froot_p)
+    allocate(AllocParamsInst%q10_upt)
+    allocate(AllocParamsInst%swc_opt)
+    allocate(AllocParamsInst%alpha_fpg)
+    allocate(AllocParamsInst%zwt_fungi_a(0:npft))
+    allocate(AllocParamsInst%zwt_fungi_b(0:npft))
+    allocate(AllocParamsInst%zwt_fungi_c)
+    allocate(AllocParamsInst%zwt_fungi_d)
+    allocate(AllocParamsInst%zwt_fungi_e)
+    allocate(AllocParamsInst%vmax_fungi_din(0:npft))
+    allocate(AllocParamsInst%vmax_fungi_dip(0:npft))
+    allocate(AllocParamsInst%km_fungi_din)
+    allocate(AllocParamsInst%km_fungi_dip)
+    allocate(AllocParamsInst%km_nsc)
+    allocate(AllocParamsInst%vmax_fungi_son(0:npft))
+    allocate(AllocParamsInst%vmax_fungi_sop(0:npft))
+    allocate(AllocParamsInst%fungi_cost_n)
+    allocate(AllocParamsInst%fungi_cost_p)
 
-    tString='compet_pft_sminn'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%compet_pft_sminn, flag='read', ncid=ncid, readvar=readv)
+    tString='zwt_froot_a'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%zwt_froot_a, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
-    tString='compet_pft_sminp'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%compet_pft_sminp, flag='read', ncid=ncid, readvar=readv)
+    tString='froot_radius'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%froot_radius, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
-    tString='cpool_pft_sminn'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%cpool_pft_sminn, flag='read', ncid=ncid, readvar=readv)
+    tString='froot_density'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%froot_density, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
-    tString='cpool_pft_sminp'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%cpool_pft_sminp, flag='read', ncid=ncid, readvar=readv)
+    tString='vmax_froot_n'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%vmax_froot_n, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
-    tString='q10_uptake'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%q10_uptake, flag='read', ncid=ncid, readvar=readv)
+    tString='vmax_froot_p'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%vmax_froot_p, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
-    tString='tbase_uptake'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%tbase_uptake, flag='read', ncid=ncid, readvar=readv)
+    tString='km_froot_n'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%km_froot_n, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
-    tString='scale_uptake'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%scale_uptake, flag='read', ncid=ncid, readvar=readv)
+    tString='km_froot_p'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%km_froot_p, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
-    tString='kmin_nuptake'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%kmin_nuptake, flag='read', ncid=ncid, readvar=readv)
+    tString='q10_upt'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%q10_upt, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
-    tString='kmin_puptake'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%kmin_puptake, flag='read', ncid=ncid, readvar=readv)
+    tString='swc_opt'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%swc_opt, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
-    tString='froot_leaf_slope'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%froot_leaf_slope, flag='read', ncid=ncid, readvar=readv)
+    tString='alpha_fpg'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%alpha_fpg, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+
+    tString='zwt_fungi_a'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%zwt_fungi_a, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+
+    tString='zwt_fungi_b'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%zwt_fungi_b, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+
+    tString='zwt_fungi_c'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%zwt_fungi_c, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+
+    tString='zwt_fungi_d'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%zwt_fungi_d, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+
+    tString='zwt_fungi_e'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%zwt_fungi_e, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+
+    tString='vmax_fungi_din'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%vmax_fungi_din, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+
+    tString='vmax_fungi_dip'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%vmax_fungi_dip, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+
+    tString='km_fungi_din'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%km_fungi_din, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+
+    tString='km_fungi_dip'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%km_fungi_dip, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+
+    tString='km_nsc'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%km_nsc, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+
+    tString='vmax_fungi_son'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%vmax_fungi_son, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+
+    tString='vmax_fungi_sop'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%vmax_fungi_sop, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+
+    tString='fungi_cost_n'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%fungi_cost_n, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+
+    tString='fungi_cost_p'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%fungi_cost_p, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
 #endif
@@ -297,8 +381,6 @@ contains
     use elm_varctl      , only : carbon_only          
     use elm_varctl      , only : carbonnitrogen_only  
     use elm_varctl      , only : carbonphosphorus_only
-
-
     use elm_varpar      , only: nlevdecomp
     !
     ! !ARGUMENTS:
@@ -315,9 +397,7 @@ contains
     integer :: max_comps  ! maximum number of possible plant competitors
     ! elm big-leaf: number of pfts/patches
     ! fates: number of cohorts in the column
-    
 
-    
     !-----------------------------------------------------------------------
 
     if ( crop_prog )then
@@ -334,7 +414,6 @@ contains
        end if
     end if
 
-    
     ! set time steps
     dt = real( get_step_size(), r8 )
 
@@ -458,14 +537,14 @@ contains
 
   subroutine Allocation1_PlantNPDemand (bounds, num_soilc, filter_soilc, num_soilp, filter_soilp, &
        photosyns_vars, crop_vars, canopystate_vars, cnstate_vars, soilhydrology_vars, & 
-       soilstate_vars, dt, yr)
+       soilstate_vars, atm2lnd_vars, dt, yr)
     ! PHASE-1 of Allocation: loop over patches to assess the total plant N demand and P demand
     ! !USES:
     !$acc routine seq
     use elm_varctl       , only: iulog
-    use elm_varctl      , only : carbon_only          !
-    use elm_varctl      , only : carbonnitrogen_only  !
-    use elm_varctl      , only : carbonphosphorus_only!
+    use elm_varctl       , only: carbon_only          !
+    use elm_varctl       , only: carbonnitrogen_only  !
+    use elm_varctl       , only: carbonphosphorus_only!
     use pftvarcon        , only: npcropmin, declfact, bfact, aleaff, arootf, astemf, noveg
     use pftvarcon        , only: arooti, fleafi, allconsl, allconss, grperc, grpnow, nsoybean
     use pftvarcon        , only: percrop
@@ -484,12 +563,13 @@ contains
     type(cnstate_type)       , intent(inout) :: cnstate_vars
     type(soilhydrology_type) , intent(in)    :: soilhydrology_vars
     type(soilstate_type)     , intent(in)    :: soilstate_vars
+    type(atm2lnd_type)       , intent(in)    :: atm2lnd_vars
     real(r8), intent(in) :: dt
     integer, intent(in) :: yr
     !
     ! !LOCAL VARIABLES:
     !
-    integer :: c,p,l,j                                               !indices
+    integer :: c,p,l,j,g,k                                           !indices
     integer :: fp                                                    !lake filter pft index
     integer :: fc                                                    !lake filter column index
     real(r8):: mr                                                    !maintenance respiration (gC/m2/s)
@@ -511,17 +591,11 @@ contains
     real(r8):: dayspyr
 
     ! local nutrient uptake pathways
-    real(r8):: active_n, active_p, fungi_n, fungi_p, maxroot_n, maxroot_p
-    real(r8):: sminn_avg, sminp_avg !temporary hold for root fraction weighted nutrient concentration over the plant profile
-    real(r8):: mm, mmp !temporary hold for Michaelis-Menten limitation values
-    real(r8):: callo, nallo, pallo !temporary hold for allometry values
-    real(r8):: scale_q10 !temporary hold for Q10-scalar on uptake rate
-    real(r8):: scale_wtd !temporary hold for water table inhibition on uptake rate
-    real(r8):: ncap, pcap !cap on npool & ppool sizes
-    real(r8):: scale_npool, scale_ppool !temporary hold for allometry limit on uptake rate
-    real(r8):: frac_fungi!temporary hold for fungi uptake fraction
-    real(r8):: leaf_to_biomass!temporary variable to LEAFC_ALLOC:TOTVEGC_ABG
-
+    real(r8):: nu_fungi, pu_fungi, ffn_nsc_temp ! temporary holder for nutrient impact on fungi inhibition
+    real(r8):: cpool_to_fungi_p, cpool_to_fungi_n ! temporary holder for N&P cost of uptaking mycorrhizal fungi nutrient
+    real(r8):: tot_fungi_som_ndemand, tot_fungi_som_pdemand, frac_n_i_met_lit, frac_n_i_cel_lit, frac_p_i_met_lit, frac_p_i_cel_lit, tot_decomp_npools, tot_decomp_ppools, frac_n_i_lig_lit, frac_p_i_lig_lit
+    real(r8):: son_uptake_prof(bounds%begc:bounds%endc, 1:nlevdecomp, 1:ndecomp_pools), sop_uptake_prof(bounds%begc:bounds%endc, 1:nlevdecomp, 1:ndecomp_pools)
+    real(r8):: son_uptake_vert(bounds%begc:bounds%endc, 1:ndecomp_pools), sop_uptake_vert(bounds%begc, 1:ndecomp_pools)
   !-----------------------------------------------------------------------
 
     associate(                                                                                   &
@@ -636,41 +710,79 @@ contains
          benefit_pgpp_pleafc          => veg_ns%benefit_pgpp_pleafc                            , &
 
          ! PFT-specific nutrients limitation
-#ifdef HUM_HOL
-         annavg_agnpp                 => veg_cf%annavg_agnpp                  , & ! Input:  [real(r8) (:)   ]  annual average NPP
+#ifdef HUM_HOL   
+         npool                        => veg_ns%npool                         , & ! Input:  [real(r8) (:)   ]  (gN/m2) plant N pool storage
+         ppool                        => veg_ps%ppool                         , & ! Input:  [real(r8) (:)   ]  (gN/m2) plant P pool storage
 
-         annavg_bgnpp                 => veg_cf%annavg_bgnpp                  , & ! Input:  [real(r8) (:)   ]  annual average belowground NPP
+         totvegn                      => veg_ns%totvegn                       , & ! Input:  [real (r8) (:)   ]
+         totvegp                      => veg_ps%totvegp                       , & ! Input:  [real (r8) (:)   ]
 
-         prev_fpg_patch               => cnstate_vars%prev_fpg_patch          , & ! Input: [real(r8) (:)     ] previous step's N limitation
-         prev_fpg_p_patch             => cnstate_vars%prev_fpg_p_patch        , & ! Input: [real(r8) (:)     ] previous step's P limitation
+         plant_ndemand_pot            => veg_nf%plant_ndemand_pot             , & ! Output: [real(r8) (:)     ] pft-level potential mineral N uptake (gN/m2/s)
+         plant_pdemand_pot            => veg_pf%plant_pdemand_pot             , & ! Output: [real(r8) (:)     ] pft-level potential mineral P uptake (gP/m2/s)
 
-         zwt_root                     => cnstate_vars%zwt_root_patch         , & ! Input: [real (r8) (:)     ] scarcity of vegetation n-supply relative to c-supply
-   
-         npool                        => veg_ns%npool                        , & ! Input:  [real(r8) (:)   ]  (gN/m2) plant N pool storage
-         ppool                        => veg_ps%ppool                        , & ! Input:  [real(r8) (:)   ]  (gN/m2) plant P pool storage
+         froot_ndemand_pot            => veg_nf%froot_ndemand_pot             , & ! Output: [real(r8) (:)     ] pft-level potential mineral N uptake by fine root (gN/m2/s)
+         froot_pdemand_pot            => veg_pf%froot_pdemand_pot             , & ! Output: [real(r8) (:)     ] pft-level potential mineral P uptake by fine root (gP/m2/s)
 
-         totvegn                      => veg_ns%totvegn                        , & ! Input:  [real (r8) (:)   ]
-         totvegp                      => veg_ps%totvegp                        , & ! Input:  [real (r8) (:)   ]
+         fungi_ndemand_pot            => veg_nf%fungi_ndemand_pot             , & ! Output: [real(r8) (:)     ] pft-level potential mineral N uptake by mycorrhizal fungi (gN/m2/s)
+         fungi_pdemand_pot            => veg_pf%fungi_pdemand_pot             , & ! Output: [real(r8) (:)     ] pft-level potential mineral P uptake by mycorrhizal fungi (gN/m2/s)
 
-         plant_nabsorb                => veg_nf%plant_nabsorb                 , & ! Input: [real(r8) (:)     ] fine root's ability to take up N (gN/m2/s)
-         plant_pabsorb                => veg_pf%plant_pabsorb                 , & ! Input: [real(r8) (:)     ] fine root's ability to take up P
-         plant_nfungi                 => cnstate_vars%plant_nfungi_patch      , & ! Input: [real (r8) (:)     ] fungi's contribution to the plant_nabsorb term
-         plant_pfungi                 => cnstate_vars%plant_pfungi_patch      , & ! Input: [real (r8) (:)     ] fungi's contribution to the plant_pabsorb term
+         fungi_som_ndemand            => veg_nf%fungi_som_ndemand             , & ! Output: [real(r8) (:)     ] pft-level soil organic N uptake by mycorrhizal fungi (gN/m2/s)
+         fungi_som_pdemand            => veg_pf%fungi_som_pdemand             , & ! Output: [real(r8) (:)     ] pft-level soil organic P uptake by mycorrhizal fungi (gP/m2/s)
 
-         smin_no3_vr                  => col_ns%smin_no3_vr                   , & ! Input: [real(r8) (:) ]  (gN/m3) soil mineral NH4 concentration
-         smin_nh4_vr                  => col_ns%smin_nh4_vr                   , & ! Input: [real(r8) (:) ]  (gN/m3) soil mineral NO3 concentration
+         fungi_som_to_npool           => veg_nf%fungi_som_to_npool            , & ! Output: [real(r8) (:)     ] pft-level soil organic N uptake by mycorrhizal fungi (gP/m2/s)
+         fungi_som_to_ppool           => veg_pf%fungi_som_to_ppool            , & ! Output: [real(r8) (:)     ] pft-level soil organic P uptake by mycorrhizal fungi (gP/m2/s)
+
+         som_n_to_fungi_vr            => col_nf%som_n_to_fungi_vr             , & ! Output: [real(r8) (:)     ] vertically-resolved soil organic N uptake by fungi (gN/m3/s)
+         som_n_to_fungi               => col_nf%som_n_to_fungi                , & ! Output: [real(r8) (:)     ] vert-int (diagnostic) soil organic N uptake by fungi (gN/m2/s)
+
+         som_p_to_fungi_vr            => col_pf%som_p_to_fungi_vr             , & ! Output: [real(r8) (:)     ] vertically-resolved soil organic P uptake by fungi (gP/m3/s)
+         som_p_to_fungi               => col_pf%som_p_to_fungi                , & ! Output: [real(r8) (:)     ] vert-int (diagnostic) soil organic P uptake by fungi (gP/m2/s)
+
+         cpool_to_fungi               => veg_cf%cpool_to_fungi                , & ! Output: [real (r8) (:)   ]
+
+         fungi_inhib                  => cnstate_vars%fungi_inhib_patch       , & ! Output: [real (r8) (:)     ] fungal inhibition on fine root uptake of nutrients
+         zwt_froot                    => cnstate_vars%zwt_froot_patch         , & ! Output: [real (r8) (:)     ] scarcity of vegetation n-supply relative to c-supply
+         ffr_sra                      => cnstate_vars%ffr_sra_patch           , & ! Output: [real (r8) (:,:)   ] patch-level fine root biomass multiplier on fine root uptake of nutrients
+         ffr_n                        => cnstate_vars%ffr_n_patch             , & ! Output: [real (r8) (:,:)   ] patch-level Michaelis-Menten multiplier on fine root uptake of inorganic N
+         ffr_p                        => cnstate_vars%ffr_p_patch             , & ! Output: [real (r8) (:,:)   ] patch-level Michaelis-Menten multiplier on fine root uptake of soluble P
+
+         ffr_tsoi                     => cnstate_vars%ffr_tsoi_patch          , & ! Output: [real (r8) (:,:)   ] patch-level soil temperature multiplier on nutrients uptake
+         ffr_swc                      => cnstate_vars%ffr_swc_patch           , & ! Output: [real (r8) (:,:)   ] patch-level soil moisture multiplier on nutrients uptake
+
+         ffr_fpg                      => cnstate_vars%ffr_fpg_patch           , & ! Input: [real (r8) (:)     ] patch-level plant N stress multiplier on N uptake
+         ffr_fpg_p                    => cnstate_vars%ffr_fpg_p_patch         , & ! Input: [real (r8) (:)     ] patch-level plant P stress multiplier on P uptake
+
+         ffn_n                        => cnstate_vars%ffn_n_patch             , & ! Output: [real (r8) (:,:)   ] patch-level Michaelis-Menten multiplier on fungal uptake of inorganic N
+         ffn_p                        => cnstate_vars%ffn_p_patch             , & ! Output: [real (r8) (:,:)   ] patch-level Michaelis-Menten multiplier on fungal uptake of soluble P
+         ffn_nsc                      => cnstate_vars%ffn_nsc_patch           , & ! Output: [real (r8) (:,:)   ] patch-level plant carbohydrate excess multiplier on fungal uptake of nutrients
+
+         smin_no3_vr                  => col_ns%smin_no3_vr                   , & ! Input: [real(r8) (:) ]  (gN/m3) soil mineral NO3 concentration
+         smin_nh4_vr                  => col_ns%smin_nh4_vr                   , & ! Input: [real(r8) (:) ]  (gN/m3) soil mineral NH4 concentration
          sminp_vr                     => col_ps%solutionp_vr                  , & ! Input: [real(r8) (:) ]  (gP/m2) soil soluble P concentration
+         decomp_npools_vr             => col_ns%decomp_npools_vr              , & ! Input:  [real(r8) (:,:,:) ]  (gC/m3)  vertically-resolved decomposing (litter, cwd, soil) N pools
+         decomp_ppools_vr             => col_ps%decomp_ppools_vr              , & ! Input:  [real(r8) (:,:,:) ]  (gC/m3)  vertically-resolved decomposing (litter, cwd, soil) P pools
 
          rootfr                       => soilstate_vars%rootfr_patch          , & ! Input: [real(r8) (:) ] (1) fraction of plant roots in each soil layer
          t_soisno                     => col_es%t_soisno                      , & ! Input: [real (r8) (:,:) ] (K) soil temperature
+         h2osoi_vol                   => col_ws%h2osoi_vol                    , & ! Input: [real (r8) (:,:) ] (m3/m3) volumetric soil moisture
+         h2osfc                       => col_ws%h2osfc                        , & ! Input: [real(r8) (:,:) ]  surface water (mm) 
+         tempsum_zwt_col              => cnstate_vars%tempsum_zwt_col         , & ! Output: [real (r8) (:)     ] accumulator of annual sum of water table depth (m)
+         annavg_zwt_col               => cnstate_vars%annavg_zwt_col          , & ! Input: [real (r8) (:)     ] annual average water table depth (m)
          zwt                          => soilhydrology_vars%zwt_col           & ! Input:  [real(r8) (:)   ]  water table depth (m)
 #endif
          )
+
+     ! update the annual water table depth accumulator
+#ifdef HUM_HOL
+     tempsum_zwt_col(1) = tempsum_zwt_col(1) + (0.15_r8 - zwt(1))*dt
+     tempsum_zwt_col(2) = tempsum_zwt_col(2) + (h2osfc(2)/1000._r8 - zwt(2))*dt
+#endif
 
       ! loop over patches to assess the total plant N demand and P demand
       do fp=1,num_soilp
          p = filter_soilp(fp)
          c = veg_pp%column(p)
+         g = col_pp%gridcell(c)
 
          ! get the time step total gross photosynthesis
          ! this is coming from the canopy fluxes code, and is the
@@ -771,7 +883,7 @@ contains
                   xsmrpool_recover(p) = availc(p)
                   availc(p) = 0.0_r8
                end if
- 
+
             end if 
             cpool_to_xsmrpool(p) = xsmrpool_recover(p)
          end if
@@ -952,32 +1064,16 @@ contains
             end if
          end if
 
-
 #ifdef HUM_HOL
-         !if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
-
-         ! relate the amount of roots growth to water table depth
-         !   if (ivt(p) == ndllf_evr_brl_tree) then
-         !      leaf_to_biomass = 0.035
-         !   else if (ivt(p) == ndllf_dcd_brl_tree) then
-         !      leaf_to_biomass = 0.016
-         !   else if (ivt(p) == nbrdlf_dcd_brl_shrub) then
-         !      leaf_to_biomass = 0.045
-         !   end if
-         !end if
-
+         ! relate the amount of roots growth to water table depth, equation form is from
          ! Murphy, M. T., & Moore, T. R. (2010). Linking root production to aboveground plant characteristics and water table in a temperate bog. Plant and Soil, 336(1), 219–231. https://doi.org/10.1007/s11104-010-0468-1
-         if ((ivt(p) == nbrdlf_dcd_brl_shrub) .and. (.not. carbon_only)) then
-            leaf_to_biomass = 0.045
-            zwt_root(p) = max(10**(1.4_r8 * zwt(c) - 1.33) / 1.37_r8 / leaf_to_biomass, 0.5)
-            f1 = zwt_root(p) * froot_leaf(ivt(p))
-            !! The slope parameter only makes sense between 0.1 and 0.8
-            !zwt_root(p) = exp(zwt(c)/0.3_r8*AllocParamsInst%froot_leaf_slope(ivt(p)))
-            !f1 = froot_leaf(ivt(p)) * max(zwt_root(p), 0.1_r8)
+         if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
+            ! always use hollow's relative water table height
+            zwt_froot(p) = 10**(- AllocParamsInst%zwt_froot_a(ivt(p))*annavg_zwt_col(2))
          else
-            zwt_root(p) = 1._r8
+            zwt_froot(p) = 1._r8
          end if
-         f1 = zwt_root(p) * froot_leaf(ivt(p))
+         f1 = zwt_froot(p) * froot_leaf(ivt(p))
 #endif
 
          ! based on available C, use constant allometric relationships to
@@ -1062,7 +1158,6 @@ contains
 
 #ifdef HUM_HOL
          ! dynamic nutrients limitation for SPRUCE vegetation but do not touch moss
-         ! calculate the root absorption capacity here
 
          ! According Brzostek et al. 2014 (DOI: 10.1002/2014JG002660) 
          ! and Shao et al. 2023 (DOI: 10.1111/nph.18555), the pathways are
@@ -1070,116 +1165,254 @@ contains
          !              in the soil. But soil hydrology is still problematic in
          !              ELM, resulting in inability to simulate flooding-induced
          !              stomatal closure and inhibition of nutrient uptake. 
-         !              Therefore, disregard for now.
-         ! (2) active via root itself: proportional to fine root, Q10, and subject
-         !              to flooding inhibition via the respiration mechanism.
-         ! (3) active via fungi: proportional to availc(p) minus the part already
-         !              satisfied by retranslocation. Maybe less sensitive to flooding?
-         ! (4) biological N fixation: = 0.
-         !
-         ! Ericoid fungi is directly using organic C; it therefore should 
-         ! not be part of mineral nutrients competition. But ELM does not have 
-         ! mechanism for it. We assume relying more on fungi means higher
-         ! maintenance respiration because plants send cpool over to the fungi
-         ! and receive back NP. 
+         !              Therefore, aggregate with (2) for now.
+         ! (2) active via root itself: proportional to fine root. 
+         ! (3) active via fungi: proportional to availc(p), in the absence of explicit
+         !                       fungi pool. This comes from both mineral and SOM pools.
+         ! (4) biological N fixation: already treated elsewhere, proportional to NPP.
 
-         if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
+         ! only alter the competitive edge when actual nutrients demand exists
+         if (((ivt(p) == ndllf_evr_brl_tree) .or. (ivt(p) == ndllf_dcd_brl_tree) .or. & 
+              (ivt(p) == nbrdlf_dcd_brl_shrub)) .and. (.not. carbon_only) .and. & 
+              (nu_com .eq. 'RD')) then
 
-            ! Assume the fine root biomass can obtain equal to the total
-            ! weight of the nutrient inside the plant (excluding labil pools)
-            ! during 1 year, under ideal conditions. (this is of course scaled by
-            ! the compet_pft_sminn & compet_pft_sminp factors)
-            maxroot_n = (totvegn(p) - npool(p)) / 365._r8 / secspday
-            maxroot_p = (totvegp(p) - ppool(p)) / 365._r8 / secspday
-
-            scale_q10 = AllocParamsInst%q10_uptake(ivt(p)) ** &
-               ((t_soisno(c,3) - AllocParamsInst%tbase_uptake) / AllocParamsInst%scale_uptake)
-
-            if (ivt(p) /= ndllf_dcd_brl_tree) then
-               scale_wtd = 0.5_r8 + 0.5_r8 * min(max(zwt(c)/0.3_r8, 0._r8), 1._r8) ! since top 30cm has roots
-            else
-               ! more flood tolerant
-               scale_wtd = 1._r8
-            end if
-
-            ! Michaelis-Menten coefficients
-            sminn_avg = 0._r8
-            sminp_avg = 0._r8
+            ! fungi inhibition factor
+            nu_fungi = 0._r8
+            pu_fungi = 0._r8
             do j = 1,col_pp%nlevbed(c)
-               sminn_avg = sminn_avg + ( &
-                  max(smin_nh4_vr(c,j), 0._r8) + & 
-                  max(smin_no3_vr(c,j), 0._r8) ) * rootfr(p,j)
-               sminp_avg = sminp_avg + sminp_vr(c,j) * rootfr(p,j)
+               nu_fungi = rootfr(p,j)*(smin_nh4_vr(c,j) + smin_no3_vr(c,j))
+               pu_fungi = rootfr(p,j)*sminp_vr(c,j)
             end do
 
-            mm = sminn_avg / (AllocParamsInst%kmin_nuptake(ivt(p)) + sminn_avg)
-            mmp = sminp_avg / (AllocParamsInst%kmin_puptake(ivt(p)) + sminp_avg)
-
-            ! Fine root uptake capacity should be correlated with FLNR
-            !  Guo, L., Deng M., Yang S., Liu W., Wang X., Wang J., & Liu L. (2021). The coordination between leaf and fine root litter decomposition and the difference in their controlling factors. Global Ecology and Biogeography, 30, 2286–2296. https://doi.org/10.1111/geb.13384
-            active_n = maxroot_n * mm * scale_q10 * scale_wtd * & 
-                       AllocParamsInst%compet_pft_sminn(ivt(p))
-            active_p = maxroot_p * mmp * scale_q10 * scale_wtd * & 
-                       AllocParamsInst%compet_pft_sminp(ivt(p))
-
-            ! Assume the fungi uptake can obtain a fraction of plant NP demand
-            ! (the fraction = compet_pft_sminn / compet_pft_sminp)
-            ! Because fungi directly access organic nutrients, this term does not have M-M. 
-            fungi_n = plant_ndemand(p) * AllocParamsInst%cpool_pft_sminn(ivt(p))
-            fungi_p = plant_pdemand(p) * AllocParamsInst%cpool_pft_sminp(ivt(p))
-
-            if (ivt(p) /= nbrdlf_dcd_brl_shrub) then
-               ! fungi becomes more helpful for the trees towards drier, more
-               ! mineralized conditions
-               fungi_n = fungi_n * scale_q10
-               fungi_p = fungi_p * scale_q10
-            end if
-
-            ! For shrub, NP more abundant -> less ErM -> lower fungi uptake
-            ! For trees, NP more abundant -> more ECM -> higher fungi uptake
-            frac_fungi = 1._r8 - zwt_root(p) * froot_leaf (ivt(p)) / 1.5_r8
-            frac_fungi = min(max(frac_fungi, 0._r8), 1._r8)
-
-            plant_nabsorb(p) = fungi_n * frac_fungi + active_n * (1 - frac_fungi)
-            plant_pabsorb(p) = fungi_p * frac_fungi + active_p * (1 - frac_fungi)
-
-            ! save the fungi absorption for diagnostic purpose
-            plant_nfungi(p) = fungi_n * frac_fungi
-            plant_pfungi(p) = fungi_p * frac_fungi
-
-            ! When N/PPOOL is too big compared to vegetation requirement, scale down absorption
-            ! Begin scaling down at 60% totvegn, cap at 100% totvegn
-            if (npool(p) > 0.6*totvegn(p)) then
-               scale_npool = min(max(2.5_r8 - npool(p)/totvegn(p)*2.5_r8, 0._r8), 2.5_r8)
+            ! always use hollow's water table height for fungal inhibition
+            fungi_inhib(p) = exp(AllocParamsInst%zwt_fungi_a(ivt(p))*annavg_zwt_col(2) + &
+                                 AllocParamsInst%zwt_fungi_b(ivt(p)))
+            if (carbonnitrogen_only) then
+               fungi_inhib(p) = min(1._r8, fungi_inhib(p)*(AllocParamsInst%zwt_fungi_c + AllocParamsInst%zwt_fungi_d*nu_fungi))
+            else if (carbonphosphorus_only) then
+               fungi_inhib(p) = min(1._r8, fungi_inhib(p)*(AllocParamsInst%zwt_fungi_c + AllocParamsInst%zwt_fungi_e*pu_fungi))
             else
-               scale_npool = 1._r8
-            end if
-            if (ppool(p) > 0.6*totvegp(p)) then
-               scale_ppool = min(max(2.5_r8 - ppool(p)/totvegp(p)*2.5_r8, 0._r8), 2.5_r8)
-            else
-               scale_ppool = 1._r8
+               fungi_inhib(p) = min(1._r8, fungi_inhib(p)*(AllocParamsInst%zwt_fungi_c + min(AllocParamsInst%zwt_fungi_d*nu_fungi, AllocParamsInst%zwt_fungi_e*pu_fungi)))
             end if
 
-            plant_nabsorb(p) = scale_npool * plant_nabsorb(p)
-            plant_pabsorb(p) = scale_ppool * plant_pabsorb(p)
+            ! fine root potential uptake
+            do j = 1,col_pp%nlevbed(c)
+               ffr_sra(p,j) = 0.01_r8 * frootc(p) * rootfr(p,j) / AllocParamsInst%froot_radius(ivt(p))**2 / AllocParamsInst%froot_density(ivt(p))
+
+               ffr_n(p,j) = max(smin_nh4_vr(c,j)+smin_no3_vr(c,j), 0._r8) / (AllocParamsInst%km_froot_n + max(smin_nh4_vr(c,j)+smin_no3_vr(c,j), 0._r8))
+
+               ffr_p(p,j) = max(sminp_vr(c,j), 0._r8) / (AllocParamsInst%km_froot_p + max(sminp_vr(c,j), 0._r8))
+
+               ! ffr_tsoi_nh4(p,j) = max(0._r8, min(1._r8, 1._r8+0.2_r8*(t_soisno(c,j)-tfrz)))
+               ffr_tsoi(p,j) = AllocParamsInst%q10_upt**((t_soisno(c,j)-tfrz-10._r8)/10._r8)
+
+               if (h2osoi_vol(c,j) <= AllocParamsInst%swc_opt) then
+                  ffr_swc(p,j) = 1._r8 - ((AllocParamsInst%swc_opt - h2osoi_vol(c,j))/AllocParamsInst%swc_opt)**2
+               else
+                  ffr_swc(p,j) = 1._r8 - 0.5_r8 * ((h2osoi_vol(c,j) - AllocParamsInst%swc_opt)/(1._r8 - AllocParamsInst%swc_opt))
+               end if
+            end do
+
+            froot_ndemand_pot(p) = 0._r8
+            froot_pdemand_pot(p) = 0._r8
+            do j = 1,col_pp%nlevbed(c)
+               froot_ndemand_pot(p) = froot_ndemand_pot(p) + AllocParamsInst%vmax_froot_n(ivt(p))*ffr_sra(p,j)*ffr_n(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg(p)
+               froot_pdemand_pot(p) = froot_pdemand_pot(p) + AllocParamsInst%vmax_froot_p(ivt(p))*ffr_sra(p,j)*ffr_p(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg_p(p)
+            end do
+            froot_ndemand_pot(p) = (1._r8 - fungi_inhib(p))*froot_ndemand_pot(p)
+            froot_pdemand_pot(p) = (1._r8 - fungi_inhib(p))*froot_pdemand_pot(p)
+
+            !write (iulog, *) 'froot_pdemand_pot', p, froot_pdemand_pot(p), AllocParamsInst%vmax_froot_p(ivt(p)), ffr_sra(p,j), ffr_p(p,j), ffr_tsoi(p,j), ffr_swc(p,j), ffr_fpg_p(p)
+
+            ! fungal potential uptake of mineral nutrients
+
+            ! Assume no Michalis-Menten
+            !do j = 1,col_pp%nlevbed(c)
+            !   ffn_n(p,j) = max(smin_nh4_vr(c,j)+smin_no3_vr(c,j), 0._r8) / (AllocParamsInst%km_fungi_din + max(smin_nh4_vr(c,j)+smin_no3_vr(c,j), 0._r8))
+            !
+            !   ffn_p(p,j) = max(sminp_vr(c,j), 0._r8) / (AllocParamsInst%km_fungi_dip + max(sminp_vr(c,j), 0._r8))
+            !end do
+
+            ffn_nsc_temp = AllocParamsInst%km_nsc*cpool(p) + frootc(p) + leafc(p)
+            if (ffn_nsc_temp == 0._r8) then
+               ffn_nsc(p) = 0._r8
+            else
+               ffn_nsc(p) = AllocParamsInst%km_nsc*cpool(p) / (AllocParamsInst%km_nsc*cpool(p) + frootc(p) + leafc(p))
+            end if
+            !write (iulog, *) 'ffn_nsc', AllocParamsInst%km_nsc, cpool(p), frootc(p), leafc(p)
+
+            fungi_ndemand_pot(p) = 0._r8
+            fungi_pdemand_pot(p) = 0._r8
+            do j = 1,col_pp%nlevbed(c)
+               fungi_ndemand_pot(p) = fungi_ndemand_pot(p) + AllocParamsInst%vmax_fungi_din(ivt(p))*frootc(p)*rootfr(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg(p)*ffn_nsc(p) ! ffn_n(p,j)
+               fungi_pdemand_pot(p) = fungi_pdemand_pot(p) + AllocParamsInst%vmax_fungi_dip(ivt(p))*frootc(p)*rootfr(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg_p(p)*ffn_nsc(p) ! ffn_p(p,j)
+            end do
+            fungi_ndemand_pot(p) = fungi_inhib(p)*fungi_ndemand_pot(p)
+            fungi_pdemand_pot(p) = fungi_inhib(p)*fungi_pdemand_pot(p)
+
+            ! fungal uptake of organic nutrients
+            fungi_som_ndemand(p,1:ndecomp_pools) = 0._r8
+            fungi_som_pdemand(p,1:ndecomp_pools) = 0._r8
+            do j = 1,col_pp%nlevbed(c)
+               ! calculte the layer's total available organic N/P
+               if ((ivt(p) == ndllf_dcd_brl_tree) .or. (ivt(p) == ndllf_evr_brl_tree)) then
+                   tot_decomp_npools = decomp_npools_vr(c,j,i_met_lit) + decomp_npools_vr(c,j,i_cel_lit) + decomp_npools_vr(c,j,i_lig_lit)
+                   tot_decomp_ppools = decomp_ppools_vr(c,j,i_met_lit) + decomp_ppools_vr(c,j,i_cel_lit) + decomp_ppools_vr(c,j,i_lig_lit)
+               else
+                   tot_decomp_npools = decomp_npools_vr(c,j,i_met_lit) + decomp_npools_vr(c,j,i_cel_lit)
+                   tot_decomp_ppools = decomp_ppools_vr(c,j,i_met_lit) + decomp_ppools_vr(c,j,i_cel_lit)
+               end if
+
+               ! calculate the layer's total fungal uptake
+               tot_fungi_som_ndemand = min(fungi_inhib(p)*frootc(p)*rootfr(p,j)* & 
+                  AllocParamsInst%vmax_fungi_son(ivt(p))* ffr_tsoi(p,j)*ffr_swc(p,j)* &
+                  ffr_fpg(p)*ffn_nsc(p), 0.08_r8/dt*tot_decomp_npools)
+               tot_fungi_som_pdemand = min(fungi_inhib(p)*frootc(p)*rootfr(p,j)* & 
+                  AllocParamsInst%vmax_fungi_sop(ivt(p))* ffr_tsoi(p,j)*ffr_swc(p,j)* & 
+                  ffr_fpg_p(p)*ffn_nsc(p), 0.08_r8/dt*tot_decomp_ppools)
+               
+               ! distribute to the different pools
+               if (tot_decomp_npools == 0._r8) then
+                  frac_n_i_met_lit = 0._r8
+                  frac_n_i_cel_lit = 0._r8
+                  frac_n_i_lig_lit = 0._r8
+               else
+                  frac_n_i_met_lit = decomp_npools_vr(c,j,i_met_lit) / tot_decomp_npools
+                  frac_n_i_cel_lit = decomp_npools_vr(c,j,i_cel_lit) / tot_decomp_npools
+                  frac_n_i_lig_lit = max(1._r8 - frac_n_i_met_lit - frac_n_i_cel_lit, 0._r8)
+               end if
+
+               if (tot_decomp_ppools == 0._r8) then
+                  frac_p_i_met_lit = 0._r8
+                  frac_p_i_cel_lit = 0._r8
+                  frac_p_i_lig_lit = 0._r8
+               else
+                  frac_p_i_met_lit = decomp_ppools_vr(c,j,i_met_lit) / tot_decomp_ppools
+                  frac_p_i_cel_lit = decomp_ppools_vr(c,j,i_cel_lit) / tot_decomp_ppools
+                  frac_p_i_lig_lit = max(1._r8 - frac_p_i_met_lit - frac_p_i_cel_lit, 0._r8)
+               end if
+
+               fungi_som_ndemand(p,i_met_lit) = fungi_som_ndemand(p,i_met_lit) + &
+                  tot_fungi_som_ndemand * frac_n_i_met_lit
+               fungi_som_pdemand(p,i_met_lit) = fungi_som_pdemand(p,i_met_lit) + &
+                  tot_fungi_som_pdemand * frac_p_i_met_lit
+               fungi_som_ndemand(p,i_cel_lit) = fungi_som_ndemand(p,i_cel_lit) + &
+                  tot_fungi_som_ndemand * frac_n_i_cel_lit
+               fungi_som_pdemand(p,i_cel_lit) = fungi_som_pdemand(p,i_cel_lit) + &
+                  tot_fungi_som_pdemand * frac_p_i_cel_lit
+               ! ericoid mycorrhizal fungi cannot access lignin
+               if ((ivt(p) == ndllf_dcd_brl_tree) .or. (ivt(p) == ndllf_evr_brl_tree)) then
+                  fungi_som_ndemand(p,i_lig_lit) = fungi_som_ndemand(p,i_lig_lit) + &
+                     tot_fungi_som_ndemand * frac_n_i_lig_lit
+                  fungi_som_pdemand(p,i_lig_lit) = fungi_som_pdemand(p,i_lig_lit) + & 
+                     tot_fungi_som_pdemand * frac_p_i_lig_lit
+               end if
+            end do
+
+            ! pool-wise vertical profile of uptake
+            do k = 1,ndecomp_pools
+               son_uptake_vert(c,k) = 0._r8
+               sop_uptake_vert(c,k) = 0._r8
+               do j = 1,nlevdecomp
+                  son_uptake_vert(c,k) = son_uptake_vert(c,k) + decomp_npools_vr(c,j,k)
+                  sop_uptake_vert(c,k) = sop_uptake_vert(c,k) + decomp_ppools_vr(c,j,k)
+               end do
+               do j = 1,nlevdecomp
+                  if (son_uptake_vert(c,k) > 0._r8) then
+                     son_uptake_prof(c,j,k) = decomp_npools_vr(c,j,k) / son_uptake_vert(c,k)
+                  else
+                     son_uptake_prof(c,j,k) = 0._r8
+                  end if
+                  if (sop_uptake_vert(c,k) > 0._r8) then
+                     sop_uptake_prof(c,j,k) = decomp_ppools_vr(c,j,k) / sop_uptake_vert(c,k)
+                  else
+                     sop_uptake_prof(c,j,k) = 0._r8
+                  end if
+               end do
+            end do
+
+            ! sum up the organic nutrient uptake
+            fungi_som_to_npool(p) = 0._r8
+            fungi_som_to_ppool(p) = 0._r8
+            do k = 1,ndecomp_pools
+               fungi_som_to_npool(p) = fungi_som_ndemand(p,k) + fungi_som_to_npool(p)
+               fungi_som_to_ppool(p) = fungi_som_pdemand(p,k) + fungi_som_to_ppool(p)
+            end do
+
+            ! limit the potential fungi uptake by nonstructural carbohydrates availability
+            cpool_to_fungi_n = (fungi_ndemand_pot(p)+fungi_som_to_npool(p)) * AllocParamsInst%fungi_cost_n
+            cpool_to_fungi_p = (fungi_pdemand_pot(p)+fungi_som_to_ppool(p)) * AllocParamsInst%fungi_cost_p
+
+            if (cpool_to_fungi_n > 0.5_r8*availc(p)) then
+               ! write (iulog, *) 'activated', plant_ndemand(p), 0.5_r8*availc(p)/cpool_to_fungi_n, fungi_ndemand_pot(p), 0.5_r8*availc(p)/cpool_to_fungi_n*fungi_ndemand_pot(p), fungi_som_to_npool(p), 0.5_r8*availc(p)/cpool_to_fungi_n*fungi_som_to_npool(p)
+               ! reduce fungal N uptake
+               fungi_ndemand_pot(p) = 0.5_r8*availc(p)/cpool_to_fungi_n*fungi_ndemand_pot(p)
+               do k = 1,ndecomp_pools
+                  fungi_som_ndemand(p,k) = 0.5_r8*availc(p)/cpool_to_fungi_n*fungi_som_ndemand(p,k)
+               end do
+               fungi_som_to_npool(p) = 0.5_r8*availc(p)/cpool_to_fungi_n*fungi_som_to_npool(p)
+            end if
+
+            if (cpool_to_fungi_p > 0.5_r8*availc(p)) then
+               ! reduce fungal P uptake
+               fungi_pdemand_pot(p) = 0.5_r8*availc(p)/cpool_to_fungi_p*fungi_pdemand_pot(p)
+               do k = 1,ndecomp_pools
+                  fungi_som_pdemand(p,k) = 0.5_r8*availc(p)/cpool_to_fungi_p*fungi_som_pdemand(p,k)
+               end do
+               fungi_som_to_ppool(p) = 0.5_r8*availc(p)/cpool_to_fungi_n*fungi_som_to_ppool(p)
+            end if
+
+            ! reduce plant mineral nutrient demand by direct fungi uptake
+            ! when fungi uptake > plant demand, still uptakes as storage
+            plant_ndemand(p) = max(plant_ndemand(p) - fungi_som_to_npool(p), 0._r8)
+            plant_pdemand(p) = max(plant_pdemand(p) - fungi_som_to_ppool(p), 0._r8)
+
+            ! sum up the inorganic nutrient competitiveness
+            plant_ndemand_pot(p) = fungi_ndemand_pot(p) + froot_ndemand_pot(p)
+            plant_pdemand_pot(p) = fungi_pdemand_pot(p) + froot_pdemand_pot(p)
+
+            !write (iulog, *) 'ndemand', p, froot_ndemand_pot(p), fungi_ndemand_pot(p), fungi_som_ndemand(p,i_met_lit), fungi_som_ndemand(p,i_cel_lit), fungi_som_ndemand(p,i_lig_lit), fungi_som_to_npool(p)
+            !write (iulog, *) 'pdemand', p, froot_pdemand_pot(p), fungi_pdemand_pot(p), fungi_som_pdemand(p,i_met_lit), fungi_som_pdemand(p,i_cel_lit), fungi_som_pdemand(p,i_lig_lit), fungi_som_to_ppool(p)
+
          else
-            plant_nabsorb(p) = plant_ndemand(p)
-            plant_pabsorb(p) = plant_pdemand(p)
+            plant_ndemand_pot(p) = plant_ndemand(p)
+            plant_pdemand_pot(p) = plant_pdemand(p)
+            froot_ndemand_pot(p) = 0._r8
+            froot_pdemand_pot(p) = 0._r8
+            fungi_ndemand_pot(p) = 0._r8
+            fungi_pdemand_pot(p) = 0._r8
+            fungi_som_ndemand(p,1:ndecomp_pools) = 0._r8
+            fungi_som_pdemand(p,1:ndecomp_pools) = 0._r8
+            fungi_som_to_npool(p) = 0._r8 
+            fungi_som_to_ppool(p) = 0._r8
+            cpool_to_fungi(p) = 0._r8
+            son_uptake_prof(c,1:nlevdecomp,1:ndecomp_pools) = 0._r8
+            sop_uptake_prof(c,1:nlevdecomp,1:ndecomp_pools) = 0._r8
          end if
-
 #endif
       end do ! end pft loop
 
 #ifdef HUM_HOL
       ! now use the p2c routine to get the column-averaged plant_ndemand
       call p2c(bounds, num_soilc, filter_soilc, &
-           plant_nabsorb(bounds%begp:bounds%endp), &
+           plant_ndemand_pot(bounds%begp:bounds%endp), &
            plant_ndemand_col(bounds%begc:bounds%endc))
 
       !!! add phosphorus
       call p2c(bounds, num_soilc, filter_soilc, &
-           plant_pabsorb(bounds%begp:bounds%endp), &
+           plant_pdemand_pot(bounds%begp:bounds%endp), &
            plant_pdemand_col(bounds%begc:bounds%endc))
+
+      !!! add fungi
+      do k = 1,ndecomp_pools
+         call p2c(bounds, num_soilc, filter_soilc, &
+            fungi_som_ndemand(bounds%begp:bounds%endp,k), &
+            som_n_to_fungi(bounds%begc:bounds%endc,k))
+
+         call p2c(bounds, num_soilc, filter_soilc, &
+            fungi_som_pdemand(bounds%begp:bounds%endp,k), &
+            som_p_to_fungi(bounds%begc:bounds%endc,k))
+      end do
 
 #else
       ! now use the p2c routine to get the column-averaged plant_ndemand
@@ -1202,14 +1435,26 @@ contains
 
       ! pflotran will need an input from CN: modified 'sum_ndemand_vr' ('potential_immob' excluded).
       if (use_elm_interface.and.use_pflotran .and. pf_cmode .or. use_alquimia) then
-            do j = 1, nlevdecomp
-               do fc=1, num_soilc
-                  c = filter_soilc(fc)
-                  plant_ndemand_vr_col(c,j) = plant_ndemand_col(c) * nuptake_prof(c,j)
-                  plant_pdemand_vr_col(c,j) = plant_pdemand_col(c) * puptake_prof(c,j)
-               end do
+         do j = 1, nlevdecomp
+            do fc=1, num_soilc
+               c = filter_soilc(fc)
+               plant_ndemand_vr_col(c,j) = plant_ndemand_col(c) * nuptake_prof(c,j)
+               plant_pdemand_vr_col(c,j) = plant_pdemand_col(c) * puptake_prof(c,j)
             end do
+         end do
       endif
+
+#ifdef HUM_HOL
+      do j = 1, nlevdecomp
+         do fc=1, num_soilc
+            c = filter_soilc(fc)
+            do k = 1,ndecomp_pools
+               som_n_to_fungi_vr(c,j,k) = som_n_to_fungi(c,k) * son_uptake_prof(c,j,k)
+               som_p_to_fungi_vr(c,j,k) = som_p_to_fungi(c,k) * sop_uptake_prof(c,j,k)
+            end do
+         end do
+      end do
+#endif
 
     end associate
 
@@ -1282,7 +1527,6 @@ contains
    real(r8):: cn_stoich_var=0.2    ! variability of CN ratio
    real(r8):: cp_stoich_var=0.4    ! variability of CP ratio
 
-   
    !-----------------------------------------------------------------------
 
    associate(                                                                                 &
@@ -1326,53 +1570,54 @@ contains
         col_plant_nh4demand_vr       => col_nf%col_plant_nh4demand_vr              , &
         col_plant_no3demand_vr       => col_nf%col_plant_no3demand_vr              , &
         col_plant_pdemand_vr         => col_pf%col_plant_pdemand_vr                , &
-        cn_scalar                    => cnstate_vars%cn_scalar                                , &
-        cn_scalar_runmean            => cnstate_vars%cn_scalar_runmean                           , &
-        cp_scalar                    => cnstate_vars%cp_scalar                                , &
-        cp_scalar_runmean            => cnstate_vars%cp_scalar_runmean                                , &
-        t_scalar                     => col_cf%t_scalar                          , &
+        cn_scalar                    => cnstate_vars%cn_scalar                     , &
+        cn_scalar_runmean            => cnstate_vars%cn_scalar_runmean             , &
+        cp_scalar                    => cnstate_vars%cp_scalar                     , &
+        cp_scalar_runmean            => cnstate_vars%cp_scalar_runmean             , &
+        t_scalar                     => col_cf%t_scalar                      , &
         plant_nh4demand_vr_patch     => veg_nf%plant_nh4demand_vr            , &
         plant_no3demand_vr_patch     => veg_nf%plant_no3demand_vr            , &
         plant_ndemand_vr_patch       => veg_nf%plant_ndemand_vr              , &
-        plant_pdemand_vr_patch       => veg_pf%plant_pdemand_vr            , &
-        pnup_pfrootc                 => veg_ns%pnup_pfrootc                 , &
-        isoilorder                   => cnstate_vars%isoilorder                               , &
-        sminp_to_plant_patch         => veg_pf%sminp_to_plant              , &
+        plant_pdemand_vr_patch       => veg_pf%plant_pdemand_vr              , &
+        pnup_pfrootc                 => veg_ns%pnup_pfrootc                  , &
+        isoilorder                   => cnstate_vars%isoilorder              , &
+        sminp_to_plant_patch         => veg_pf%sminp_to_plant                , &
         sminn_to_plant_patch         => veg_nf%sminn_to_plant                , &
         smin_nh4_to_plant_patch      => veg_nf%smin_nh4_to_plant             , &
         smin_no3_to_plant_patch      => veg_nf%smin_no3_to_plant             , &
-        actual_immob_no3             => col_nf%actual_immob_no3                , &
-        actual_immob_nh4             => col_nf%actual_immob_nh4                , &
-        froot_prof                   => cnstate_vars%froot_prof_patch                         , & ! fine root vertical profile Zeng, X. 2001. Global vegetation root distribution for land modeling. J. Hydrometeor. 2:525-530
-        frootc                       => veg_cs%frootc                         , & ! Input:  [real(r8) (:)   ]
-        leafc                        => veg_cs%leafc                          , & ! Input:  [real(r8) (:)   ]
-        leafcn                       => veg_vp%leafcn                                     , & ! Input:  [real(r8) (:)   ]  leaf C:N (gC/gN)
-        leafcp                       => veg_vp%leafcp                                     , & ! Input:  [real(r8) (:)   ]  leaf C:P (gC/gP)
-        vmax_minsurf_p_vr            => veg_vp%vmax_minsurf_p_vr                          , &
-        leafn                        => veg_ns%leafn                        , &
-        vmax_plant_nh4               => veg_vp%vmax_plant_nh4                             , &
-        vmax_plant_no3               => veg_vp%vmax_plant_no3                             , &
-        vmax_plant_p                 => veg_vp%vmax_plant_p                               , &
+        actual_immob_no3             => col_nf%actual_immob_no3              , &
+        actual_immob_nh4             => col_nf%actual_immob_nh4              , &
+        froot_prof                   => cnstate_vars%froot_prof_patch        , & ! fine root vertical profile Zeng, X. 2001. Global vegetation root distribution for land modeling. J. Hydrometeor. 2:525-530
+        frootc                       => veg_cs%frootc                        , & ! Input:  [real(r8) (:)   ]
+        leafc                        => veg_cs%leafc                         , & ! Input:  [real(r8) (:)   ]
+        leafcn                       => veg_vp%leafcn                        , & ! Input:  [real(r8) (:)   ]  leaf C:N (gC/gN)
+        leafcp                       => veg_vp%leafcp                        , & ! Input:  [real(r8) (:)   ]  leaf C:P (gC/gP)
+        vmax_minsurf_p_vr            => veg_vp%vmax_minsurf_p_vr             , &
+        leafn                        => veg_ns%leafn                         , &
+        vmax_plant_nh4               => veg_vp%vmax_plant_nh4                , &
+        vmax_plant_no3               => veg_vp%vmax_plant_no3                , &
+        vmax_plant_p                 => veg_vp%vmax_plant_p                  , &
         primp_to_labilep_vr_col      => col_pf%primp_to_labilep_vr           , &
-        leafp                        => veg_ps%leafp                      , &
-        km_decomp_nh4                => veg_vp%km_decomp_nh4                              , &
-        km_decomp_no3                => veg_vp%km_decomp_no3                              , &
-        km_decomp_p                  => veg_vp%km_decomp_p                                , &
-        km_nit                       => veg_vp%km_nit                                     , &
-        km_den                       => veg_vp%km_den                                     , &
-        km_plant_nh4                 => veg_vp%km_plant_nh4                               , &
-        km_plant_no3                 => veg_vp%km_plant_no3                               , &
-        km_plant_p                   => veg_vp%km_plant_p                                 , &
-        km_minsurf_p_vr              => veg_vp%km_minsurf_p_vr                            , &
-        decompmicc_patch_vr          => veg_vp%decompmicc_patch_vr                        , &
-        adsorb_to_labilep_vr         => col_pf%adsorb_to_labilep_vr              , &
-        desorb_to_solutionp_vr       => col_pf%desorb_to_solutionp_vr            , &
+        leafp                        => veg_ps%leafp                         , &
+        km_decomp_nh4                => veg_vp%km_decomp_nh4                 , &
+        km_decomp_no3                => veg_vp%km_decomp_no3                 , &
+        km_decomp_p                  => veg_vp%km_decomp_p                   , &
+        km_nit                       => veg_vp%km_nit                        , &
+        km_den                       => veg_vp%km_den                        , &
+        km_plant_nh4                 => veg_vp%km_plant_nh4                  , &
+        km_plant_no3                 => veg_vp%km_plant_no3                  , &
+        km_plant_p                   => veg_vp%km_plant_p                    , &
+        km_minsurf_p_vr              => veg_vp%km_minsurf_p_vr               , &
+        decompmicc_patch_vr          => veg_vp%decompmicc_patch_vr           , &
+        adsorb_to_labilep_vr         => col_pf%adsorb_to_labilep_vr          , &
+        desorb_to_solutionp_vr       => col_pf%desorb_to_solutionp_vr        , &
         biochem_pmin_vr_col          => col_pf%biochem_pmin_vr               , &
-        labilep_vr                   => col_ps%labilep_vr                   , &
+        labilep_vr                   => col_ps%labilep_vr                    , &
         pdep_to_sminp                => col_pf%pdep_to_sminp                 , &
-        pdep_prof                    => cnstate_vars%pdep_prof_col                            , &
+        pdep_prof                    => cnstate_vars%pdep_prof_col           , &
         gross_pmin_vr                => col_pf%gross_pmin_vr                 , &
-                                !! add phosphorus variables  - X. YANG
+
+        !! add phosphorus variables  - X. YANG
         solutionp_vr                 => col_ps%solutionp_vr               , & ! Input:  [real(r8) (:,:) ]  (gP/m3) soil mineral P
         potential_immob_p            => col_pf%potential_immob_p           , & ! Output: [real(r8) (:)   ]
         actual_immob_p               => col_pf%actual_immob_p              , & ! Output: [real(r8) (:)   ]
@@ -1381,15 +1626,15 @@ contains
         sminp_to_plant_vr            => col_pf%sminp_to_plant_vr           , & ! Output: [real(r8) (:,:) ]
         potential_immob_p_vr         => col_pf%potential_immob_p_vr        , & ! Output: [real(r8) (:,:) ]
         actual_immob_p_vr            => col_pf%actual_immob_p_vr           , & ! Output: [real(r8) (:,:) ]
-        bd                           => soilstate_vars%bd_col                               , &
-        h2osoi_vol                   => col_ws%h2osoi_vol                      , &
-        pmnf_decomp_cascade          => col_nf%pmnf_decomp_cascade               , &
-        pmpf_decomp_cascade          => col_pf%pmpf_decomp_cascade             , &
-        leafc_storage                => veg_cs%leafc_storage                , &
-        leafc_xfer                   => veg_cs%leafc_xfer                   , &
-        leafn_storage                => veg_ns%leafn_storage              , &
-        leafn_xfer                   => veg_ns%leafn_xfer                 , &
-        leafp_storage                => veg_ps%leafp_storage            , &
+        bd                           => soilstate_vars%bd_col              , &
+        h2osoi_vol                   => col_ws%h2osoi_vol                  , &
+        pmnf_decomp_cascade          => col_nf%pmnf_decomp_cascade         , &
+        pmpf_decomp_cascade          => col_pf%pmpf_decomp_cascade         , &
+        leafc_storage                => veg_cs%leafc_storage               , &
+        leafc_xfer                   => veg_cs%leafc_xfer                  , &
+        leafn_storage                => veg_ns%leafn_storage               , &
+        leafn_xfer                   => veg_ns%leafn_xfer                  , &
+        leafp_storage                => veg_ps%leafp_storage               , &
         leafp_xfer                   => veg_ps%leafp_xfer                 &
         )
 
@@ -1517,7 +1762,7 @@ contains
               end do
 
            else
-              
+
               f = 0
               decompmicc(:) = 0._r8
               do p = col_pp%pfti(c), col_pp%pftf(c)
@@ -1596,7 +1841,7 @@ contains
 
            ! Estimate actual allocation rates via Relative Demand
            ! approach (RD)
-           
+
            call NAllocationRD(col_plant_ndemand_vr(c,:), & ! IN
                 potential_immob_vr(c,:),                 & ! IN
                 AllocParamsInst%compet_plant_nh4,        & ! IN
@@ -1680,7 +1925,6 @@ contains
            ! NO3 flux demands.
            supplement_to_sminn_vr(c,j) = 0._r8
            if (carbon_only .or. carbonphosphorus_only) then
-              
               if ( fpi_no3_vr(j) + fpi_nh4_vr(j) < 1._r8 ) then
                  fpi_vr(c,j) = 1._r8
                  fpi_nh4_vr(j) = 1.0_r8 - fpi_no3_vr(j)
@@ -1980,8 +2224,8 @@ contains
 
      do fc=1,num_soilc
         c = filter_soilc(fc)
-        ! calculate the fraction of potential growth that can be
-        ! acheived with the N available to plants
+        ! calculate the fraction of potential uptake that can be
+        ! satisfied with the N available to plants
         if (plant_ndemand_col(c) > 0.0_r8) then
            fpg(c) = sminn_to_plant(c) / plant_ndemand_col(c)
         else
@@ -1998,8 +2242,8 @@ contains
 
      do fc=1,num_soilc
         c = filter_soilc(fc)
-        ! calculate the fraction of potential growth that can be
-        ! acheived with the P available to plants
+        ! calculate the fraction of potential uptake that can be
+        ! satisfied with the P available to plants
         if (plant_pdemand_col(c) > 0.0_r8) then
            fpg_p(c) = sminp_to_plant(c) / plant_pdemand_col(c)
         else
@@ -2109,7 +2353,7 @@ contains
                   elm_fates%fates(ci)%bc_in(s)%plant_nh4_uptake_flux(f,1) = & 
                        elm_fates%fates(ci)%bc_in(s)%plant_nh4_uptake_flux(f,1) + & 
                        plant_nh4demand_vr_fates(f,j) * fpg_nh4_vr(c,j)  * dzsoi_decomp(j) * dt
-                  
+
                   elm_fates%fates(ci)%bc_in(s)%plant_no3_uptake_flux(f,1) = & 
                        elm_fates%fates(ci)%bc_in(s)%plant_no3_uptake_flux(f,1) + & 
                        plant_no3demand_vr_fates(f,j) * fpg_no3_vr(c,j) * dzsoi_decomp(j) * dt
@@ -2192,6 +2436,7 @@ contains
     real(r8):: cp_stoich_var=0.4    ! variability of CP ratio
     real(r8):: curmr, curmr_ratio   !xsmrpool temporary variables
     real(r8):: xsmr_ratio           ! ratio of mr comes from non-structue carobn hydrate pool
+    real(r8):: cpool_to_fungi_p, cpool_to_fungi_n ! temporary holder for N&P cost of uptaking mycorrhizal fungi nutrient
     !-----------------------------------------------------------------------
 
     associate(                                                                                 &
@@ -2352,18 +2597,27 @@ contains
          nsc_rtime                    => veg_vp%nsc_rtime                       , &
          supplement_to_plantn         => veg_nf%supplement_to_plantn            , &
          supplement_to_plantp         => veg_pf%supplement_to_plantp            , &
- 
+
 #ifdef HUM_HOL
-         prev_fpg_patch               => cnstate_vars%prev_fpg_patch          , & ! Input: [real(r8) (:)     ] previous step's N limitation
-         prev_fpg_p_patch             => cnstate_vars%prev_fpg_p_patch        , & ! Input: [real(r8) (:)     ] previous step's P limitation
+         cpool                        => veg_cs%cpool , &
+         cpool_to_fungi               => veg_cf%cpool_to_fungi                , & ! Output: [real (r8) (:)   ]
 
          fpg_patch                    => cnstate_vars%fpg_patch               , & ! Output: [real(r8) (:)     ] N limitation
          fpg_p_patch                  => cnstate_vars%fpg_p_patch             , & ! Output: [real(r8) (:)     ] P limitation
 
-         plant_nabsorb                => veg_nf%plant_nabsorb                 , & ! Input: [real(r8) (:)     ] fine root's ability to take up N (gN/m2/s)
-         plant_pabsorb                => veg_pf%plant_pabsorb                 , & ! Input: [real(r8) (:)     ] fine root's ability to take up P
+         ffr_fpg                      => cnstate_vars%ffr_fpg_patch           , & ! Input: [real (r8) (:)     ] patch-level plant N stress multiplier on N uptake
+         ffr_fpg_p                    => cnstate_vars%ffr_fpg_p_patch         , & ! Input: [real (r8) (:)     ] patch-level plant P stress multiplier on P uptake
 
-         zwt_root                    => cnstate_vars%zwt_root_patch            & ! Input: [real (r8) (:)     ] scarcity of vegetation n-supply relative to c-supply
+         plant_ndemand_pot            => veg_nf%plant_ndemand_pot             , & ! Input: [real(r8) (:)     ] pft-level potential mineral N uptake (gN/m2/s)
+         plant_pdemand_pot            => veg_pf%plant_pdemand_pot             , & ! Input: [real(r8) (:)     ] pft-level potential mineral P uptake (gN/m2/s)
+
+         fungi_ndemand_pot            => veg_nf%fungi_ndemand_pot             , & ! Output: [real(r8) (:)     ] pft-level potential mineral N uptake by mycorrhizal fungi (gN/m2/s)
+         fungi_pdemand_pot            => veg_pf%fungi_pdemand_pot             , & ! Output: [real(r8) (:)     ] pft-level potential mineral P uptake by mycorrhizal fungi (gN/m2/s)
+
+         fungi_som_to_npool           => veg_nf%fungi_som_to_npool            , & ! Output: [real(r8) (:)     ] pft-level soil organic N uptake by mycorrhizal fungi (gP/m2/s)
+         fungi_som_to_ppool           => veg_pf%fungi_som_to_ppool            , & ! Output: [real(r8) (:)     ] pft-level soil organic P uptake by mycorrhizal fungi (gP/m2/s)
+
+         zwt_froot                    => cnstate_vars%zwt_froot_patch           & ! Input: [real (r8) (:)     ] multiplicative factor on water table height impact on fine root allocation
 #endif
       )
 
@@ -2385,20 +2639,35 @@ contains
 
 #ifdef HUM_HOL
                   if (.not. carbon_only) then
-                     ! calculate the PFT-level limitation factor here
+                     ! calculate the carbon cost of mycorrhizal uptake
+                     cpool_to_fungi_n = (fpg(c)*fungi_ndemand_pot(p)+fungi_som_to_npool(p)) * AllocParamsInst%fungi_cost_n
+                     cpool_to_fungi_p = (fpg_p(c)*fungi_pdemand_pot(p)+fungi_som_to_ppool(p)) * AllocParamsInst%fungi_cost_p
+
+                     if (carbonnitrogen_only) then
+                        cpool_to_fungi(p) = cpool_to_fungi_n
+                     else if (carbonphosphorus_only) then
+                        cpool_to_fungi(p) = cpool_to_fungi_p
+                     else
+                        cpool_to_fungi(p) = max(cpool_to_fungi_n, cpool_to_fungi_p)
+                     end if
+
+                     ! write (iulog, *) 'cpool_to_fungi_n', p, cpool_to_fungi(p), fpg(c), fungi_ndemand_pot(p), fungi_som_to_npool(p), AllocParamsInst%fungi_cost_n
+                     ! write (iulog, *) 'cpool_to_fungi_p', p, cpool_to_fungi(p), fpg_p(c), fungi_pdemand_pot(p), fungi_som_to_ppool(p), AllocParamsInst%fungi_cost_p
+
+                     ! calculate the PFT-level ratio of satisfied uptake to growth demand
                      if (plant_ndemand(p) == 0._r8) then
                         fpg_patch(p) = 1._r8
                      else
-                        fpg_patch(p) = (plant_nabsorb(p)*fpg(c)) / plant_ndemand(p)
+                        fpg_patch(p) = (plant_ndemand_pot(p)*fpg(c)) / plant_ndemand(p)
                      end if
 
                      if (plant_pdemand(p) == 0._r8) then
                         fpg_p_patch(p) = 1._r8
                      else
-                        fpg_p_patch(p) = (plant_pabsorb(p)*fpg_p(c)) / plant_pdemand(p)
+                        fpg_p_patch(p) = (plant_pdemand_pot(p)*fpg_p(c)) / plant_pdemand(p)
                      end if
-
                   else
+                     cpool_to_fungi(p) = 0._r8
                      fpg_patch(p) = fpg(c)
                      fpg_p_patch(p) = fpg_p(c)
                   end if
@@ -2407,9 +2676,12 @@ contains
                   plant_n_uptake_flux(c) = plant_n_uptake_flux(c) + plant_ndemand(p) * fpg_patch(p) * veg_pp%wtcol(p)
                   plant_p_uptake_flux(c) = plant_p_uptake_flux(c) + plant_pdemand(p) * fpg_p_patch(p) * veg_pp%wtcol(p)
 
-                  ! save the limitation values for next time step
-                  prev_fpg_patch(p) = fpg_patch(p)
-                  prev_fpg_p_patch(p) = fpg_p_patch(p)
+                  ! use fpg to calculate next time step's limitation-stimulation on root uptake
+                  ffr_fpg(p) = AllocParamsInst%alpha_fpg / (fpg_patch(p)**2._r8 + AllocParamsInst%alpha_fpg - 1._r8)
+                  ffr_fpg_p(p) = AllocParamsInst%alpha_fpg / (fpg_p_patch(p)**2._r8 + AllocParamsInst%alpha_fpg - 1._r8)
+
+                  ! write (iulog, *) 'ffr_fpg', p, fpg_patch(p), plant_ndemand(p), plant_n_uptake_flux(c), AllocParamsInst%alpha_fpg
+                  ! write (iulog, *) 'ffr_fpg_p', p, fpg_p_patch(p), plant_pdemand(p), plant_p_uptake_flux(c), AllocParamsInst%alpha_fpg
 #else
                   plant_n_uptake_flux(c) = plant_n_uptake_flux(c) + plant_ndemand(p) * fpg(c)*veg_pp%wtcol(p)
                   plant_p_uptake_flux(c) = plant_p_uptake_flux(c) + plant_pdemand(p) * fpg_p(c)*veg_pp%wtcol(p)
@@ -2445,11 +2717,8 @@ contains
              f2 = croot_stem(ivt(p))
 
 #ifdef HUM_HOL
-             !if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
-             !  f1 = froot_leaf(ivt(p)) * max(zwt_root(p), 0.1_r8)
-             !end if
              if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
-                f1 = zwt_root(p) * froot_leaf(ivt(p))
+                f1 = zwt_froot(p) * froot_leaf(ivt(p))
              end if
 #endif
 
@@ -2531,28 +2800,39 @@ contains
                else
                  r  = max(1._r8,rc/max(npool(p), 1e-15_r8))
                end if
-               plant_nalloc(p) = (plant_ndemand(p) + retransn_to_npool(p)) / r
 
+#ifdef HUM_HOL
+               plant_nalloc(p) = (plant_ndemand(p) + retransn_to_npool(p) + fungi_som_to_npool(p)) / r
+#else
+               plant_nalloc(p) = (plant_ndemand(p) + retransn_to_npool(p)) / r
+#endif
                if ( carbon_only  .or.  carbonnitrogen_only ) then
                  r = 1.0_r8
                else
                  r  = max(1._r8,rc_p/max(ppool(p), 1e-15_r8))
                end if
+#ifdef HUM_HOL
+               plant_palloc(p) = (plant_pdemand(p) + retransp_to_ppool(p) + fungi_som_to_ppool(p)) / r
+#else
                plant_palloc(p) = (plant_pdemand(p) + retransp_to_ppool(p)) / r
-
+#endif
              else
 #ifdef HUM_HOL
                sminn_to_npool(p) = plant_ndemand(p) * fpg_patch(p)
                sminp_to_ppool(p) = plant_pdemand(p) * fpg_p_patch(p)
+               plant_nalloc(p) = sminn_to_npool(p) + retransn_to_npool(p) + fungi_som_to_npool(p)
+               plant_palloc(p) = sminp_to_ppool(p) + retransp_to_ppool(p) + fungi_som_to_ppool(p)
 #else
                sminn_to_npool(p) = plant_ndemand(p) * fpg(c)
                sminp_to_ppool(p) = plant_pdemand(p) * fpg_p(c)
-#endif
-
                plant_nalloc(p) = sminn_to_npool(p) + retransn_to_npool(p)
                plant_palloc(p) = sminp_to_ppool(p) + retransp_to_ppool(p)
+#endif
 
              end if
+
+             !write (iulog, *) 'fpg', sminn_to_npool(p), plant_ndemand(p), fpg_patch(p), plant_nalloc(p), retransn_to_npool(p), fungi_som_to_npool(p)
+             !write (iulog, *) 'fpg_p', sminp_to_ppool(p), plant_pdemand(p), fpg_p_patch(p), plant_palloc(p), retransp_to_ppool(p), fungi_som_to_ppool(p)
 
              ! calculate the associated carbon allocation, and the excess
              ! carbon flux that must be accounted for through downregulation
@@ -2566,33 +2846,60 @@ contains
                      plant_palloc(p) = plant_nalloc(p) * (p_allometry(p)/n_allometry(p))
                      !in case of strong N limitation, and plant_palloc(p) < retransp_to_ppool(p)
                      if (veg_vp%nstor(veg_pp%itype(p)) < 1e-6_r8) then
+#ifdef HUM_HOL
+                         sminp_to_ppool(p) = max(plant_palloc(p) - retransp_to_ppool(p) - fungi_som_to_ppool(p),0.0_r8)
+                         retransp_to_ppool(p) = min(plant_palloc(p) - fungi_som_to_ppool(p), retransp_to_ppool(p))
+#else
                          sminp_to_ppool(p) = max(plant_palloc(p) - retransp_to_ppool(p),0.0_r8)
                          retransp_to_ppool(p) = min(plant_palloc(p), retransp_to_ppool(p))
+#endif
                      end if
                  else
                      plant_calloc(p) = plant_palloc(p) * (c_allometry(p)/p_allometry(p))
                      plant_nalloc(p) = plant_palloc(p) * (n_allometry(p)/p_allometry(p))
                      ! in case of strong P limitation, and plant_nalloc(p) < retransn_to_npool(p)
                      if (veg_vp%nstor(veg_pp%itype(p)) < 1e-6_r8) then
+#ifdef HUM_HOL
+                         sminn_to_npool(p) = max(plant_nalloc(p) - retransn_to_npool(p) - fungi_som_to_npool(p), 0.0_r8)
+                         retransn_to_npool(p) = min(plant_nalloc(p) - fungi_som_to_npool(p), retransn_to_npool(p))
+#else
                          sminn_to_npool(p) = max(plant_nalloc(p) - retransn_to_npool(p), 0.0_r8)
-                         retransn_to_npool(p) = min(plant_nalloc(p) , retransn_to_npool(p))
+                         retransn_to_npool(p) = min(plant_nalloc(p), retransn_to_npool(p))
+#endif
                      end if
-                 endif
-             endif
+                 end if
+             end if
 
-             if(carbonphosphorus_only .or. carbon_only )then
+             if (carbonphosphorus_only .or. carbon_only )then
                  plant_calloc(p) = plant_palloc(p) * (c_allometry(p)/p_allometry(p))
-             endif
+             end if
 
              if(carbonnitrogen_only .or. carbon_only )then
                  plant_calloc(p) = plant_nalloc(p) * (c_allometry(p)/n_allometry(p))
                  plant_palloc(p) = plant_calloc(p) * (p_allometry(p)/c_allometry(p))
                  if (veg_vp%nstor(veg_pp%itype(p)) < 1e-6_r8) then
+#ifdef HUM_HOL
+                     sminp_to_ppool(p) = max(plant_palloc(p) - retransp_to_ppool(p) - fungi_som_to_ppool(p), 0.0_r8)
+#else
                      sminp_to_ppool(p) = max(plant_palloc(p) - retransp_to_ppool(p), 0.0_r8)
+#endif
                  end if
              endif
-
+#ifdef HUM_HOL
+             ! deduct the fungi carbon cost (cpool_to_fungi) from xsmr pool instead of here
+             if (availc(p) > plant_calloc(p)) then
+                excess_cflux(p) = availc(p) - plant_calloc(p)
+             else
+                ! if nutrients uptake is too high, reduce the plant n & p alloc,
+                ! the excess nutrients go to nonstructural nutrients pool
+                excess_cflux(p) = 0._r8
+                plant_calloc(p) = availc(p)
+                plant_nalloc(p) = plant_calloc(p) * n_allometry(p)/c_allometry(p)
+                plant_palloc(p) = plant_calloc(p) * p_allometry(p)/c_allometry(p)
+             end if
+#else
              excess_cflux(p) = availc(p) - plant_calloc(p)
+#endif
 
              ! reduce gpp fluxes due to N limitation
              if (gpp(p) > 0.0_r8) then
@@ -2627,6 +2934,7 @@ contains
                      endif
                  endif
              end if
+
          else
              ! 'ECA' or 'MIC' mode
              ! dynamic allocation based on light limitation (more woody growth) vs nutrient limitations (more fine root growth)
@@ -2881,7 +3189,6 @@ contains
                ! adjust fcur* to reduce the C allocated to leaf pool
                ! x* = plant_nalloc(p) / n_allometry(p) * (1 + cn_stoich_var )  /  (plant_calloc/c_allometry)
                ! x* = plant_palloc(p) / p_allometry(p) * (1 + cp_stoich_var )  /  (plant_calloc/c_allometry)
-
 
                nlc_adjust_high = plant_nalloc(p) / n_allometry(p) * (1 + cn_stoich_var )  ! upper bound of allocatable C to leaf  to satisfy N allocation
                nlc_adjust_high = nlc_adjust_high + max((leafn(p)+leafn_storage(p) + leafn_xfer(p))* cnl *  (1 + cn_stoich_var ) - &
@@ -3910,16 +4217,11 @@ contains
     real(r8) :: sum_no3_demand_scaled ! "" no3
     integer  :: j                     ! soil decomp layer loop
 
-    ! Michaelis-Menten competition with the plants
-    real(r8) :: mm_nh4, mm_no3
-
     do j = 1, nlevdecomp
-
-       mm_nh4 = 2._r8 * max(smin_nh4_vr(j), 0._r8) / (0.1_r8 + max(smin_nh4_vr(j), 0._r8))
 
        sum_nh4_demand        = col_plant_ndemand_vr(j) + potential_immob_vr(j) + pot_f_nit_vr(j)
        sum_nh4_demand_scaled = col_plant_ndemand_vr(j) * compet_plants_nh4 + &
-            potential_immob_vr(j)*compet_decomp_nh4 * mm_nh4 + pot_f_nit_vr(j)*compet_nit * mm_nh4
+            potential_immob_vr(j)*compet_decomp_nh4 + pot_f_nit_vr(j)*compet_nit
 
        if (sum_nh4_demand*dt < smin_nh4_vr(j)) then
           ! NH4 availability is not limiting immobilization or plant
@@ -3937,11 +4239,11 @@ contains
           if (sum_nh4_demand > 0.0_r8 .and. smin_nh4_vr(j) > 0.0_r8 &
                .and. sum_nh4_demand_scaled > 0.0_r8) then
              actual_immob_nh4_vr(j) = min((smin_nh4_vr(j)/dt)*(potential_immob_vr(j)* &
-                  compet_decomp_nh4 * mm_nh4 / sum_nh4_demand_scaled), potential_immob_vr(j))
+                  compet_decomp_nh4 / sum_nh4_demand_scaled), potential_immob_vr(j))
              smin_nh4_to_plant_vr(j) = min((smin_nh4_vr(j)/dt)*&
                   (col_plant_ndemand_vr(j)*compet_plants_nh4 / sum_nh4_demand_scaled), &
                   col_plant_ndemand_vr(j))
-             f_nit_vr(j) =  min((smin_nh4_vr(j)/dt)*(pot_f_nit_vr(j) * compet_nit * mm_nh4 / &
+             f_nit_vr(j) =  min((smin_nh4_vr(j)/dt)*(pot_f_nit_vr(j) * compet_nit / &
                   sum_nh4_demand_scaled), pot_f_nit_vr(j))
           else
              actual_immob_nh4_vr(j) = 0.0_r8
@@ -3962,15 +4264,13 @@ contains
        ! ------------------------------------------------------------------------
 
        ! next compete for no3
-       mm_no3 = 2._r8 * max(smin_no3_vr(j), 0._r8) / (0.1_r8 + max(smin_no3_vr(j), 0._r8))
-
        sum_no3_demand = (col_plant_ndemand_vr(j)-smin_nh4_to_plant_vr(j)) + &
             (potential_immob_vr(j)-actual_immob_nh4_vr(j)) + pot_f_denit_vr(j)
 
        sum_no3_demand_scaled = (col_plant_ndemand_vr(j)-smin_nh4_to_plant_vr(j)) &
             * compet_plants_no3 + & 
-            (potential_immob_vr(j)-actual_immob_nh4_vr(j))*compet_decomp_no3 * mm_no3 &
-            + pot_f_denit_vr(j)*compet_denit * mm_no3
+            (potential_immob_vr(j)-actual_immob_nh4_vr(j))*compet_decomp_no3 &
+            + pot_f_denit_vr(j)*compet_denit
 
        if (sum_no3_demand*dt < smin_no3_vr(j)) then
 
@@ -3989,13 +4289,13 @@ contains
           if (sum_no3_demand > 0.0_r8 .and. smin_no3_vr(j) > 0.0_r8 &
                .and. sum_no3_demand_scaled > 0.0_r8) then
              actual_immob_no3_vr(j) = min((smin_no3_vr(j)/dt)*((potential_immob_vr(j)- &
-                  actual_immob_nh4_vr(j))*compet_decomp_no3 * mm_no3 / sum_no3_demand_scaled), &
+                  actual_immob_nh4_vr(j))*compet_decomp_no3 / sum_no3_demand_scaled), &
                   potential_immob_vr(j)-actual_immob_nh4_vr(j))
              smin_no3_to_plant_vr(j) = min((smin_no3_vr(j)/dt) * &
                   ((col_plant_ndemand_vr(j)-smin_nh4_to_plant_vr(j)) * &
                   compet_plants_no3 / sum_no3_demand_scaled), &
                   col_plant_ndemand_vr(j)-smin_nh4_to_plant_vr(j))
-             f_denit_vr(j) =  min((smin_no3_vr(j)/dt)*(pot_f_denit_vr(j)*compet_denit * mm_no3 / &
+             f_denit_vr(j) =  min((smin_no3_vr(j)/dt)*(pot_f_denit_vr(j)*compet_denit / &
                   sum_no3_demand_scaled), pot_f_denit_vr(j))
           else
              actual_immob_no3_vr(j) = 0.0_r8
@@ -4041,11 +4341,8 @@ contains
     ! Locals
     real(r8) :: sum_pdemand          ! Total phos demand over all competitors
     integer  :: j                     ! soil decomp layer loop
-    real(r8) :: mmp ! Michaelis-Menten coefficient for P competition
 
     do j = 1, nlevdecomp
-
-       mmp = 2._r8 * max(solutionp_vr(j), 0._r8) / (1e-7 + max(solutionp_vr(j), 0._r8))
 
        sum_pdemand = col_plant_pdemand_vr(j) + potential_immob_p_vr(j)
 
@@ -4070,7 +4367,7 @@ contains
           ! available soil mineral solution P resource.
 
           if (sum_pdemand > 0.0_r8 .and. solutionp_vr(j) >0._r8) then
-             actual_immob_p_vr(j) = min((solutionp_vr(j)/dt)*(potential_immob_p_vr(j) * mmp / sum_pdemand), potential_immob_p_vr(j))
+             actual_immob_p_vr(j) = min((solutionp_vr(j)/dt)*(potential_immob_p_vr(j) / sum_pdemand), potential_immob_p_vr(j))
           else
              actual_immob_p_vr(j) = 0.0_r8
           end if

@@ -10,6 +10,8 @@ module AnnualUpdateMod
   use ColumnDataType   , only : col_cf
   use VegetationDataType, only : veg_cf
 
+  use elm_varctl, only : iulog
+
   use timeinfoMod
   !
   implicit none
@@ -62,7 +64,9 @@ contains
       tempavg_t2m_patch           => cnstate_vars%tempavg_t2m_patch    , &
       annsum_npp                  => veg_cf%annsum_npp   , &
       tempsum_npp                 => veg_cf%tempsum_npp  , &
-      annsum_npp_col              => col_cf%annsum_npp      , &
+      annsum_npp_col              => col_cf%annsum_npp   , &
+      tempsum_zwt_col             => cnstate_vars%tempsum_zwt_col, &
+      annavg_zwt_col              => cnstate_vars%annavg_zwt_col, &
       annavg_t2m_col              => cnstate_vars%annavg_t2m_col &
       )
       dt = dtime_mod 
@@ -116,9 +120,14 @@ contains
     do fc = 1,num_soilc
        c = filter_soilc(fc)
        if (annsum_counter_col(c) >= dayspyr_mod * secspday) then
+
+           annavg_zwt_col(c) = tempsum_zwt_col(c) / annsum_counter_col(c)
+           tempsum_zwt_col(c) = 0._r8
            annsum_counter_col(c) = 0._r8
        end if
     end do
+
+    ! write (iulog, *) 'annavg_zwt_col', annavg_zwt_col(2)
 
   end associate
 

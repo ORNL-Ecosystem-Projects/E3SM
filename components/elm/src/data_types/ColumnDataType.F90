@@ -759,6 +759,8 @@ module ColumnDataType
     real(r8), pointer :: actual_immob                          (:)     => null() ! vert-int (diagnostic) actual N immobilization (gN/m2/s)
     real(r8), pointer :: sminn_to_plant_vr                     (:,:)   => null() ! vertically-resolved plant uptake of soil mineral N (gN/m3/s)
     real(r8), pointer :: sminn_to_plant                        (:)     => null() ! vert-int (diagnostic) plant uptake of soil mineral N (gN/m2/s)
+    real(r8), pointer :: som_n_to_fungi_vr                     (:,:,:) => null() ! vertically-resolved soil organic N uptake by fungi (gN/m3/s)
+    real(r8), pointer :: som_n_to_fungi                        (:,:)   => null() ! vert-int (diagnostic) soil organic N uptake by fungi (gN/m2/s)
     real(r8), pointer :: supplement_to_sminn_vr                (:,:)   => null() ! vertically-resolved supplemental N supply (gN/m3/s)
     real(r8), pointer :: supplement_to_sminn                   (:)     => null() ! vert-int (diagnostic) supplemental N supply (gN/m2/s)
     real(r8), pointer :: gross_nmin_vr                         (:,:)   => null() ! vertically-resolved gross rate of N mineralization (gN/m3/s)
@@ -886,7 +888,7 @@ module ColumnDataType
     real(r8), pointer :: plant_to_litter_nflux                 (:)     => null() ! for the purpose of mass balance check
     real(r8), pointer :: plant_to_cwd_nflux                    (:)     => null() ! for the purpose of mass balance check
     ! C4MIP output variable
-       real(r8), pointer :: plant_n_to_cwdn                      (:)     => null() ! sum of gap, fire, dynamic land use, and harvest mort
+    real(r8), pointer :: plant_n_to_cwdn                      (:)     => null() ! sum of gap, fire, dynamic land use, and harvest mort
     ! FAN
     real(r8), pointer :: manure_tan_appl                       (:)     => null() ! Manure TAN applied on soil (gN/m2/s)
     real(r8), pointer :: manure_n_appl                         (:)     => null() ! Manure N (TAN+organic) applied on soil (gN/m2/s)
@@ -904,7 +906,7 @@ module ColumnDataType
     real(r8), pointer :: nh3_otherfert                         (:)     => null() ! NH3 emission from non-urea fertilizers applied on crops and gra
     real(r8), pointer :: nh3_total                             (:)     => null() ! Total NH3 emission from agriculture
     real(r8), pointer :: manure_no3_to_soil                    (:)     => null() ! Nitrification flux from manure (gN/m2/s)
-    real(r8), pointer :: fert_no3_to_soil                      (:)     => null() ! Nitrification flux from fertilizer (gN/m2/s)
+    real(r8), pointer :: fert_no3_to_soil                      (:)     => null() ! Nitrification flux from fertilizer (gN/m2/s)n
     real(r8), pointer :: manure_nh4_to_soil                    (:)     => null() ! NH4 flux to soil mineral N pools from manure (gN/m2/s)
     real(r8), pointer :: fert_nh4_to_soil                      (:)     => null() ! NH4 flux to soil mineral N pools from fertilizer (gN/m2/s)
     real(r8), pointer :: manure_nh4_runoff                     (:)     => null() ! NH4 runoff flux from manure, (gN/m2/s)
@@ -966,6 +968,8 @@ module ColumnDataType
     real(r8), pointer :: actual_immob_p                        (:)     => null() ! vert-int (diagnostic) actual P immobilization (gP/m2/s)
     real(r8), pointer :: sminp_to_plant_vr                     (:,:)   => null() ! vertically-resolved plant uptake of soil mineral P (gP/m3/s)
     real(r8), pointer :: sminp_to_plant                        (:)     => null() ! vert-int (diagnostic) plant uptake of soil mineral P (gP/m2/s)
+    real(r8), pointer :: som_p_to_fungi_vr                     (:,:,:) => null() ! vertically-resolved soil organic P uptake by fungi (gP/m3/s)
+    real(r8), pointer :: som_p_to_fungi                        (:,:)   => null() ! vert-int (diagnostic) soil organic P uptake by fungi (gP/m2/s)
     real(r8), pointer :: net_mineralization_p_vr               (:,:)   => null() 
     real(r8), pointer :: supplement_to_sminp_vr                (:,:)   =>null() ! vertically-resolved supplemental P supply (gP/m3/s)
     real(r8), pointer :: supplement_to_sminp                   (:)     =>null() ! vert-int (diagnostic) supplemental P supply (gP/m2/s)
@@ -2186,10 +2190,10 @@ contains
 
        this%decomp_cpools(begc:endc,:) = spval
        do l  = 1, ndecomp_pools
-          if(trim(decomp_cascade_con%decomp_pool_name_history(l))=='')exit
+          if (trim(decomp_cascade_con%decomp_pool_name_history(l))=='') exit
 
           ! Do not define history variables for CWD when fates is active
-          if( decomp_cascade_con%is_cwd(l) .and. use_fates ) cycle
+          if ( decomp_cascade_con%is_cwd(l) .and. use_fates ) cycle
           
           if ( nlevdecomp_full > 1 ) then
              data2dptr => this%decomp_cpools_vr(:,:,l)
@@ -3558,8 +3562,6 @@ contains
          avgflag='A', long_name='soil mineral N', &
          ptr_col=this%sminn_vr, default = 'inactive')
 
-
-
     this%totlitn(begc:endc) = spval
      call hist_addfld1d (fname='TOTLITN', units='gN/m^2', &
           avgflag='A', long_name='total litter N', &
@@ -4539,8 +4541,6 @@ contains
             this%totDON(c) + &
             this%totprodn(c) + &
             this%totvegn(c)
-
-
 
        ! total column nitrogen, including pft (TOTCOLN)
        this%totcoln(c) = &
@@ -8374,12 +8374,13 @@ contains
     allocate(this%hrv_deadstemn_to_prod10n        (begc:endc))                   ; this%hrv_deadstemn_to_prod10n       (:)   = spval
     allocate(this%hrv_deadstemn_to_prod100n       (begc:endc))                   ; this%hrv_deadstemn_to_prod100n      (:)   = spval
     allocate(this%hrv_cropn_to_prod1n             (begc:endc))                   ; this%hrv_cropn_to_prod1n            (:)   = spval
-    allocate(this%sminn_to_plant                  (begc:endc))                   ; this%sminn_to_plant	               (:)   = spval
+    allocate(this%sminn_to_plant                  (begc:endc))                   ; this%sminn_to_plant	              (:)   = spval
+    allocate(this%som_n_to_fungi                  (begc:endc,1:ndecomp_pools))   ; this%som_n_to_fungi	              (:,:) = spval
     allocate(this%potential_immob                 (begc:endc))                   ; this%potential_immob                (:)   = spval
     allocate(this%actual_immob                    (begc:endc))                   ; this%actual_immob                   (:)   = spval
     allocate(this%gross_nmin                      (begc:endc))                   ; this%gross_nmin                     (:)   = spval
     allocate(this%net_nmin                        (begc:endc))                   ; this%net_nmin                       (:)   = spval
-    allocate(this%denit                           (begc:endc))                   ; this%denit		                       (:)   = spval
+    allocate(this%denit                           (begc:endc))                   ; this%denit		                    (:)   = spval
     allocate(this%supplement_to_sminn             (begc:endc))                   ; this%supplement_to_sminn            (:)   = spval
     allocate(this%prod1n_loss                     (begc:endc))                   ; this%prod1n_loss                    (:)   = spval
     allocate(this%prod10n_loss                    (begc:endc))                   ; this%prod10n_loss                   (:)   = spval
@@ -8403,6 +8404,7 @@ contains
     allocate(this%potential_immob_vr              (begc:endc,1:nlevdecomp_full)) ; this%potential_immob_vr             (:,:) = spval
     allocate(this%actual_immob_vr                 (begc:endc,1:nlevdecomp_full)) ; this%actual_immob_vr                (:,:) = spval
     allocate(this%sminn_to_plant_vr               (begc:endc,1:nlevdecomp_full)) ; this%sminn_to_plant_vr              (:,:) = spval
+    allocate(this%som_n_to_fungi_vr               (begc:endc,1:nlevdecomp_full,1:ndecomp_pools)) ; this%som_n_to_fungi_vr              (:,:,:) = spval
     allocate(this%supplement_to_sminn_vr          (begc:endc,1:nlevdecomp_full)) ; this%supplement_to_sminn_vr         (:,:) = spval
     allocate(this%gross_nmin_vr                   (begc:endc,1:nlevdecomp_full)) ; this%gross_nmin_vr                  (:,:) = spval
     allocate(this%net_nmin_vr                     (begc:endc,1:nlevdecomp_full)) ; this%net_nmin_vr                    (:,:) = spval
@@ -9024,6 +9026,27 @@ contains
               ptr_col=this%sminn_to_plant_vr, default='inactive')
     end if
 
+    if ((nlevdecomp_full > 1) .or. (use_pflotran .and. pf_cmode)) then
+      do k = 1,ndecomp_pools
+         this%som_n_to_fungi_vr(begc:endc,:,k) = spval
+         data2dptr => this%som_n_to_fungi_vr(:,:,k)
+         fieldname = trim(decomp_cascade_con%decomp_pool_name_history(k))//'_N_TO_FUNGI'//trim(vr_suffix)
+         longname = 'fungi uptake of '//trim(decomp_cascade_con%decomp_pool_name_history(k))//' N (vertically resolved)'
+         call hist_addfld_decomp (fname=fieldname, units='gN/m^3/s',  type2d='levdcmp', &
+               avgflag='A', long_name=longname, &
+               ptr_col=data2dptr, default='inactive')
+      end do
+    end if
+
+    this%som_n_to_fungi(begc:endc,:) = spval
+    do k = 1,ndecomp_pools
+      data1dptr => this%som_n_to_fungi(:,k)
+      fieldname = trim(decomp_cascade_con%decomp_pool_name_history(k))//'_N_TO_FUNGI'
+      longname = 'fungi uptake of '//trim(decomp_cascade_con%decomp_pool_name_history(k))//' N'
+      call hist_addfld1d (fname=fieldname, units='gN/m^3/s', &
+             avgflag='A', long_name=longname, &
+             ptr_col=data1dptr, default='inactive')
+    end do
 
     if ((nlevdecomp_full > 1) .or. (use_pflotran .and. pf_cmode)) then
        this%supplement_to_sminn_vr(begc:endc,:) = spval
@@ -9669,6 +9692,7 @@ contains
        end if
 
     end do
+
     do k = 1, ndecomp_pools
        do fi = 1,num_column
           i = filter_column(fi)
@@ -9678,26 +9702,28 @@ contains
           !this%bgc_npool_ext_inputs_vr(i,:,k) = value_column
           !this%bgc_npool_ext_loss_vr(i,:,k) = value_column
           !this%bgc_npool_inputs(i,k) = value_column
+          this%som_n_to_fungi(i,k)           = value_column
        end do
     end do
 
-
-       do l = 1, ndecomp_cascade_transitions
-          do fi = 1,num_column
-             i = filter_column(fi)
-             this%decomp_cascade_ntransfer(i,l) = value_column
-             this%decomp_cascade_sminn_flux(i,l) = value_column
-          end do
+    do l = 1, ndecomp_cascade_transitions
+       do fi = 1,num_column
+           i = filter_column(fi)
+           this%decomp_cascade_ntransfer(i,l) = value_column
+           this%decomp_cascade_sminn_flux(i,l) = value_column
        end do
+   end do
 
-    do k = 1, ndecomp_pools
+   do k = 1, ndecomp_pools
        do j = 1, nlevdecomp_full
-          do fi = 1,num_column
-             i = filter_column(fi)
-             this%decomp_npools_sourcesink(i,j,k) = value_column
-          end do
+           do fi = 1,num_column
+              i = filter_column(fi)
+              this%decomp_npools_sourcesink(i,j,k) = value_column
+              this%decomp_npools_sourcesink(i,j,k) = value_column
+              this%som_n_to_fungi_vr(i,j,k) = value_column
+           end do
        end do
-    end do
+   end do
 
     ! pflotran
     !------------------------------------------------------------------------
@@ -9907,6 +9933,7 @@ contains
        end do
 
     end if
+
     ! vertically integrate column-level fire N losses
     do k = 1, ndecomp_pools
        do j = 1, nlev
@@ -10059,8 +10086,19 @@ contains
                this%smin_no3_to_plant_vr(c,j) * dzsoi_decomp(j)
           this%smin_nh4_to_plant(c)= this%smin_nh4_to_plant(c) + &
                this%smin_nh4_to_plant_vr(c,j) * dzsoi_decomp(j)
-       enddo
-    enddo
+       end do
+    end do
+
+    do k = 1, ndecomp_pools
+      do fc = 1,num_soilc
+         c = filter_soilc(fc)
+         this%som_n_to_fungi(c,k) = 0._r8
+         do j = 1,nlev
+            this%som_n_to_fungi(c,k) = this%som_n_to_fungi(c,k) + &
+               this%som_n_to_fungi_vr(c,j,k) * dzsoi_decomp(j)
+          end do
+       end do
+    end do
 
     ! bgc interface & pflotran
     if (use_elm_interface .and. (use_pflotran .and. pf_cmode)) then
@@ -10312,6 +10350,7 @@ contains
     allocate(this%hrv_deadstemp_to_prod100p        (begc:endc))                   ; this%hrv_deadstemp_to_prod100p     (:)   = spval
     allocate(this%hrv_cropp_to_prod1p              (begc:endc))                   ; this%hrv_cropp_to_prod1p           (:)   = spval
     allocate(this%sminp_to_plant                   (begc:endc))                   ; this%sminp_to_plant                (:)   = spval
+    allocate(this%som_p_to_fungi                   (begc:endc,1:ndecomp_pools))   ; this%som_p_to_fungi                (:,:) = spval
     allocate(this%potential_immob_p                (begc:endc))                   ; this%potential_immob_p             (:)   = spval
     allocate(this%actual_immob_p                   (begc:endc))                   ; this%actual_immob_p                (:)   = spval
     allocate(this%gross_pmin                       (begc:endc))                   ; this%gross_pmin                    (:)   = spval
@@ -10348,6 +10387,7 @@ contains
     allocate(this%potential_immob_p_vr             (begc:endc,1:nlevdecomp_full)) ; this%potential_immob_p_vr          (:,:) = spval
     allocate(this%actual_immob_p_vr                (begc:endc,1:nlevdecomp_full)) ; this%actual_immob_p_vr             (:,:) = spval
     allocate(this%sminp_to_plant_vr                (begc:endc,1:nlevdecomp_full)) ; this%sminp_to_plant_vr             (:,:) = spval
+    allocate(this%som_p_to_fungi_vr                (begc:endc,1:nlevdecomp_full,1:ndecomp_pools)) ; this%som_p_to_fungi_vr             (:,:,:) = spval
     allocate(this%net_mineralization_p_vr          (begc:endc,1:nlevdecomp_full)) ; this%net_mineralization_p_vr       (:,:) = spval
     allocate(this%supplement_to_sminp_vr           (begc:endc,1:nlevdecomp_full)) ; this%supplement_to_sminp_vr        (:,:) = spval
     allocate(this%gross_pmin_vr                    (begc:endc,1:nlevdecomp_full)) ; this%gross_pmin_vr                 (:,:) = spval
@@ -10804,6 +10844,28 @@ contains
               ptr_col=this%sminp_to_plant_vr, default='inactive')
     end if
 
+    if ((nlevdecomp_full > 1) .or. (use_pflotran .and. pf_cmode)) then
+      do k = 1,ndecomp_pools
+         this%som_p_to_fungi_vr(begc:endc,:,k) = spval
+         data2dptr => this%som_p_to_fungi_vr(:,:,k)
+         fieldname = trim(decomp_cascade_con%decomp_pool_name_history(k))//'_P_TO_FUNGI'//trim(vr_suffix)
+         longname = 'fungi uptake of '//trim(decomp_cascade_con%decomp_pool_name_history(k))//' P (vertically resolved)'
+         call hist_addfld_decomp (fname=fieldname, units='gP/m^3/s',  type2d='levdcmp', &
+               avgflag='A', long_name=longname, &
+               ptr_col=data2dptr, default='inactive')
+      end do
+    end if
+
+    this%som_p_to_fungi(begc:endc,:) = spval
+    do k = 1,ndecomp_pools
+      data1dptr => this%som_p_to_fungi(:,k)
+      fieldname = trim(decomp_cascade_con%decomp_pool_name_history(k))//'_P_TO_FUNGI'
+      longname = 'fungi uptake of '//trim(decomp_cascade_con%decomp_pool_name_history(k))//' P'
+      call hist_addfld1d (fname=fieldname, units='gP/m^2/s', &
+             avgflag='A', long_name=longname, &
+             ptr_col=data1dptr, default='inactive')
+    end do
+
     if ( nlevdecomp_full > 1 ) then
        this%supplement_to_sminp_vr(begc:endc,:) = spval
         call hist_addfld_decomp (fname='SUPPLEMENT_TO_SMINP'//trim(vr_suffix), units='gP/m^3/s',  type2d='levdcmp', &
@@ -11210,6 +11272,7 @@ contains
           this%decomp_ppools_deposit(i,k) = value_column
           this%decomp_ppools_yield(i,k) = value_column
           this%m_decomp_ppools_to_fire(i,k) = value_column
+          this%som_p_to_fungi(i,k) = value_column
        end do
     end do
 
@@ -11227,6 +11290,7 @@ contains
              i = filter_column(fi)
              this%decomp_ppools_sourcesink(i,j,k) = value_column
              this%biochem_pmin_ppools_vr(i,j,k) = value_column
+             this%som_p_to_fungi_vr(i,j,k) = value_column
           end do
        end do
     end do
@@ -11591,6 +11655,17 @@ contains
                this%actual_immob_p_vr(c,j) * dzsoi_decomp(j)
           this%smin_p_to_plant(c)= this%smin_p_to_plant(c) + &
                this%sminp_to_plant_vr(c,j) * dzsoi_decomp(j)
+       end do
+    end do
+
+    do k = 1, ndecomp_pools
+      do fc = 1,num_soilc
+         c = filter_soilc(fc)
+         this%som_p_to_fungi(c,k) = 0._r8
+         do j = 1,nlevdecomp
+            this%som_p_to_fungi(c,k) = this%som_p_to_fungi(c,k) + &
+               this%som_p_to_fungi_vr(c,j,k) * dzsoi_decomp(j)
+          end do
        end do
     end do
 

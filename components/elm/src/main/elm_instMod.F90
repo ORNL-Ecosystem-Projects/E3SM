@@ -7,6 +7,7 @@ module elm_instMod
   use abortutils                 , only : endrun
   use decompMod                  , only : bounds_type, get_proc_bounds
   use elm_varctl                 , only : use_cn, use_voc, use_c13, use_c14, use_fates, use_betr
+
   !-----------------------------------------
   ! Definition of component types
   !-----------------------------------------
@@ -222,7 +223,6 @@ contains
 
        call veg_cs%Init(begp, endp, carbon_type='c12', ratio=1._r8)
        call veg_cf%Init(begp, endp, carbon_type='c12')
-
 
        if (use_c13) then
           call c13_veg_cs%Init(begp, endp, carbon_type='c13', ratio=c13ratio)
@@ -457,7 +457,6 @@ contains
     ! the namelist value itself (if the namelist is read elsewhere).
     allocate(soil_water_retention_curve, &
          source=create_soil_water_retention_curve())
-
 
     ! Note - always initialize the memory for ch4_vars
     call ch4_vars%Init(bounds_proc, soilstate_vars%cellorg_col(begc:endc, 1:))

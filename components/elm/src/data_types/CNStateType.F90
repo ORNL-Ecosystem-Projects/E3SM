@@ -20,6 +20,7 @@ module CNStateType
   use elm_varctl   , only:  use_fates,use_crop
   use topounit_varcon,  only : max_topounits
   use GridcellType    , only : grc_pp
+
   ! 
   ! !PUBLIC TYPES:
   implicit none
@@ -79,11 +80,18 @@ module CNStateType
 
      real(r8),  pointer :: fpg_patch                   (:)     ! patch-level fraction of potential gpp (no units)
      real(r8),  pointer :: fpg_p_patch                 (:)     ! patch-level fraction of potential gpp (no units)
-     real(r8),  pointer :: prev_fpg_patch              (:)     ! patch-level fraction of potential gpp (no units)
-     real(r8),  pointer :: prev_fpg_p_patch            (:)     ! patch-level fraction of potential gpp (no units)
-     real(r8),  pointer :: plant_nfungi_patch          (:)     ! fungi's contribution to the plant_nabsorb term
-     real(r8),  pointer :: plant_pfungi_patch          (:)     ! fungi's contribution to the plant_pabsorb term
-     real(r8),  pointer :: zwt_root_patch              (:)     ! water table inhibition factor of fine root growth
+     real(r8),  pointer :: fungi_inhib_patch           (:)     ! fungal inhibition on fine root uptake of nutrients
+     real(r8),  pointer :: zwt_froot_patch             (:)     ! water table inhibition factor of fine root growth
+     real(r8),  pointer :: ffr_sra_patch               (:,:)   ! patch-level fine root biomass multiplier on fine root uptake of nutrients
+     real(r8),  pointer :: ffr_n_patch                 (:,:)   ! patch-level Michaelis-Menten multiplier on fine root uptake of N
+     real(r8),  pointer :: ffr_p_patch                 (:,:)   ! patch-level Michaelis-Menten multiplier on fine root uptake of P
+     real(r8),  pointer :: ffr_tsoi_patch              (:,:)   ! patch-level soil temperature multiplier on nutrients uptake
+     real(r8),  pointer :: ffr_swc_patch               (:,:)   ! patch-level soil moisture multiplier on nutrients uptake
+     real(r8),  pointer :: ffr_fpg_patch               (:)     ! patch-level plant N stress multiplier on N uptake
+     real(r8),  pointer :: ffr_fpg_p_patch             (:)     ! patch-level plant P stress multiplier on P uptake
+     real(r8),  pointer :: ffn_n_patch                 (:,:)   ! patch-level Michaelis-Menten multiplier on fungal uptake of nitrogen
+     real(r8),  pointer :: ffn_p_patch                 (:,:)   ! patch-level Michaelis-Menten multiplier on fungal uptake of nitrogen phosphorus
+     real(r8),  pointer :: ffn_nsc_patch               (:)     ! patch-level plant carbohydrate excess multiplier on fungal uptake of nutrients
 
      real(r8) , pointer :: rf_decomp_cascade_col       (:,:,:) ! col respired fraction in decomposition step (frac)
      real(r8) , pointer :: pathfrac_decomp_cascade_col (:,:,:) ! col what fraction of C leaving a given pool passes through a given transition (frac) 
@@ -95,6 +103,8 @@ module CNStateType
 
      real(r8) , pointer :: tempavg_t2m_patch           (:)     ! patch temporary average 2m air temperature (K)
      real(r8) , pointer :: annavg_t2m_patch            (:)     ! patch annual average 2m air temperature (K)
+     real(r8) , pointer :: annavg_zwt_col              (:)     ! patch annual average water table height (m)
+     real(r8) , pointer :: tempsum_zwt_col             (:)     ! patch annual summation of water table height (m*s)
      real(r8) , pointer :: annavg_t2m_col              (:)     ! col annual average of 2m air temperature, averaged from pft-level (K)
      real(r8) , pointer :: scalaravg_col               (:,:)   ! column average scalar for decompostion (for ad_spinup)
      real(r8) , pointer :: annsum_counter_col          (:)     ! col seconds since last annual accumulator turnover
@@ -273,13 +283,18 @@ contains
     allocate(this%fpg_patch             (begp:endp))                   ; this%fpg_patch           (:)   = spval
     allocate(this%fpg_p_patch           (begp:endp))                   ; this%fpg_p_patch           (:)   = spval
 
-    ! in the first step, the "previous" time step has no nutrients limitation
-    allocate( this%prev_fpg_patch       (begp:endp))                   ; this%prev_fpg_patch       (:) = 1._r8
-    allocate( this%prev_fpg_p_patch     (begp:endp))                   ; this%prev_fpg_p_patch    (:) = 1._r8
-
-    allocate(this%plant_nfungi_patch    (begp:endp))                   ; this%plant_nfungi_patch        (:)   = spval
-    allocate(this%plant_pfungi_patch    (begp:endp))                   ; this%plant_pfungi_patch        (:)   = spval
-    allocate(this%zwt_root_patch        (begp:endp))                   ; this%zwt_root_patch            (:)   = spval
+    allocate(this%fungi_inhib_patch     (begp:endp))                   ; this%fungi_inhib_patch         (:)   = spval
+    allocate(this%zwt_froot_patch       (begp:endp))                   ; this%zwt_froot_patch           (:)   = spval
+    allocate(this%ffr_sra_patch         (begp:endp,1:nlevdecomp_full)) ; this%ffr_sra_patch             (:,:) = spval
+    allocate(this%ffr_n_patch           (begp:endp,1:nlevdecomp_full)) ; this%ffr_n_patch               (:,:) = spval
+    allocate(this%ffr_p_patch           (begp:endp,1:nlevdecomp_full)) ; this%ffr_p_patch               (:,:) = spval
+    allocate(this%ffr_tsoi_patch        (begp:endp,1:nlevdecomp_full)) ; this%ffr_tsoi_patch            (:,:) = spval
+    allocate(this%ffr_swc_patch         (begp:endp,1:nlevdecomp_full)) ; this%ffr_swc_patch             (:,:) = spval
+    allocate(this%ffr_fpg_patch         (begp:endp))                   ; this%ffr_fpg_patch             (:)   = spval
+    allocate(this%ffr_fpg_p_patch       (begp:endp))                   ; this%ffr_fpg_p_patch           (:)   = spval
+    allocate(this%ffn_n_patch           (begp:endp,1:nlevdecomp_full)) ; this%ffn_n_patch               (:,:) = spval
+    allocate(this%ffn_p_patch           (begp:endp,1:nlevdecomp_full)) ; this%ffn_p_patch               (:,:) = spval
+    allocate(this%ffn_nsc_patch         (begp:endp))                   ; this%ffn_nsc_patch             (:)   = spval
 
     allocate(this%rf_decomp_cascade_col(begc:endc,1:nlevdecomp_full,1:ndecomp_cascade_transitions)); 
     this%rf_decomp_cascade_col(:,:,:) = spval
@@ -294,6 +309,8 @@ contains
 
     allocate(this%tempavg_t2m_patch   (begp:endp))                   ; this%tempavg_t2m_patch   (:)   = spval
     allocate(this%annsum_counter_col  (begc:endc))                   ; this%annsum_counter_col  (:)   = spval
+    allocate(this%annavg_zwt_col      (begc:endc))                   ; this%annavg_zwt_col      (:)   = spval
+    allocate(this%tempsum_zwt_col     (begc:endc))                   ; this%tempsum_zwt_col     (:)   = spval
     allocate(this%annavg_t2m_col      (begc:endc))                   ; this%annavg_t2m_col      (:)   = spval
     allocate(this%scalaravg_col       (begc:endc,1:nlevdecomp_full)) ; this%scalaravg_col       (:,:) = spval
     allocate(this%annavg_t2m_patch    (begp:endp))                   ; this%annavg_t2m_patch    (:)   = spval
@@ -504,40 +521,80 @@ contains
          avgflag='A', long_name='pft-level fraction of potential gpp due to N limitation', &
          ptr_patch=this%fpg_patch)
 
-    this%prev_fpg_patch(begp:endp) = spval
-    call hist_addfld1d (fname='PREV_FPG_PATCH', units='proportion', &
-         avgflag='A', long_name='previous time step pft-level fraction of potential gpp due to N limitation', &
-         ptr_patch=this%prev_fpg_patch)
-
     this%fpg_p_patch(begp:endp) = spval
     call hist_addfld1d (fname='FPG_P_PATCH', units='proportion', &
          avgflag='A', long_name='pft-level fraction of potential gpp due to P limitation', &
          ptr_patch=this%fpg_p_patch)
 
-    this%prev_fpg_p_patch(begp:endp) = spval
-    call hist_addfld1d (fname='PREV_FPG_P_PATCH', units='proportion', &
-         avgflag='A', long_name='previous time step pft-level fraction of potential gpp due to P limitation', &
-         ptr_patch=this%prev_fpg_p_patch)
+    this%fungi_inhib_patch(begp:endp) = spval
+    call hist_addfld1d (fname='FUNGI_INHIB_PATCH', units='proportion', &
+         avgflag='A', long_name='fungal inhibition on plant fine root uptake', &
+         ptr_patch=this%fungi_inhib_patch)
 
-    this%plant_nfungi_patch(begp:endp) = spval
-    call hist_addfld1d (fname='PLANT_NFUNGI_PATCH', units='proportion', &
-         avgflag='A', long_name='fungi contribution to the plant_nabsorb term', &
-         ptr_patch=this%plant_nfungi_patch)
-
-    this%plant_pfungi_patch(begp:endp) = spval
-    call hist_addfld1d (fname='PLANT_PFUNGI_PATCH', units='proportion', &
-         avgflag='A', long_name='fungi contribution to the plant_pabsorb term', &
-         ptr_patch=this%plant_pfungi_patch)
-
-    this%zwt_root_patch(begp:endp) = spval
-    call hist_addfld1d (fname='ZWT_ROOT_PATCH', units='proportion', &
+    this%zwt_froot_patch(begp:endp) = spval
+    call hist_addfld1d (fname='ZWT_FROOT_PATCH', units='proportion', &
          avgflag='A', long_name='water table inhibition of fine root growth', &
-         ptr_patch=this%zwt_root_patch)
+         ptr_patch=this%zwt_froot_patch)
+
+    this%ffr_sra_patch(begp:endp,1:nlevdecomp_full) = spval
+    call hist_addfld_decomp (fname='FFR_SRA_PATCH', units='proportion', type2d='levdcmp', &
+         avgflag='A', long_name='patch-level fine root biomass multiplier on fine root uptake of nutrients', &
+         ptr_patch=this%ffr_sra_patch)
+
+    this%ffr_n_patch(begp:endp,1:nlevdecomp_full) = spval
+    call hist_addfld_decomp (fname='FFR_N_PATCH', units='proportion', type2d='levdcmp', &
+         avgflag='A', long_name='patch-level Michaelis-Menten multiplier on fine root uptake of N', &
+         ptr_patch=this%ffr_n_patch)
+
+    this%ffr_p_patch(begp:endp,1:nlevdecomp_full) = spval
+    call hist_addfld_decomp (fname='FFR_P_PATCH', units='proportion', type2d='levdcmp', &
+         avgflag='A', long_name='patch-level Michaelis-Menten multiplier on fine root uptake of P', &
+         ptr_patch=this%ffr_p_patch)
+
+    this%ffr_tsoi_patch(begp:endp,1:nlevdecomp_full) = spval
+    call hist_addfld_decomp (fname='FFR_TSOI_PATCH', units='proportion', type2d='levdcmp', &
+         avgflag='A', long_name='patch-level soil temperature multiplier on nutrients uptake', &
+         ptr_patch=this%ffr_tsoi_patch)
+
+    this%ffr_swc_patch(begp:endp,1:nlevdecomp_full) = spval
+    call hist_addfld_decomp (fname='FFR_SWC_PATCH', units='proportion', type2d='levdcmp', &
+         avgflag='A', long_name='patch-level soil moisture multiplier on nutrients uptake', &
+         ptr_patch=this%ffr_swc_patch)
+
+    this%ffr_fpg_patch(begp:endp) = spval
+    call hist_addfld1d (fname='FFR_FPG_PATCH', units='proportion', &
+         avgflag='A', long_name='patch-level plant nutrient stress multiplier on N uptake', &
+         ptr_patch=this%ffr_fpg_patch)
+
+    this%ffr_fpg_p_patch(begp:endp) = spval
+    call hist_addfld1d (fname='FFR_FPG_P_PATCH', units='proportion', &
+         avgflag='A', long_name='patch-level plant nutrient stress multiplier on P uptake', &
+         ptr_patch=this%ffr_fpg_p_patch)
+
+    this%ffn_n_patch(begp:endp,1:nlevdecomp_full) = spval
+    call hist_addfld_decomp (fname='FFN_N_PATCH', units='proportion', type2d='levdcmp', &
+         avgflag='A', long_name='patch-level Michaelis-Menten multiplier on fungal uptake of N', &
+         ptr_patch=this%ffn_n_patch)
+
+    this%ffn_p_patch(begp:endp,1:nlevdecomp_full) = spval
+    call hist_addfld_decomp (fname='FFN_P_PATCH', units='proportion', type2d='levdcmp', &
+         avgflag='A', long_name='patch-level Michaelis-Menten multiplier on fungal uptake of P', &
+         ptr_patch=this%ffn_p_patch)
+
+    this%ffn_nsc_patch(begp:endp) = spval
+    call hist_addfld1d (fname='FFN_NSC_PATCH', units='proportion', &
+         avgflag='A', long_name='patch-level plant carbohydrate excess multiplier on fungal uptake of nutrients', &
+         ptr_patch=this%ffn_nsc_patch)
 
     this%annsum_counter_col(begc:endc) = spval
     call hist_addfld1d (fname='ANNSUM_COUNTER', units='s', &
          avgflag='A', long_name='seconds since last annual accumulator turnover', &
          ptr_col=this%annsum_counter_col, default='inactive')
+
+    this%annavg_zwt_col(begc:endc) = spval
+    call hist_addfld1d (fname='ANNAVG_ZWT_COL', units='m', &
+         avgflag='A', long_name='annual average of water table depth (positive as belowground)', &
+         ptr_col=this%annavg_zwt_col, default='inactive')
 
     this%annavg_t2m_col(begc:endc) = spval
     call hist_addfld1d (fname='CANNAVG_T2M', units='K', &
@@ -1065,6 +1122,8 @@ contains
        l = col_pp%landunit(c)
        if (lun_pp%ifspecial(l)) then
           this%annsum_counter_col (c) = spval
+          this%annavg_zwt_col     (c) = spval
+          this%tempsum_zwt_col    (c) = spval
           this%annavg_t2m_col     (c) = spval
           this%nfire_col          (c) = spval
           this%baf_crop_col       (c) = spval
@@ -1077,14 +1136,6 @@ contains
           this%fpi_p_col          (c) = spval
           this%fpg_p_col          (c) = spval
 
-          this%fpg_patch          (c) = spval
-          this%prev_fpg_patch     (c) = 1._r8
-          this%fpg_p_patch        (c) = spval
-          this%prev_fpg_p_patch   (c) = 1._r8
-          this%plant_nfungi_patch (c) = 1._r8
-          this%plant_pfungi_patch (c) = 1._r8
-          this%zwt_root_patch     (c) = 1._r8
-
           do j = 1,nlevdecomp_full
              this%fpi_vr_col(c,j) = spval
              this%fpi_p_vr_col(c,j) = spval
@@ -1093,7 +1144,9 @@ contains
        end if
 
        if (lun_pp%itype(l) == istsoil .or. lun_pp%itype(l) == istcrop) then
-          this%annsum_counter_col(c) = 0._r8   
+          this%annsum_counter_col(c) = 0._r8
+          this%annavg_zwt_col(c)     = 0._r8 
+          this%tempsum_zwt_col(c)    = 0._r8
           this%annavg_t2m_col(c)     = 280._r8 
 
           ! fire related variables 
@@ -1126,7 +1179,23 @@ contains
        l = veg_pp%landunit(p)
        this%rc14_atm_patch(p)              = c14ratio 
 
+       ! ifspecial = (ltype == istsoil .or. ltype == istcrop)
        if (lun_pp%ifspecial(l)) then
+          this%fpg_patch(p)                   = spval
+          this%fpg_p_patch(p)                 = spval
+          this%fungi_inhib_patch(p)           = spval
+          this%zwt_froot_patch(p)             = spval
+          this%ffr_sra_patch(p,:)             = spval
+          this%ffr_n_patch(p,:)               = spval
+          this%ffr_p_patch(p,:)               = spval
+          this%ffr_tsoi_patch(p,:)            = spval
+          this%ffr_swc_patch(p,:)             = spval
+          this%ffr_fpg_patch(p)               = spval
+          this%ffr_fpg_p_patch(p)             = spval
+          this%ffn_n_patch(p,:)               = spval
+          this%ffn_p_patch(p,:)               = spval
+          this%ffn_nsc_patch(p)               = spval
+
           this%annavg_t2m_patch  (p)          = spval
           this%tempavg_t2m_patch (p)          = spval
           this%dormant_flag_patch(p)          = spval
@@ -1161,8 +1230,6 @@ contains
           this%annmax_retransp_patch(p)       = spval
 
           this%r_mort_cal_patch(p)           = spval
-
- 
        end if
     end do
        
@@ -1211,13 +1278,10 @@ contains
           this%annmax_retransp_patch(p)       = 0._r8
 
           this%r_mort_cal_patch(p)           = 0._r8
-
-
        end if
     end do
 
     ! fire variables
-
     do c = bounds%begc,bounds%endc
        this%lfc2_col(c) = 0._r8
     end do
@@ -1455,35 +1519,65 @@ contains
          long_name='', units='', &
          interpinic_flag='interp', readvar=readvar, data=this%fpg_patch) 
 
-    call restartvar(ncid=ncid, flag=flag, varname='prev_fpg_patch', xtype=ncd_double,  &
-         dim1name='pft', &
-         long_name='', units='', &
-         interpinic_flag='interp', readvar=readvar, data=this%prev_fpg_patch)
-
     call restartvar(ncid=ncid, flag=flag, varname='fpg_p_patch', xtype=ncd_double,  &
          dim1name='pft', &
          long_name='', units='', &
          interpinic_flag='interp', readvar=readvar, data=this%fpg_p_patch) 
 
-    call restartvar(ncid=ncid, flag=flag, varname='prev_fpg_p_patch', xtype=ncd_double,  &
+    call restartvar(ncid=ncid, flag=flag, varname='fungi_inhib_patch', xtype=ncd_double,  &
          dim1name='pft', &
          long_name='', units='', &
-         interpinic_flag='interp', readvar=readvar, data=this%prev_fpg_p_patch)
+         interpinic_flag='interp', readvar=readvar, data=this%fungi_inhib_patch)
 
-    call restartvar(ncid=ncid, flag=flag, varname='plant_nfungi_patch', xtype=ncd_double,  &
+    call restartvar(ncid=ncid, flag=flag, varname='zwt_froot_patch', xtype=ncd_double,  &
          dim1name='pft', &
          long_name='', units='', &
-         interpinic_flag='interp', readvar=readvar, data=this%plant_nfungi_patch)
+         interpinic_flag='interp', readvar=readvar, data=this%zwt_froot_patch)
 
-    call restartvar(ncid=ncid, flag=flag, varname='plant_pfungi_patch', xtype=ncd_double,  &
-         dim1name='pft', &
+    call restartvar(ncid=ncid, flag=flag, varname='ffr_sra_patch', xtype=ncd_double,  &
+         dim1name='pft', dim2name='levdcmp', switchdim=.true., &
          long_name='', units='', &
-         interpinic_flag='interp', readvar=readvar, data=this%plant_pfungi_patch)
+         interpinic_flag='interp', readvar=readvar, data=this%ffr_sra_patch)
 
-    call restartvar(ncid=ncid, flag=flag, varname='zwt_root_patch', xtype=ncd_double,  &
-         dim1name='pft', &
+    call restartvar(ncid=ncid, flag=flag, varname='ffr_n_patch', xtype=ncd_double,  &
+         dim1name='pft', dim2name='levdcmp', switchdim=.true., &
          long_name='', units='', &
-         interpinic_flag='interp', readvar=readvar, data=this%zwt_root_patch)
+         interpinic_flag='interp', readvar=readvar, data=this%ffr_n_patch)
+
+    call restartvar(ncid=ncid, flag=flag, varname='ffr_p_patch', xtype=ncd_double,  &
+         dim1name='pft', dim2name='levdcmp', switchdim=.true., &
+         long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%ffr_p_patch)
+
+    call restartvar(ncid=ncid, flag=flag, varname='ffr_tsoi_patch', xtype=ncd_double,  &
+         dim1name='pft', dim2name='levdcmp', switchdim=.true., &
+         long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%ffr_tsoi_patch)
+
+    call restartvar(ncid=ncid, flag=flag, varname='ffr_swc_patch', xtype=ncd_double,  &
+         dim1name='pft', dim2name='levdcmp', switchdim=.true., &
+         long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%ffr_swc_patch)
+
+    call restartvar(ncid=ncid, flag=flag, varname='ffr_fpg_patch', xtype=ncd_double,  &
+         dim1name='pft', long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%ffr_fpg_patch)
+
+    call restartvar(ncid=ncid, flag=flag, varname='ffr_fpg_p_patch', xtype=ncd_double,  &
+         dim1name='pft', long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%ffr_fpg_p_patch)
+
+    call restartvar(ncid=ncid, flag=flag, varname='ffn_n_patch', xtype=ncd_double,  &
+         dim1name='pft', long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%ffn_n_patch)
+
+    call restartvar(ncid=ncid, flag=flag, varname='ffn_p_patch', xtype=ncd_double,  &
+         dim1name='pft', long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%ffn_p_patch)
+
+    call restartvar(ncid=ncid, flag=flag, varname='ffn_nsc_patch', xtype=ncd_double,  &
+         dim1name='pft', long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%ffn_nsc_patch)
 
     call restartvar(ncid=ncid, flag=flag, varname='annsum_counter', xtype=ncd_double,  &
          dim1name='column', &
@@ -1499,6 +1593,11 @@ contains
          dim1name='column', &
          long_name='', units='', &
          interpinic_flag='interp', readvar=readvar, data=this%lfc_col) 
+
+    call restartvar(ncid=ncid, flag=flag, varname='annavg_zwt_col', xtype=ncd_double,  &
+         dim1name='column', &
+         long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%annavg_zwt_col) 
 
     call restartvar(ncid=ncid, flag=flag, varname='cannavg_t2m', xtype=ncd_double,  &
          dim1name='column', &

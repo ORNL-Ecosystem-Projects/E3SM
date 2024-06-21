@@ -748,7 +748,7 @@ contains
                else
                  if (obs_zwt_forcing) then
                    g = col_pp%gridcell(c)
-           
+
                    qflx_lat_aqu(1) = ka_hu * (zwt_hu-(atm2lnd_vars%forc_zwt_not_downscaled_grc(g)+humhol_ht)) / 1.0_r8
                    qflx_lat_aqu(2) = ka_ho * (zwt_ho-atm2lnd_vars%forc_zwt_not_downscaled_grc(g)) / 1.0_r8
                  else
