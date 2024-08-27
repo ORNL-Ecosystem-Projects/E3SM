@@ -28,7 +28,6 @@ module NitrogenStateUpdate1Mod
   use elm_varctl             , only : nu_com
   use elm_varctl             , only : NFIX_PTASE_plant
   use decompMod              , only : bounds_type
-  use elm_varcon             , only : dzsoi_decomp
   use elm_varctl             , only : use_fates
   !
   implicit none

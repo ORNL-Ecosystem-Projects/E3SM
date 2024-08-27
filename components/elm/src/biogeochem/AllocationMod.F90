@@ -1222,8 +1222,6 @@ contains
             froot_ndemand_pot(p) = (1._r8 - fungi_inhib(p))*froot_ndemand_pot(p)
             froot_pdemand_pot(p) = (1._r8 - fungi_inhib(p))*froot_pdemand_pot(p)
 
-            !write (iulog, *) 'froot_pdemand_pot', p, froot_pdemand_pot(p), AllocParamsInst%vmax_froot_p(ivt(p)), ffr_sra(p,j), ffr_p(p,j), ffr_tsoi(p,j), ffr_swc(p,j), ffr_fpg_p(p)
-
             ! fungal potential uptake of mineral nutrients
 
             ! Assume no Michalis-Menten
@@ -1239,7 +1237,6 @@ contains
             else
                ffn_nsc(p) = AllocParamsInst%km_nsc*cpool(p) / (AllocParamsInst%km_nsc*cpool(p) + frootc(p) + leafc(p))
             end if
-            !write (iulog, *) 'ffn_nsc', AllocParamsInst%km_nsc, cpool(p), frootc(p), leafc(p)
 
             fungi_ndemand_pot(p) = 0._r8
             fungi_pdemand_pot(p) = 0._r8
@@ -1256,11 +1253,11 @@ contains
             do j = 1,col_pp%nlevbed(c)
                ! calculte the layer's total available organic N/P
                if ((ivt(p) == ndllf_dcd_brl_tree) .or. (ivt(p) == ndllf_evr_brl_tree)) then
-                   tot_decomp_npools = decomp_npools_vr(c,j,i_met_lit) + decomp_npools_vr(c,j,i_cel_lit) + decomp_npools_vr(c,j,i_lig_lit)
-                   tot_decomp_ppools = decomp_ppools_vr(c,j,i_met_lit) + decomp_ppools_vr(c,j,i_cel_lit) + decomp_ppools_vr(c,j,i_lig_lit)
+                   tot_decomp_npools = (decomp_npools_vr(c,j,i_met_lit) + decomp_npools_vr(c,j,i_cel_lit) + decomp_npools_vr(c,j,i_lig_lit)) * dzsoi_decomp(j)
+                   tot_decomp_ppools = (decomp_ppools_vr(c,j,i_met_lit) + decomp_ppools_vr(c,j,i_cel_lit) + decomp_ppools_vr(c,j,i_lig_lit)) * dzsoi_decomp(j)
                else
-                   tot_decomp_npools = decomp_npools_vr(c,j,i_met_lit) + decomp_npools_vr(c,j,i_cel_lit)
-                   tot_decomp_ppools = decomp_ppools_vr(c,j,i_met_lit) + decomp_ppools_vr(c,j,i_cel_lit)
+                   tot_decomp_npools = (decomp_npools_vr(c,j,i_met_lit) + decomp_npools_vr(c,j,i_cel_lit)) * dzsoi_decomp(j)
+                   tot_decomp_ppools = (decomp_ppools_vr(c,j,i_met_lit) + decomp_ppools_vr(c,j,i_cel_lit)) * dzsoi_decomp(j)
                end if
 
                ! calculate the layer's total fungal uptake
@@ -1277,8 +1274,8 @@ contains
                   frac_n_i_cel_lit = 0._r8
                   frac_n_i_lig_lit = 0._r8
                else
-                  frac_n_i_met_lit = decomp_npools_vr(c,j,i_met_lit) / tot_decomp_npools
-                  frac_n_i_cel_lit = decomp_npools_vr(c,j,i_cel_lit) / tot_decomp_npools
+                  frac_n_i_met_lit = decomp_npools_vr(c,j,i_met_lit) * dzsoi_decomp(j) / tot_decomp_npools
+                  frac_n_i_cel_lit = decomp_npools_vr(c,j,i_cel_lit) * dzsoi_decomp(j) / tot_decomp_npools
                   frac_n_i_lig_lit = max(1._r8 - frac_n_i_met_lit - frac_n_i_cel_lit, 0._r8)
                end if
 
@@ -1287,8 +1284,8 @@ contains
                   frac_p_i_cel_lit = 0._r8
                   frac_p_i_lig_lit = 0._r8
                else
-                  frac_p_i_met_lit = decomp_ppools_vr(c,j,i_met_lit) / tot_decomp_ppools
-                  frac_p_i_cel_lit = decomp_ppools_vr(c,j,i_cel_lit) / tot_decomp_ppools
+                  frac_p_i_met_lit = decomp_ppools_vr(c,j,i_met_lit) * dzsoi_decomp(j) / tot_decomp_ppools
+                  frac_p_i_cel_lit = decomp_ppools_vr(c,j,i_cel_lit) * dzsoi_decomp(j) / tot_decomp_ppools
                   frac_p_i_lig_lit = max(1._r8 - frac_p_i_met_lit - frac_p_i_cel_lit, 0._r8)
                end if
 
@@ -1309,28 +1306,6 @@ contains
                end if
             end do
 
-            ! pool-wise vertical profile of uptake
-            do k = 1,ndecomp_pools
-               son_uptake_vert(c,k) = 0._r8
-               sop_uptake_vert(c,k) = 0._r8
-               do j = 1,nlevdecomp
-                  son_uptake_vert(c,k) = son_uptake_vert(c,k) + decomp_npools_vr(c,j,k)
-                  sop_uptake_vert(c,k) = sop_uptake_vert(c,k) + decomp_ppools_vr(c,j,k)
-               end do
-               do j = 1,nlevdecomp
-                  if (son_uptake_vert(c,k) > 0._r8) then
-                     son_uptake_prof(c,j,k) = decomp_npools_vr(c,j,k) / son_uptake_vert(c,k)
-                  else
-                     son_uptake_prof(c,j,k) = 0._r8
-                  end if
-                  if (sop_uptake_vert(c,k) > 0._r8) then
-                     sop_uptake_prof(c,j,k) = decomp_ppools_vr(c,j,k) / sop_uptake_vert(c,k)
-                  else
-                     sop_uptake_prof(c,j,k) = 0._r8
-                  end if
-               end do
-            end do
-
             ! sum up the organic nutrient uptake
             fungi_som_to_npool(p) = 0._r8
             fungi_som_to_ppool(p) = 0._r8
@@ -1344,7 +1319,6 @@ contains
             cpool_to_fungi_p = (fungi_pdemand_pot(p)+fungi_som_to_ppool(p)) * AllocParamsInst%fungi_cost_p
 
             if (cpool_to_fungi_n > 0.5_r8*availc(p)) then
-               ! write (iulog, *) 'activated', plant_ndemand(p), 0.5_r8*availc(p)/cpool_to_fungi_n, fungi_ndemand_pot(p), 0.5_r8*availc(p)/cpool_to_fungi_n*fungi_ndemand_pot(p), fungi_som_to_npool(p), 0.5_r8*availc(p)/cpool_to_fungi_n*fungi_som_to_npool(p)
                ! reduce fungal N uptake
                fungi_ndemand_pot(p) = 0.5_r8*availc(p)/cpool_to_fungi_n*fungi_ndemand_pot(p)
                do k = 1,ndecomp_pools
@@ -1371,9 +1345,6 @@ contains
             plant_ndemand_pot(p) = fungi_ndemand_pot(p) + froot_ndemand_pot(p)
             plant_pdemand_pot(p) = fungi_pdemand_pot(p) + froot_pdemand_pot(p)
 
-            !write (iulog, *) 'ndemand', p, froot_ndemand_pot(p), fungi_ndemand_pot(p), fungi_som_ndemand(p,i_met_lit), fungi_som_ndemand(p,i_cel_lit), fungi_som_ndemand(p,i_lig_lit), fungi_som_to_npool(p)
-            !write (iulog, *) 'pdemand', p, froot_pdemand_pot(p), fungi_pdemand_pot(p), fungi_som_pdemand(p,i_met_lit), fungi_som_pdemand(p,i_cel_lit), fungi_som_pdemand(p,i_lig_lit), fungi_som_to_ppool(p)
-
          else
             plant_ndemand_pot(p) = plant_ndemand(p)
             plant_pdemand_pot(p) = plant_pdemand(p)
@@ -1386,8 +1357,6 @@ contains
             fungi_som_to_npool(p) = 0._r8 
             fungi_som_to_ppool(p) = 0._r8
             cpool_to_fungi(p) = 0._r8
-            son_uptake_prof(c,1:nlevdecomp,1:ndecomp_pools) = 0._r8
-            sop_uptake_prof(c,1:nlevdecomp,1:ndecomp_pools) = 0._r8
          end if
 #endif
       end do ! end pft loop
@@ -1445,6 +1414,32 @@ contains
       endif
 
 #ifdef HUM_HOL
+      ! pool-wise vertical profile of uptake
+      do fc=1, num_soilc
+         c = filter_soilc(fc)
+         do k = 1,ndecomp_pools
+            son_uptake_vert(c,k) = 0._r8
+            sop_uptake_vert(c,k) = 0._r8
+            do j = 1,nlevdecomp
+               son_uptake_vert(c,k) = son_uptake_vert(c,k) + decomp_npools_vr(c,j,k) * dzsoi_decomp(j)
+               sop_uptake_vert(c,k) = sop_uptake_vert(c,k) + decomp_ppools_vr(c,j,k) * dzsoi_decomp(j)
+            end do
+
+            do j = 1,nlevdecomp
+               if (son_uptake_vert(c,k) > 0._r8) then
+                  son_uptake_prof(c,j,k) = decomp_npools_vr(c,j,k) / son_uptake_vert(c,k)
+               else
+                  son_uptake_prof(c,j,k) = 0._r8
+               end if
+               if (sop_uptake_vert(c,k) > 0._r8) then
+                  sop_uptake_prof(c,j,k) = decomp_ppools_vr(c,j,k) / sop_uptake_vert(c,k)
+               else
+                  sop_uptake_prof(c,j,k) = 0._r8
+               end if
+            end do
+         end do
+      end do
+
       do j = 1, nlevdecomp
          do fc=1, num_soilc
             c = filter_soilc(fc)
@@ -2651,9 +2646,6 @@ contains
                         cpool_to_fungi(p) = max(cpool_to_fungi_n, cpool_to_fungi_p)
                      end if
 
-                     ! write (iulog, *) 'cpool_to_fungi_n', p, cpool_to_fungi(p), fpg(c), fungi_ndemand_pot(p), fungi_som_to_npool(p), AllocParamsInst%fungi_cost_n
-                     ! write (iulog, *) 'cpool_to_fungi_p', p, cpool_to_fungi(p), fpg_p(c), fungi_pdemand_pot(p), fungi_som_to_ppool(p), AllocParamsInst%fungi_cost_p
-
                      ! calculate the PFT-level ratio of satisfied uptake to growth demand
                      if (plant_ndemand(p) == 0._r8) then
                         fpg_patch(p) = 1._r8
@@ -2680,8 +2672,6 @@ contains
                   ffr_fpg(p) = AllocParamsInst%alpha_fpg / (fpg_patch(p)**2._r8 + AllocParamsInst%alpha_fpg - 1._r8)
                   ffr_fpg_p(p) = AllocParamsInst%alpha_fpg / (fpg_p_patch(p)**2._r8 + AllocParamsInst%alpha_fpg - 1._r8)
 
-                  ! write (iulog, *) 'ffr_fpg', p, fpg_patch(p), plant_ndemand(p), plant_n_uptake_flux(c), AllocParamsInst%alpha_fpg
-                  ! write (iulog, *) 'ffr_fpg_p', p, fpg_p_patch(p), plant_pdemand(p), plant_p_uptake_flux(c), AllocParamsInst%alpha_fpg
 #else
                   plant_n_uptake_flux(c) = plant_n_uptake_flux(c) + plant_ndemand(p) * fpg(c)*veg_pp%wtcol(p)
                   plant_p_uptake_flux(c) = plant_p_uptake_flux(c) + plant_pdemand(p) * fpg_p(c)*veg_pp%wtcol(p)
@@ -2830,9 +2820,6 @@ contains
 #endif
 
              end if
-
-             !write (iulog, *) 'fpg', sminn_to_npool(p), plant_ndemand(p), fpg_patch(p), plant_nalloc(p), retransn_to_npool(p), fungi_som_to_npool(p)
-             !write (iulog, *) 'fpg_p', sminp_to_ppool(p), plant_pdemand(p), fpg_p_patch(p), plant_palloc(p), retransp_to_ppool(p), fungi_som_to_ppool(p)
 
              ! calculate the associated carbon allocation, and the excess
              ! carbon flux that must be accounted for through downregulation
@@ -3608,16 +3595,15 @@ contains
 
           if(  carbonnitrogen_only  )then
 
-          temp_sminp_to_plant(bounds%begc:bounds%endc) = sminp_to_plant(bounds%begc:bounds%endc)
+            temp_sminp_to_plant(bounds%begc:bounds%endc) = sminp_to_plant(bounds%begc:bounds%endc)
 
             call p2c(bounds,num_soilc,filter_soilc, &
                 sminp_to_ppool(bounds%begp:bounds%endp), &
                 sminp_to_plant(bounds%begc:bounds%endc))
 
-           do j = 1, nlevdecomp
-               do fc=1,num_soilc
-                  c = filter_soilc(fc)
-
+            do j = 1, nlevdecomp
+                  do fc=1,num_soilc
+                     c = filter_soilc(fc)
                   if ( temp_sminp_to_plant(c) > 0._r8) then
                      sminp_to_plant_vr(c,j) =  sminp_to_plant_vr(c,j) * ( sminp_to_plant(c)/temp_sminp_to_plant(c) )
                   else
@@ -3625,8 +3611,30 @@ contains
                   endif
                end do
             end do
-          end if  ! carbonnitrogen
 
+#ifdef HUM_HOL
+            temp_sminn_to_plant(bounds%begc:bounds%endc) = sminn_to_plant(bounds%begc:bounds%endc)
+
+            call p2c(bounds,num_soilc,filter_soilc, &
+                sminn_to_npool(bounds%begp:bounds%endp), &
+                sminn_to_plant(bounds%begc:bounds%endc))
+
+            do j = 1, nlevdecomp
+                  do fc=1,num_soilc
+                     c = filter_soilc(fc)
+                  if ( temp_sminn_to_plant(c) > 0._r8) then
+                     sminn_to_plant_vr(c,j)    = sminn_to_plant_vr(c,j) * ( sminn_to_plant(c)/temp_sminn_to_plant(c) )
+                     smin_nh4_to_plant_vr(c,j) = smin_nh4_to_plant_vr(c,j) * ( sminn_to_plant(c)/temp_sminn_to_plant(c) )
+                     smin_no3_to_plant_vr(c,j) = smin_no3_to_plant_vr(c,j) * ( sminn_to_plant(c)/temp_sminn_to_plant(c) )
+                  else
+                     sminn_to_plant_vr(c,j)    = 0._r8
+                     smin_nh4_to_plant_vr(c,j) = 0._r8
+                     smin_no3_to_plant_vr(c,j) = 0._r8
+                  endif
+               end do
+            end do
+#endif
+          end if  ! carbonnitrogen
       end if ! nu_com .eq. RD
 
 
@@ -4360,7 +4368,7 @@ contains
           actual_immob_p_vr(j) = potential_immob_p_vr(j)
           sminp_to_plant_vr(j) =  col_plant_pdemand_vr(j)
           supplement_to_sminp_vr(j) = sum_pdemand - (solutionp_vr(j)/dt)
- 
+
        else
           ! P availability can not satisfy the sum of immobilization and
           ! plant growth demands, so these two demands compete for

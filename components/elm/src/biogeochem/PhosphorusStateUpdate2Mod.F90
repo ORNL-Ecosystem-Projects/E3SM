@@ -61,22 +61,23 @@ contains
 
       ! column-level phosporus fluxes from gap-phase mortality
       if (.not. is_active_betr_bgc) then
-      do j = 1, nlevdecomp
-         do fc = 1,num_soilc
-            c = filter_soilc(fc)
+        do j = 1, nlevdecomp
+          do fc = 1,num_soilc
+              c = filter_soilc(fc)
 
-            col_ps%decomp_ppools_vr(c,j,i_met_lit) = &
-                 col_ps%decomp_ppools_vr(c,j,i_met_lit) + col_pf%gap_mortality_p_to_litr_met_p(c,j) * dt
-            col_ps%decomp_ppools_vr(c,j,i_cel_lit) = &
-                 col_ps%decomp_ppools_vr(c,j,i_cel_lit) + col_pf%gap_mortality_p_to_litr_cel_p(c,j) * dt
-            col_ps%decomp_ppools_vr(c,j,i_lig_lit) = &
-                 col_ps%decomp_ppools_vr(c,j,i_lig_lit) + col_pf%gap_mortality_p_to_litr_lig_p(c,j) * dt
-            col_ps%decomp_ppools_vr(c,j,i_cwd)     = &
-                 col_ps%decomp_ppools_vr(c,j,i_cwd)     + col_pf%gap_mortality_p_to_cwdp(c,j)       * dt
-         end do
-      end do
+              col_ps%decomp_ppools_vr(c,j,i_met_lit) = &
+                  col_ps%decomp_ppools_vr(c,j,i_met_lit) + col_pf%gap_mortality_p_to_litr_met_p(c,j) * dt
+              col_ps%decomp_ppools_vr(c,j,i_cel_lit) = &
+                  col_ps%decomp_ppools_vr(c,j,i_cel_lit) + col_pf%gap_mortality_p_to_litr_cel_p(c,j) * dt
+              col_ps%decomp_ppools_vr(c,j,i_lig_lit) = &
+                  col_ps%decomp_ppools_vr(c,j,i_lig_lit) + col_pf%gap_mortality_p_to_litr_lig_p(c,j) * dt
+              col_ps%decomp_ppools_vr(c,j,i_cwd)     = &
+                  col_ps%decomp_ppools_vr(c,j,i_cwd)     + col_pf%gap_mortality_p_to_cwdp(c,j)       * dt
+          end do
+        end do
       endif ! if (.not.is_active_betr_bgc))
       !------------------------------------------------------------------
+
 
       ! patch -level phosporus fluxes from gap-phase mortality
 

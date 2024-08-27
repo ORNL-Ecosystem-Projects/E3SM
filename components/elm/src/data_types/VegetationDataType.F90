@@ -9535,6 +9535,11 @@ module VegetationDataType
          avgflag='A', long_name='total allocated N flux', &
          ptr_patch=this%plant_nalloc, default='inactive')
 
+    this%supplement_to_plantn(begp:endp) = 0.d0
+    call hist_addfld1d (fname='SUPPLEMENT_TO_PLANTN', units='gN/m^2/s', &
+         avgflag='A', long_name='N addition to satisfy plant demand during ad-spinup', &
+         ptr_patch=this%supplement_to_plantn, default='active')
+
     this%gap_nloss_litter(begp:endp) = spval
     call hist_addfld1d (fname='GAP_NLOSS_LITTER', units='gN/m^2/s', &
          avgflag='A', long_name='total nloss from veg to litter due to gap mortality', &
@@ -10712,6 +10717,10 @@ module VegetationDataType
          avgflag='A', long_name='total allocated P flux', &
          ptr_patch=this%plant_palloc, default='active')
 
+    this%supplement_to_plantp(begp:endp) = 0.d0
+    call hist_addfld1d (fname='SUPPLEMENT_TO_PLANTP', units='gP/m^2/s', &
+         avgflag='A', long_name='P addition to satisfy plant demand during ad-spinup', &
+         ptr_patch=this%supplement_to_plantp, default='active')
 
     !-----------------------------------------------------------------------
     ! set cold-start initial values for select members of veg_pf

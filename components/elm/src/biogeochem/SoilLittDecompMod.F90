@@ -228,6 +228,7 @@ contains
                      ! that fungi outcompete saprotrophs in uptaking litter nitrogen
                      cn_decomp_pools(c,j,l) = decomp_cpools_vr(c,j,l) / (decomp_npools_vr(c,j,l) - som_n_to_fungi_vr(c,j,l)*dtime)
                   end if
+
 #else
                   if ( decomp_npools_vr(c,j,l) > 0._r8 ) then
                      cn_decomp_pools(c,j,l) = decomp_cpools_vr(c,j,l) / decomp_npools_vr(c,j,l)

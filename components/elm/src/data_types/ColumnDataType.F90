@@ -4364,7 +4364,7 @@ contains
          this%totDON(c) = dot_sum(this%DON_vr(c,1:nlevdecomp),dzsoi_decomp(1:nlevdecomp)) 
       enddo
      endif
-     
+
     ! vertically integrate each of the decomposing N pools
     do l = 1, ndecomp_pools
        do fc = 1,num_soilc
@@ -4376,7 +4376,7 @@ contains
              c = filter_soilc(fc)
              this%decomp_npools(c,l) = &
                   this%decomp_npools(c,l) + &
-                  this%decomp_npools_vr(c,j,l) * dzsoi_decomp(j)
+                  this%decomp_npools_vr(c,j,l) * dzsoi_decomp(j)            
           end do
        end do
     end do
@@ -10068,7 +10068,10 @@ contains
                   this%gap_mortality_n_to_litr_lig_n(c,j)* dzsoi_decomp(j) + &
                   this%m_n_to_litr_met_fire(c,j)* dzsoi_decomp(j) + &
                   this%m_n_to_litr_cel_fire(c,j)* dzsoi_decomp(j) + &
-                  this%m_n_to_litr_lig_fire(c,j)* dzsoi_decomp(j)
+                  this%m_n_to_litr_lig_fire(c,j)* dzsoi_decomp(j) - &
+                  this%som_n_to_fungi_vr(c,j,i_met_lit)* dzsoi_decomp(j) - & 
+                  this%som_n_to_fungi_vr(c,j,i_cel_lit)* dzsoi_decomp(j) - & 
+                  this%som_n_to_fungi_vr(c,j,i_lig_lit)* dzsoi_decomp(j)
              this%plant_to_cwd_nflux(c) = &
                   this%plant_to_cwd_nflux(c) + &
                   this%gap_mortality_n_to_cwdn(c,j)* dzsoi_decomp(j) + &
@@ -11686,7 +11689,10 @@ contains
                   this%gap_mortality_p_to_litr_lig_p(c,j)* dzsoi_decomp(j) + &
                   this%m_p_to_litr_met_fire(c,j)* dzsoi_decomp(j) + &
                   this%m_p_to_litr_cel_fire(c,j)* dzsoi_decomp(j) + &
-                  this%m_p_to_litr_lig_fire(c,j)* dzsoi_decomp(j)
+                  this%m_p_to_litr_lig_fire(c,j)* dzsoi_decomp(j) - &
+                  this%som_p_to_fungi_vr(c,j,i_met_lit)* dzsoi_decomp(j) - & 
+                  this%som_p_to_fungi_vr(c,j,i_cel_lit)* dzsoi_decomp(j) - & 
+                  this%som_p_to_fungi_vr(c,j,i_lig_lit)* dzsoi_decomp(j)
              this%plant_to_cwd_pflux(c) = &
                   this%plant_to_cwd_pflux(c) + &
                   this%gap_mortality_p_to_cwdp(c,j)* dzsoi_decomp(j) + &

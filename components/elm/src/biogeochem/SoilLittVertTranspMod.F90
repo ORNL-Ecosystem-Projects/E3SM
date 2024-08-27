@@ -159,7 +159,6 @@ contains
     real(r8) :: spinup_term                   ! spinup accelerated decomposition factor, used to accelerate transport as well
     real(r8) :: epsilon                       ! small number
 
-
     !-----------------------------------------------------------------------
 
     ! Set statement functions
@@ -255,6 +254,7 @@ contains
             conc_ptr          => col_ns%decomp_npools_vr
             source            => col_nf%decomp_npools_sourcesink
             trcr_tendency_ptr => col_nf%decomp_npools_transport_tendency
+
          case (3)  ! P
             conc_ptr          => col_ps%decomp_ppools_vr
             source            => col_pf%decomp_ppools_sourcesink
