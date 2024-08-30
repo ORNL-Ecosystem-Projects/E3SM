@@ -557,7 +557,7 @@ contains
             write(iulog,*)'DON                   = ',col_ns%totDON(c)
             write(iulog,*)'DON_runoff            = ',col_nf%DON_runoff(c)*dt
          endif
-         !call endrun(msg=errMsg(__FILE__, __LINE__))
+         call endrun(msg=errMsg(__FILE__, __LINE__))
 #endif
 
       end if
@@ -755,8 +755,11 @@ contains
             err_found = .true.
             err_index = c
          end if
-      end do ! end of columns loop
 
+         !write (iulog, *) c, 'col_pinputs', col_pinputs(c)*dt, primp_to_labilep(c)*dt, supplement_to_sminp(c)*dt
+         !write (iulog, *) c, 'col_poutputs', col_poutputs(c)*dt, secondp_to_occlp(c)*dt, sminp_leached(c)*dt, col_fire_ploss(c)*dt, col_prod1p_loss(c)*dt, col_prod10p_loss(c)*dt, col_prod100p_loss(c)*dt, - som_p_leached(c)*dt
+
+      end do ! end of columns loop
 
       if (err_found .and. nstep>1) then
 #ifndef _OPENACC
@@ -783,7 +786,7 @@ contains
             write(iulog,*)'SOP erosion = ',som_p_yield(c)*dt
             write(iulog,*)'SIP erosion = ',(labilep_yield(c)+secondp_yield(c)+occlp_yield(c)+primp_yield(c))*dt
          end if
-         !call endrun(msg=errMsg(__FILE__, __LINE__))
+         call endrun(msg=errMsg(__FILE__, __LINE__))
 #endif
       end if
 

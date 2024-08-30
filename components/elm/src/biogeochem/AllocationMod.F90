@@ -1267,7 +1267,7 @@ contains
                tot_fungi_som_pdemand = min(fungi_inhib(p)*frootc(p)*rootfr(p,j)* & 
                   AllocParamsInst%vmax_fungi_sop(ivt(p))* ffr_tsoi(p,j)*ffr_swc(p,j)* & 
                   ffr_fpg_p(p)*ffn_nsc(p), 0.08_r8/dt*tot_decomp_ppools)
-               
+
                ! distribute to the different pools
                if (tot_decomp_npools == 0._r8) then
                   frac_n_i_met_lit = 0._r8
@@ -1303,6 +1303,9 @@ contains
                      tot_fungi_som_ndemand * frac_n_i_lig_lit
                   fungi_som_pdemand(p,i_lig_lit) = fungi_som_pdemand(p,i_lig_lit) + & 
                      tot_fungi_som_pdemand * frac_p_i_lig_lit
+               else
+                  fungi_som_ndemand(p,i_lig_lit) = 0._r8
+                  fungi_som_pdemand(p,i_lig_lit) = 0._r8
                end if
             end do
 
@@ -1333,7 +1336,7 @@ contains
                do k = 1,ndecomp_pools
                   fungi_som_pdemand(p,k) = 0.5_r8*availc(p)/cpool_to_fungi_p*fungi_som_pdemand(p,k)
                end do
-               fungi_som_to_ppool(p) = 0.5_r8*availc(p)/cpool_to_fungi_n*fungi_som_to_ppool(p)
+               fungi_som_to_ppool(p) = 0.5_r8*availc(p)/cpool_to_fungi_p*fungi_som_to_ppool(p)
             end if
 
             ! reduce plant mineral nutrient demand by direct fungi uptake

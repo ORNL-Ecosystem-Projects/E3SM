@@ -5589,7 +5589,7 @@ contains
            this%occlp(c) + &
            this%totprodp(c) + &
            this%totvegp(c)
-
+      
       ! total column phosphorus, including pft (TOTCOLP)
       this%totcolp(c) = &
            this%totpftp(c) + &
