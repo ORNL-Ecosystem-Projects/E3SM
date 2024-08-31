@@ -5060,8 +5060,6 @@ module VegetationDataType
            this%dispvegp(p) + &
            this%storvegp(p)
 
-      ! write (iulog, *) 'totvegp', p, this%totvegp(p), this%leafp(p), this%frootp(p), this%livestemp(p), this%deadstemp(p), this%livecrootp(p), this%deadcrootp(p), this%leafp_storage(p), this%frootp_storage(p), this%livestemp_storage(p), this%deadstemp_storage(p), this%livecrootp_storage(p), this%deadcrootp_storage(p), this%leafp_xfer(p), this%frootp_xfer(p), this%livestemp_xfer(p), this%deadstemp_xfer(p), this%livecrootp_xfer(p), this%deadcrootp_xfer(p), this%ppool(p), this%retransp(p)
-
       ! total pft-level carbon (add pft_ntrunc)
       this%totpftp(p) = &
            this%totvegp(p) + &

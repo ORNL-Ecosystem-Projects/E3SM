@@ -1211,6 +1211,8 @@ contains
                else
                   ffr_swc(p,j) = 1._r8 - 0.5_r8 * ((h2osoi_vol(c,j) - AllocParamsInst%swc_opt)/(1._r8 - AllocParamsInst%swc_opt))
                end if
+               ! Need to limit, because sometimes VWC is > 1, causing negative ffr_swc
+               ffr_swc(p,j) = max(min(ffr_swc(p,j), 1._r8), 0._r8)
             end do
 
             froot_ndemand_pot(p) = 0._r8
