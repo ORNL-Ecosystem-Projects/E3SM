@@ -127,8 +127,6 @@ contains
        end if
     end do
 
-    ! write (iulog, *) 'annavg_zwt_col', annavg_zwt_col(2)
-
   end associate
 
  end subroutine AnnualUpdate

@@ -97,8 +97,8 @@ module AllocationMod
      real(r8), pointer :: zwt_fungi_e => null() ! sensitivity of fungal inhibition to soil P concentration
      real(r8), pointer :: vmax_fungi_din(:) => null() ! (gN g-1 s-1) maximum N uptake rate per unit biomass of fungi-colonized fine root
      real(r8), pointer :: vmax_fungi_dip(:) => null() ! (gP g-1 s-1) maximum P uptake rate per unit biomass of fungi-colonized fine root
-     real(r8), pointer :: km_fungi_din => null() ! (gN m-3) half saturation point for N uptake rate by fungi-colonized fine root
-     real(r8), pointer :: km_fungi_dip => null() ! (gP m-3) half saturation point for P uptake rate by fungi-colonized fine root
+     !real(r8), pointer :: km_fungi_din => null() ! (gN m-3) half saturation point for N uptake rate by fungi-colonized fine root
+     !real(r8), pointer :: km_fungi_dip => null() ! (gP m-3) half saturation point for P uptake rate by fungi-colonized fine root
      real(r8), pointer :: km_nsc => null() ! half saturation parameter for plant carbohydrate excess
      real(r8), pointer :: vmax_fungi_son(:) => null() ! (gN gC-1 s-1) maximum fungal organic nutrient uptake rate per unit available excess plant nonstructural carbon
      real(r8), pointer :: vmax_fungi_sop(:) => null() ! (gP gC-1 s-1) maximum fungal organic nutrient uptake rate per unit available excess plant nonstructural carbon
@@ -260,8 +260,8 @@ contains
     allocate(AllocParamsInst%zwt_fungi_e)
     allocate(AllocParamsInst%vmax_fungi_din(0:npft))
     allocate(AllocParamsInst%vmax_fungi_dip(0:npft))
-    allocate(AllocParamsInst%km_fungi_din)
-    allocate(AllocParamsInst%km_fungi_dip)
+    !allocate(AllocParamsInst%km_fungi_din)
+    !allocate(AllocParamsInst%km_fungi_dip)
     allocate(AllocParamsInst%km_nsc)
     allocate(AllocParamsInst%vmax_fungi_son(0:npft))
     allocate(AllocParamsInst%vmax_fungi_sop(0:npft))
@@ -336,13 +336,13 @@ contains
     call ncd_io(varname=trim(tString),data=AllocParamsInst%vmax_fungi_dip, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
-    tString='km_fungi_din'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%km_fungi_din, flag='read', ncid=ncid, readvar=readv)
-    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    !tString='km_fungi_din'
+    !call ncd_io(varname=trim(tString),data=AllocParamsInst%km_fungi_din, flag='read', ncid=ncid, readvar=readv)
+    !if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
-    tString='km_fungi_dip'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%km_fungi_dip, flag='read', ncid=ncid, readvar=readv)
-    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    !tString='km_fungi_dip'
+    !call ncd_io(varname=trim(tString),data=AllocParamsInst%km_fungi_dip, flag='read', ncid=ncid, readvar=readv)
+    !if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
     tString='km_nsc'
     call ncd_io(varname=trim(tString),data=AllocParamsInst%km_nsc, flag='read', ncid=ncid, readvar=readv)
@@ -772,7 +772,7 @@ contains
 #endif
          )
 
-     ! update the annual water table depth accumulator
+     ! update the annual water table depth accumulator; both are relative to hollow surface
 #ifdef HUM_HOL
      tempsum_zwt_col(1) = tempsum_zwt_col(1) + (0.15_r8 - zwt(1))*dt
      tempsum_zwt_col(2) = tempsum_zwt_col(2) + (h2osfc(2)/1000._r8 - zwt(2))*dt
@@ -1069,7 +1069,7 @@ contains
          ! Murphy, M. T., & Moore, T. R. (2010). Linking root production to aboveground plant characteristics and water table in a temperate bog. Plant and Soil, 336(1), 219–231. https://doi.org/10.1007/s11104-010-0468-1
          if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
             ! always use hollow's relative water table height
-            zwt_froot(p) = 10**(- AllocParamsInst%zwt_froot_a(ivt(p))*annavg_zwt_col(2))
+            zwt_froot(p) = 10**(- AllocParamsInst%zwt_froot_a(ivt(p))*annavg_zwt_col(c))
          else
             zwt_froot(p) = 1._r8
          end if
@@ -1185,7 +1185,7 @@ contains
             end do
 
             ! always use hollow's water table height for fungal inhibition
-            fungi_inhib(p) = exp(AllocParamsInst%zwt_fungi_a(ivt(p))*annavg_zwt_col(2) + &
+            fungi_inhib(p) = exp(AllocParamsInst%zwt_fungi_a(ivt(p))*annavg_zwt_col(c) + &
                                  AllocParamsInst%zwt_fungi_b(ivt(p)))
             if (carbonnitrogen_only) then
                fungi_inhib(p) = min(1._r8, fungi_inhib(p)*(AllocParamsInst%zwt_fungi_c + AllocParamsInst%zwt_fungi_d*nu_fungi))
@@ -1243,8 +1243,8 @@ contains
             fungi_ndemand_pot(p) = 0._r8
             fungi_pdemand_pot(p) = 0._r8
             do j = 1,col_pp%nlevbed(c)
-               fungi_ndemand_pot(p) = fungi_ndemand_pot(p) + AllocParamsInst%vmax_fungi_din(ivt(p))*frootc(p)*rootfr(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg(p)*ffn_nsc(p) ! ffn_n(p,j)
-               fungi_pdemand_pot(p) = fungi_pdemand_pot(p) + AllocParamsInst%vmax_fungi_dip(ivt(p))*frootc(p)*rootfr(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg_p(p)*ffn_nsc(p) ! ffn_p(p,j)
+               fungi_ndemand_pot(p) = fungi_ndemand_pot(p) + AllocParamsInst%vmax_fungi_din(ivt(p))*frootc(p)*rootfr(p,j)*ffr_n(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg(p)*ffn_nsc(p)
+               fungi_pdemand_pot(p) = fungi_pdemand_pot(p) + AllocParamsInst%vmax_fungi_dip(ivt(p))*frootc(p)*rootfr(p,j)*ffr_p(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg_p(p)*ffn_nsc(p)
             end do
             fungi_ndemand_pot(p) = fungi_inhib(p)*fungi_ndemand_pot(p)
             fungi_pdemand_pot(p) = fungi_inhib(p)*fungi_pdemand_pot(p)
