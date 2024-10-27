@@ -108,6 +108,10 @@ module CNStateType
      real(r8) , pointer :: annavg_t2m_col              (:)     ! col annual average of 2m air temperature, averaged from pft-level (K)
      real(r8) , pointer :: scalaravg_col               (:,:)   ! column average scalar for decompostion (for ad_spinup)
      real(r8) , pointer :: annsum_counter_col          (:)     ! col seconds since last annual accumulator turnover
+     real(r8) , pointer :: tempavg_nu_fungi            (:)     ! patch annual average of plant available N (g m-3)
+     real(r8) , pointer :: annavg_nu_fungi             (:)     ! patch annual average of plant available N (g m-3)
+     real(r8) , pointer :: tempavg_pu_fungi            (:)     ! patch annual average of plant available N (g m-3)
+     real(r8) , pointer :: annavg_pu_fungi             (:)     ! patch annual average of plant available N (g m-3)
 
      ! Fire
      real(r8) , pointer :: nfire_col                   (:)     ! col fire counts (count/km2/sec), valid only in Reg. C
@@ -314,6 +318,10 @@ contains
     allocate(this%annavg_t2m_col      (begc:endc))                   ; this%annavg_t2m_col      (:)   = spval
     allocate(this%scalaravg_col       (begc:endc,1:nlevdecomp_full)) ; this%scalaravg_col       (:,:) = spval
     allocate(this%annavg_t2m_patch    (begp:endp))                   ; this%annavg_t2m_patch    (:)   = spval
+    allocate(this%tempavg_nu_fungi    (begp:endp))                   ; this%tempavg_nu_fungi      (:)   = spval
+    allocate(this%annavg_nu_fungi     (begp:endp))                   ; this%annavg_nu_fungi      (:)   = spval
+    allocate(this%tempavg_pu_fungi    (begp:endp))                   ; this%tempavg_pu_fungi      (:)   = spval
+    allocate(this%annavg_pu_fungi     (begp:endp))                   ; this%annavg_pu_fungi      (:)   = spval
 
     allocate(this%nfire_col           (begc:endc))                   ; this%nfire_col           (:)   = spval
     allocate(this%fsr_col             (begc:endc))                   ; this%fsr_col             (:)   = spval
@@ -600,6 +608,16 @@ contains
     call hist_addfld1d (fname='CANNAVG_T2M', units='K', &
          avgflag='A', long_name='annual average of 2m air temperature', &
          ptr_col=this%annavg_t2m_col, default='inactive')
+
+    this%annavg_nu_fungi(begc:endc) = spval
+    call hist_addfld1d (fname='ANNAVG_NU_FUNGI', units='g m-3', &
+         avgflag='A', long_name='annual average of plant accessible mineral N', &
+         ptr_col=this%annavg_nu_fungi, default='inactive')
+
+    this%annavg_pu_fungi(begc:endc) = spval
+    call hist_addfld1d (fname='ANNAVG_PU_FUNGI', units='g m-3', &
+         avgflag='A', long_name='annual average of plant accessible mineral P', &
+         ptr_col=this%annavg_pu_fungi, default='inactive')
 
     this%scalaravg_col(begc:endc,:) = spval
     call hist_addfld_decomp(fname='SCALARAVG'//trim(vr_suffix), units='fraction', &
@@ -1196,6 +1214,11 @@ contains
           this%ffn_p_patch(p,:)               = spval
           this%ffn_nsc_patch(p)               = spval
 
+          this%tempavg_nu_fungi(p)            = spval
+          this%annavg_nu_fungi(p)             = spval
+          this%tempavg_pu_fungi(p)            = spval
+          this%annavg_pu_fungi(p)             = spval
+
           this%annavg_t2m_patch  (p)          = spval
           this%tempavg_t2m_patch (p)          = spval
           this%dormant_flag_patch(p)          = spval
@@ -1263,6 +1286,11 @@ contains
           this%tempavg_t2m_patch(p)    = 0._r8
           this%grain_flag_patch(p)     = 0._r8
 
+          this%tempavg_nu_fungi(p)     = 0._r8
+          this%annavg_nu_fungi(p)      = 15._r8
+          this%tempavg_pu_fungi(p)     = 0._r8
+          this%annavg_pu_fungi(p)      = 0.005_r8
+
           ! non-phenology variables
           this%alloc_pnow_patch(p)            = 1._r8
           this%c_allometry_patch(p)           = 0._r8
@@ -1276,6 +1304,11 @@ contains
           this%p_allometry_patch(p)           = 0._r8
           this%tempmax_retransp_patch(p)      = 0._r8
           this%annmax_retransp_patch(p)       = 0._r8
+
+          this%tempavg_nu_fungi(p)            = 0._r8
+          this%annavg_nu_fungi(p)             = 0._r8
+          this%tempavg_pu_fungi(p)            = 0._r8
+          this%annavg_pu_fungi(p)             = 0._r8
 
           this%r_mort_cal_patch(p)           = 0._r8
        end if
@@ -1448,7 +1481,6 @@ contains
          long_name='', units='', &
          interpinic_flag='interp', readvar=readvar, data=this%downreg_patch) 
 
-
     call restartvar(ncid=ncid, flag=flag, varname='p_allometry', xtype=ncd_double,  &
          dim1name='pft', &
          long_name='', units='', &
@@ -1598,6 +1630,26 @@ contains
          dim1name='column', &
          long_name='', units='', &
          interpinic_flag='interp', readvar=readvar, data=this%annavg_zwt_col) 
+
+    call restartvar(ncid=ncid, flag=flag, varname='tempavg_nu_fungi', xtype=ncd_double,  &
+         dim1name='pft', &
+         long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%tempavg_nu_fungi) 
+
+    call restartvar(ncid=ncid, flag=flag, varname='annavg_nu_fungi', xtype=ncd_double,  &
+         dim1name='pft', &
+         long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%annavg_nu_fungi) 
+
+    call restartvar(ncid=ncid, flag=flag, varname='tempavg_pu_fungi', xtype=ncd_double,  &
+         dim1name='pft', &
+         long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%tempavg_pu_fungi) 
+
+    call restartvar(ncid=ncid, flag=flag, varname='annavg_pu_fungi', xtype=ncd_double,  &
+         dim1name='pft', &
+         long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%annavg_pu_fungi) 
 
     call restartvar(ncid=ncid, flag=flag, varname='cannavg_t2m', xtype=ncd_double,  &
          dim1name='column', &

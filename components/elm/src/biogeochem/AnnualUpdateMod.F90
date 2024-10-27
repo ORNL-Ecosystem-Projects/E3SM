@@ -62,6 +62,10 @@ contains
       tempmax_retransp_patch      => cnstate_vars%tempmax_retransp_patch  , &
       annavg_t2m_patch            => cnstate_vars%annavg_t2m_patch    , &
       tempavg_t2m_patch           => cnstate_vars%tempavg_t2m_patch    , &
+      annavg_nu_fungi             => cnstate_vars%annavg_nu_fungi    , &
+      tempavg_nu_fungi           => cnstate_vars%tempavg_nu_fungi    , &
+      annavg_pu_fungi             => cnstate_vars%annavg_pu_fungi    , &
+      tempavg_pu_fungi           => cnstate_vars%tempavg_pu_fungi    , &
       annsum_npp                  => veg_cf%annsum_npp   , &
       tempsum_npp                 => veg_cf%tempsum_npp  , &
       annsum_npp_col              => col_cf%annsum_npp   , &
@@ -102,7 +106,13 @@ contains
              annsum_npp(p) = tempsum_npp(p) * dt
              tempsum_npp(p) = 0._r8
 
+             ! update annual plant available nutrient accumulator
+             annavg_nu_fungi(p) = tempavg_nu_fungi(p)
+             tempavg_nu_fungi(p) = 0._r8
+             annavg_pu_fungi(p) = tempavg_pu_fungi(p)
+             tempavg_pu_fungi(c) = 0._r8
           end do
+
           ! use p2c routine to get selected column-average pft-level fluxes and states
 
           call p2c(bounds, num_soilc, filter_soilc, &
@@ -120,7 +130,6 @@ contains
     do fc = 1,num_soilc
        c = filter_soilc(fc)
        if (annsum_counter_col(c) >= dayspyr_mod * secspday) then
-
            annavg_zwt_col(c) = tempsum_zwt_col(c) / annsum_counter_col(c)
            tempsum_zwt_col(c) = 0._r8
            annsum_counter_col(c) = 0._r8

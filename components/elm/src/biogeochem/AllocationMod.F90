@@ -90,11 +90,9 @@ module AllocationMod
      real(r8), pointer :: q10_upt => null() ! Q10 for temperature sensitivity of nutrient uptake by fine root
      real(r8), pointer :: swc_opt => null() ! (m3 m-3) optimal volumetric soil water content for mycorrhizal growth
      real(r8), pointer :: alpha_fpg => null() ! (unitless) scaling factor controlling the influence of nutrient limitation factor on nutrient uptake
-     real(r8), pointer :: zwt_fungi_a(:) => null() ! sensitivity of fungal inhibition to water table depth
-     real(r8), pointer :: zwt_fungi_b(:) => null() ! sensitivity of fungal inhibition to water table depth
-     real(r8), pointer :: zwt_fungi_c => null() ! sensitivity of fungal inhibition to soil nutrients concentration
-     real(r8), pointer :: zwt_fungi_d => null() ! sensitivity of fungal inhibition to soil N concentration
-     real(r8), pointer :: zwt_fungi_e => null() ! sensitivity of fungal inhibition to soil P concentration
+     real(r8), pointer :: zwt_fungi_a(:) => null() ! sensitivity of fungal inhibition to nutrients
+     real(r8), pointer :: zwt_fungi_b(:) => null() ! sensitivity of fungal inhibition to nutrients
+     real(r8), pointer :: zwt_fungi_c(:) => null() ! sensitivity of fungal inhibition to nutrients
      real(r8), pointer :: vmax_fungi_din(:) => null() ! (gN g-1 s-1) maximum N uptake rate per unit biomass of fungi-colonized fine root
      real(r8), pointer :: vmax_fungi_dip(:) => null() ! (gP g-1 s-1) maximum P uptake rate per unit biomass of fungi-colonized fine root
      !real(r8), pointer :: km_fungi_din => null() ! (gN m-3) half saturation point for N uptake rate by fungi-colonized fine root
@@ -255,9 +253,7 @@ contains
     allocate(AllocParamsInst%alpha_fpg)
     allocate(AllocParamsInst%zwt_fungi_a(0:npft))
     allocate(AllocParamsInst%zwt_fungi_b(0:npft))
-    allocate(AllocParamsInst%zwt_fungi_c)
-    allocate(AllocParamsInst%zwt_fungi_d)
-    allocate(AllocParamsInst%zwt_fungi_e)
+    allocate(AllocParamsInst%zwt_fungi_c(0:npft))
     allocate(AllocParamsInst%vmax_fungi_din(0:npft))
     allocate(AllocParamsInst%vmax_fungi_dip(0:npft))
     !allocate(AllocParamsInst%km_fungi_din)
@@ -318,14 +314,6 @@ contains
 
     tString='zwt_fungi_c'
     call ncd_io(varname=trim(tString),data=AllocParamsInst%zwt_fungi_c, flag='read', ncid=ncid, readvar=readv)
-    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
-
-    tString='zwt_fungi_d'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%zwt_fungi_d, flag='read', ncid=ncid, readvar=readv)
-    if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
-
-    tString='zwt_fungi_e'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%zwt_fungi_e, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
     tString='vmax_fungi_din'
@@ -550,6 +538,7 @@ contains
     use pftvarcon        , only: percrop
     use elm_varpar       , only: nlevdecomp
     use elm_varcon       , only: nitrif_n2o_loss_frac, secspday
+    use timeinfoMod
     !
     ! !ARGUMENTS:
     type(bounds_type)        , intent(in)    :: bounds
@@ -588,10 +577,10 @@ contains
     real(r8):: cpl,cpfr,cplw,cpdw,cpg                                    !C:N ratios for leaf, fine root, and wood
     real(r8):: puptake_prof(bounds%begc:bounds%endc, 1:nlevdecomp)
 
-    real(r8):: dayspyr
+    real(r8):: fracday
 
     ! local nutrient uptake pathways
-    real(r8):: nu_fungi, pu_fungi, ffn_nsc_temp ! temporary holder for nutrient impact on fungi inhibition
+    real(r8):: nu_fungi, pu_fungi, ffn_nsc_temp, dzsum ! temporary holder for nutrient impact on fungi inhibition
     real(r8):: cpool_to_fungi_p, cpool_to_fungi_n ! temporary holder for N&P cost of uptaking mycorrhizal fungi nutrient
     real(r8):: tot_fungi_som_ndemand, tot_fungi_som_pdemand, frac_n_i_met_lit, frac_n_i_cel_lit, frac_p_i_met_lit, frac_p_i_cel_lit, tot_decomp_npools, tot_decomp_ppools, frac_n_i_lig_lit, frac_p_i_lig_lit
     real(r8):: son_uptake_prof(bounds%begc:bounds%endc, 1:nlevdecomp, 1:ndecomp_pools), sop_uptake_prof(bounds%begc:bounds%endc, 1:nlevdecomp, 1:ndecomp_pools)
@@ -768,15 +757,21 @@ contains
          h2osfc                       => col_ws%h2osfc                        , & ! Input: [real(r8) (:,:) ]  surface water (mm) 
          tempsum_zwt_col              => cnstate_vars%tempsum_zwt_col         , & ! Output: [real (r8) (:)     ] accumulator of annual sum of water table depth (m)
          annavg_zwt_col               => cnstate_vars%annavg_zwt_col          , & ! Input: [real (r8) (:)     ] annual average water table depth (m)
-         zwt                          => soilhydrology_vars%zwt_col           & ! Input:  [real(r8) (:)   ]  water table depth (m)
+         zwt                          => soilhydrology_vars%zwt_col           , & ! Input:  [real(r8) (:)   ]  water table depth (m)
+
+         tempavg_nu_fungi             => cnstate_vars%tempavg_nu_fungi         , & ! Output: [real (r8) (:)     ] accumulator of annual average plant accessible mineral N
+         annavg_nu_fungi              => cnstate_vars%annavg_nu_fungi          , & ! Output: [real (r8) (:)     ] annual average plant accessible mineral N
+         tempavg_pu_fungi             => cnstate_vars%tempavg_pu_fungi         , & ! Output: [real (r8) (:)     ] accumulator of annual average plant accessible mineral P
+         annavg_pu_fungi              => cnstate_vars%annavg_pu_fungi          & ! Output: [real (r8) (:)     ] annual average plant accessible mineral P
 #endif
          )
 
-     ! update the annual water table depth accumulator; both are relative to hollow surface
 #ifdef HUM_HOL
      tempsum_zwt_col(1) = tempsum_zwt_col(1) + (0.15_r8 - zwt(1))*dt
      tempsum_zwt_col(2) = tempsum_zwt_col(2) + (h2osfc(2)/1000._r8 - zwt(2))*dt
 #endif
+
+      fracday = dt / secspday
 
       ! loop over patches to assess the total plant N demand and P demand
       do fp=1,num_soilp
@@ -1176,23 +1171,35 @@ contains
               (ivt(p) == nbrdlf_dcd_brl_shrub)) .and. (.not. carbon_only) .and. & 
               (nu_com .eq. 'RD')) then
 
-            ! fungi inhibition factor
+            ! fungi inhibition factor: accumulate the top 30cm
             nu_fungi = 0._r8
             pu_fungi = 0._r8
+            dzsum = 0._r8
             do j = 1,col_pp%nlevbed(c)
-               nu_fungi = rootfr(p,j)*(smin_nh4_vr(c,j) + smin_no3_vr(c,j))
-               pu_fungi = rootfr(p,j)*sminp_vr(c,j)
+               if (dzsoi_decomp(j) <= 0.3_r8) then
+                  nu_fungi = nu_fungi + dzsoi_decomp(j)*(smin_nh4_vr(c,j) + smin_no3_vr(c,j))
+                  pu_fungi = nu_fungi + dzsoi_decomp(j)*sminp_vr(c,j)
+                  dzsum = dzsum + dzsoi_decomp(j)
+               end if
             end do
+            nu_fungi = nu_fungi / dzsum
+            pu_fungi = pu_fungi / dzsum
+
+            ! update accumulators
+            tempavg_nu_fungi(p) = tempavg_nu_fungi(p) + nu_fungi * (fracday/dayspyr_mod)
+            tempavg_pu_fungi(p) = tempavg_pu_fungi(p) + pu_fungi * (fracday/dayspyr_mod)
 
             ! always use hollow's water table height for fungal inhibition
-            fungi_inhib(p) = exp(AllocParamsInst%zwt_fungi_a(ivt(p))*annavg_zwt_col(c) + &
-                                 AllocParamsInst%zwt_fungi_b(ivt(p)))
             if (carbonnitrogen_only) then
-               fungi_inhib(p) = min(1._r8, fungi_inhib(p)*(AllocParamsInst%zwt_fungi_c + AllocParamsInst%zwt_fungi_d*nu_fungi))
+               fungi_inhib(p) = max(0._r8, min(1._r8, AllocParamsInst%zwt_fungi_a(ivt(p)) + &
+                  AllocParamsInst%zwt_fungi_b(ivt(p)) * annavg_nu_fungi(p)))
             else if (carbonphosphorus_only) then
-               fungi_inhib(p) = min(1._r8, fungi_inhib(p)*(AllocParamsInst%zwt_fungi_c + AllocParamsInst%zwt_fungi_e*pu_fungi))
+               fungi_inhib(p) = max(0._r8, min(1._r8, AllocParamsInst%zwt_fungi_a(ivt(p)) + & 
+                  AllocParamsInst%zwt_fungi_c(ivt(p)) * annavg_pu_fungi(p)))
             else
-               fungi_inhib(p) = min(1._r8, fungi_inhib(p)*(AllocParamsInst%zwt_fungi_c + min(AllocParamsInst%zwt_fungi_d*nu_fungi, AllocParamsInst%zwt_fungi_e*pu_fungi)))
+               fungi_inhib(p) = max(0._r8, min(1._r8, AllocParamsInst%zwt_fungi_a(ivt(p)) + &
+                  AllocParamsInst%zwt_fungi_b(ivt(p)) * annavg_nu_fungi(p) + &
+                  AllocParamsInst%zwt_fungi_c(ivt(p)) * annavg_pu_fungi(p)))
             end if
 
             ! fine root potential uptake
@@ -1254,21 +1261,21 @@ contains
             fungi_som_pdemand(p,1:ndecomp_pools) = 0._r8
             do j = 1,col_pp%nlevbed(c)
                ! calculte the layer's total available organic N/P
-               if ((ivt(p) == ndllf_dcd_brl_tree) .or. (ivt(p) == ndllf_evr_brl_tree)) then
-                   tot_decomp_npools = (decomp_npools_vr(c,j,i_met_lit) + decomp_npools_vr(c,j,i_cel_lit) + decomp_npools_vr(c,j,i_lig_lit)) * dzsoi_decomp(j)
-                   tot_decomp_ppools = (decomp_ppools_vr(c,j,i_met_lit) + decomp_ppools_vr(c,j,i_cel_lit) + decomp_ppools_vr(c,j,i_lig_lit)) * dzsoi_decomp(j)
-               else
-                   tot_decomp_npools = (decomp_npools_vr(c,j,i_met_lit) + decomp_npools_vr(c,j,i_cel_lit)) * dzsoi_decomp(j)
-                   tot_decomp_ppools = (decomp_ppools_vr(c,j,i_met_lit) + decomp_ppools_vr(c,j,i_cel_lit)) * dzsoi_decomp(j)
-               end if
+               ! if ((ivt(p) == ndllf_dcd_brl_tree) .or. (ivt(p) == ndllf_evr_brl_tree)) then
+               tot_decomp_npools = (decomp_npools_vr(c,j,i_met_lit) + decomp_npools_vr(c,j,i_cel_lit) + decomp_npools_vr(c,j,i_lig_lit)) * dzsoi_decomp(j)
+               tot_decomp_ppools = (decomp_ppools_vr(c,j,i_met_lit) + decomp_ppools_vr(c,j,i_cel_lit) + decomp_ppools_vr(c,j,i_lig_lit)) * dzsoi_decomp(j)
+               ! else
+               !    tot_decomp_npools = (decomp_npools_vr(c,j,i_met_lit) + decomp_npools_vr(c,j,i_cel_lit)) * dzsoi_decomp(j)
+               !    tot_decomp_ppools = (decomp_ppools_vr(c,j,i_met_lit) + decomp_ppools_vr(c,j,i_cel_lit)) * dzsoi_decomp(j)
+               !end if
 
                ! calculate the layer's total fungal uptake
                tot_fungi_som_ndemand = min(fungi_inhib(p)*frootc(p)*rootfr(p,j)* & 
                   AllocParamsInst%vmax_fungi_son(ivt(p))* ffr_tsoi(p,j)*ffr_swc(p,j)* &
-                  ffr_fpg(p)*ffn_nsc(p), 0.08_r8/dt*tot_decomp_npools)
+                  ffr_fpg(p)*ffn_nsc(p), 0.0001_r8/dt*tot_decomp_npools)
                tot_fungi_som_pdemand = min(fungi_inhib(p)*frootc(p)*rootfr(p,j)* & 
                   AllocParamsInst%vmax_fungi_sop(ivt(p))* ffr_tsoi(p,j)*ffr_swc(p,j)* & 
-                  ffr_fpg_p(p)*ffn_nsc(p), 0.08_r8/dt*tot_decomp_ppools)
+                  ffr_fpg_p(p)*ffn_nsc(p), 0.0001_r8/dt*tot_decomp_ppools)
 
                ! distribute to the different pools
                if (tot_decomp_npools == 0._r8) then
@@ -1299,16 +1306,17 @@ contains
                   tot_fungi_som_ndemand * frac_n_i_cel_lit
                fungi_som_pdemand(p,i_cel_lit) = fungi_som_pdemand(p,i_cel_lit) + &
                   tot_fungi_som_pdemand * frac_p_i_cel_lit
-               ! ericoid mycorrhizal fungi cannot access lignin
-               if ((ivt(p) == ndllf_dcd_brl_tree) .or. (ivt(p) == ndllf_evr_brl_tree)) then
-                  fungi_som_ndemand(p,i_lig_lit) = fungi_som_ndemand(p,i_lig_lit) + &
-                     tot_fungi_som_ndemand * frac_n_i_lig_lit
-                  fungi_som_pdemand(p,i_lig_lit) = fungi_som_pdemand(p,i_lig_lit) + & 
-                     tot_fungi_som_pdemand * frac_p_i_lig_lit
-               else
-                  fungi_som_ndemand(p,i_lig_lit) = 0._r8
-                  fungi_som_pdemand(p,i_lig_lit) = 0._r8
-               end if
+               ! lignin pool is much larger than the other two pools. I need it
+               !! ericoid mycorrhizal fungi cannot access lignin
+               !if ((ivt(p) == ndllf_dcd_brl_tree) .or. (ivt(p) == ndllf_evr_brl_tree)) then
+               fungi_som_ndemand(p,i_lig_lit) = fungi_som_ndemand(p,i_lig_lit) + &
+                  tot_fungi_som_ndemand * frac_n_i_lig_lit
+               fungi_som_pdemand(p,i_lig_lit) = fungi_som_pdemand(p,i_lig_lit) + & 
+                  tot_fungi_som_pdemand * frac_p_i_lig_lit
+               !else
+               !   fungi_som_ndemand(p,i_lig_lit) = 0._r8
+               !   fungi_som_pdemand(p,i_lig_lit) = 0._r8
+               !end if
             end do
 
             ! sum up the organic nutrient uptake
