@@ -92,6 +92,8 @@ module CNStateType
      real(r8),  pointer :: ffn_n_patch                 (:,:)   ! patch-level Michaelis-Menten multiplier on fungal uptake of nitrogen
      real(r8),  pointer :: ffn_p_patch                 (:,:)   ! patch-level Michaelis-Menten multiplier on fungal uptake of nitrogen phosphorus
      real(r8),  pointer :: ffn_nsc_patch               (:)     ! patch-level plant carbohydrate excess multiplier on fungal uptake of nutrients
+     real(r8),  pointer :: cpool_to_fungi_n            (:)     ! patch-level C-cost of fungal nitrogen uptake
+     real(r8),  pointer :: cpool_to_fungi_p            (:)     ! patch-level C-cost of fungal nitrogen uptake
 
      real(r8) , pointer :: rf_decomp_cascade_col       (:,:,:) ! col respired fraction in decomposition step (frac)
      real(r8) , pointer :: pathfrac_decomp_cascade_col (:,:,:) ! col what fraction of C leaving a given pool passes through a given transition (frac) 
@@ -299,6 +301,8 @@ contains
     allocate(this%ffn_n_patch           (begp:endp,1:nlevdecomp_full)) ; this%ffn_n_patch               (:,:) = spval
     allocate(this%ffn_p_patch           (begp:endp,1:nlevdecomp_full)) ; this%ffn_p_patch               (:,:) = spval
     allocate(this%ffn_nsc_patch         (begp:endp))                   ; this%ffn_nsc_patch             (:)   = spval
+    allocate(this%cpool_to_fungi_n      (begp:endp))                   ; this%cpool_to_fungi_n             (:)   = spval
+    allocate(this%cpool_to_fungi_p      (begp:endp))                   ; this%cpool_to_fungi_p             (:)   = spval
 
     allocate(this%rf_decomp_cascade_col(begc:endc,1:nlevdecomp_full,1:ndecomp_cascade_transitions)); 
     this%rf_decomp_cascade_col(:,:,:) = spval
@@ -593,6 +597,16 @@ contains
     call hist_addfld1d (fname='FFN_NSC_PATCH', units='proportion', &
          avgflag='A', long_name='patch-level plant carbohydrate excess multiplier on fungal uptake of nutrients', &
          ptr_patch=this%ffn_nsc_patch)
+
+    this%cpool_to_fungi_n(begp:endp) = spval
+    call hist_addfld1d (fname='CPOOL_TO_FUNGI_N', units='gC m-2 s-1', &
+         avgflag='A', long_name='patch-level plant carbohydrate cost for fungal uptake of N', &
+         ptr_patch=this%cpool_to_fungi_n)
+
+    this%cpool_to_fungi_p(begp:endp) = spval
+    call hist_addfld1d (fname='CPOOL_TO_FUNGI_P', units='gC m-2 s-1', &
+         avgflag='A', long_name='patch-level plant carbohydrate cost for fungal uptake of P', &
+         ptr_patch=this%cpool_to_fungi_p)
 
     this%annsum_counter_col(begc:endc) = spval
     call hist_addfld1d (fname='ANNSUM_COUNTER', units='s', &
@@ -1213,6 +1227,8 @@ contains
           this%ffn_n_patch(p,:)               = spval
           this%ffn_p_patch(p,:)               = spval
           this%ffn_nsc_patch(p)               = spval
+          this%cpool_to_fungi_n(p)            = spval
+          this%cpool_to_fungi_p(p)           = spval
 
           this%tempavg_nu_fungi(p)            = spval
           this%annavg_nu_fungi(p)             = spval
@@ -1610,6 +1626,14 @@ contains
     call restartvar(ncid=ncid, flag=flag, varname='ffn_nsc_patch', xtype=ncd_double,  &
          dim1name='pft', long_name='', units='', &
          interpinic_flag='interp', readvar=readvar, data=this%ffn_nsc_patch)
+
+    call restartvar(ncid=ncid, flag=flag, varname='cpool_to_fungi_n', xtype=ncd_double,  &
+         dim1name='pft', long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%cpool_to_fungi_n)
+
+    call restartvar(ncid=ncid, flag=flag, varname='cpool_to_fungi_p', xtype=ncd_double,  &
+         dim1name='pft', long_name='', units='', &
+         interpinic_flag='interp', readvar=readvar, data=this%cpool_to_fungi_p)
 
     call restartvar(ncid=ncid, flag=flag, varname='annsum_counter', xtype=ncd_double,  &
          dim1name='column', &

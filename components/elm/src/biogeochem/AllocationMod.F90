@@ -581,7 +581,7 @@ contains
 
     ! local nutrient uptake pathways
     real(r8):: nu_fungi, pu_fungi, ffn_nsc_temp, dzsum ! temporary holder for nutrient impact on fungi inhibition
-    real(r8):: cpool_to_fungi_p, cpool_to_fungi_n ! temporary holder for N&P cost of uptaking mycorrhizal fungi nutrient
+    real(r8):: fungi_ndemand_pot_nmm, fungi_pdemand_pot_pmm ! temporary holder for mineral N/P potential uptake by fungi, without Michaelis-Menten factor
     real(r8):: tot_fungi_som_ndemand, tot_fungi_som_pdemand, frac_n_i_met_lit, frac_n_i_cel_lit, frac_p_i_met_lit, frac_p_i_cel_lit, tot_decomp_npools, tot_decomp_ppools, frac_n_i_lig_lit, frac_p_i_lig_lit
     real(r8):: son_uptake_prof(bounds%begc:bounds%endc, 1:nlevdecomp, 1:ndecomp_pools), sop_uptake_prof(bounds%begc:bounds%endc, 1:nlevdecomp, 1:ndecomp_pools)
     real(r8):: son_uptake_vert(bounds%begc:bounds%endc, 1:ndecomp_pools), sop_uptake_vert(bounds%begc, 1:ndecomp_pools)
@@ -727,7 +727,8 @@ contains
          som_p_to_fungi_vr            => col_pf%som_p_to_fungi_vr             , & ! Output: [real(r8) (:)     ] vertically-resolved soil organic P uptake by fungi (gP/m3/s)
          som_p_to_fungi               => col_pf%som_p_to_fungi                , & ! Output: [real(r8) (:)     ] vert-int (diagnostic) soil organic P uptake by fungi (gP/m2/s)
 
-         cpool_to_fungi               => veg_cf%cpool_to_fungi                , & ! Output: [real (r8) (:)   ]
+         cpool_to_fungi_n             => cnstate_vars%cpool_to_fungi_n                   , & ! Output: [real(r8) (:)   ]  plants carbohydrates cost for fungal uptake of N
+         cpool_to_fungi_p             => cnstate_vars%cpool_to_fungi_p                   , & ! Output: [real(r8) (:)   ]  plants carbohydrates cost for fungal uptake of P
 
          fungi_inhib                  => cnstate_vars%fungi_inhib_patch       , & ! Output: [real (r8) (:)     ] fungal inhibition on fine root uptake of nutrients
          zwt_froot                    => cnstate_vars%zwt_froot_patch         , & ! Output: [real (r8) (:)     ] scarcity of vegetation n-supply relative to c-supply
@@ -1249,12 +1250,19 @@ contains
 
             fungi_ndemand_pot(p) = 0._r8
             fungi_pdemand_pot(p) = 0._r8
+            fungi_ndemand_pot_nmm = 0._r8
+            fungi_pdemand_pot_pmm = 0._r8
             do j = 1,col_pp%nlevbed(c)
                fungi_ndemand_pot(p) = fungi_ndemand_pot(p) + AllocParamsInst%vmax_fungi_din(ivt(p))*frootc(p)*rootfr(p,j)*ffr_n(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg(p)*ffn_nsc(p)
                fungi_pdemand_pot(p) = fungi_pdemand_pot(p) + AllocParamsInst%vmax_fungi_dip(ivt(p))*frootc(p)*rootfr(p,j)*ffr_p(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg_p(p)*ffn_nsc(p)
+
+               fungi_ndemand_pot_nmm = fungi_ndemand_pot_nmm + AllocParamsInst%vmax_fungi_din(ivt(p))*frootc(p)*rootfr(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg(p)*ffn_nsc(p)
+               fungi_pdemand_pot_pmm = fungi_pdemand_pot_pmm + AllocParamsInst%vmax_fungi_dip(ivt(p))*frootc(p)*rootfr(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg_p(p)*ffn_nsc(p)
             end do
             fungi_ndemand_pot(p) = fungi_inhib(p)*fungi_ndemand_pot(p)
             fungi_pdemand_pot(p) = fungi_inhib(p)*fungi_pdemand_pot(p)
+            fungi_ndemand_pot_nmm = fungi_ndemand_pot_nmm * fungi_inhib(p)
+            fungi_pdemand_pot_pmm = fungi_pdemand_pot_pmm * fungi_inhib(p)
 
             ! fungal uptake of organic nutrients
             fungi_som_ndemand(p,1:ndecomp_pools) = 0._r8
@@ -1328,25 +1336,27 @@ contains
             end do
 
             ! limit the potential fungi uptake by nonstructural carbohydrates availability
-            cpool_to_fungi_n = (fungi_ndemand_pot(p)+fungi_som_to_npool(p)) * AllocParamsInst%fungi_cost_n
-            cpool_to_fungi_p = (fungi_pdemand_pot(p)+fungi_som_to_ppool(p)) * AllocParamsInst%fungi_cost_p
+            !cpool_to_fungi_n = (fungi_ndemand_pot(p)+fungi_som_to_npool(p)) * AllocParamsInst%fungi_cost_n
+            !cpool_to_fungi_p = (fungi_pdemand_pot(p)+fungi_som_to_ppool(p)) * AllocParamsInst%fungi_cost_p
+            !cpool_to_fungi_n = fungi_som_to_npool(p) * AllocParamsInst%fungi_cost_n
+            !cpool_to_fungi_p = fungi_som_to_ppool(p) * AllocParamsInst%fungi_cost_p
+            cpool_to_fungi_n(p) = (fungi_ndemand_pot_nmm+fungi_som_to_npool(p)) * AllocParamsInst%fungi_cost_n
+            cpool_to_fungi_p(p) = (fungi_pdemand_pot_pmm+fungi_som_to_ppool(p)) * AllocParamsInst%fungi_cost_p
 
-            if (cpool_to_fungi_n > 0.5_r8*availc(p)) then
+            if (cpool_to_fungi_n(p) > 0.5_r8*availc(p)) then
                ! reduce fungal N uptake
-               fungi_ndemand_pot(p) = 0.5_r8*availc(p)/cpool_to_fungi_n*fungi_ndemand_pot(p)
                do k = 1,ndecomp_pools
-                  fungi_som_ndemand(p,k) = 0.5_r8*availc(p)/cpool_to_fungi_n*fungi_som_ndemand(p,k)
+                  fungi_som_ndemand(p,k) = 0.5_r8*availc(p)/cpool_to_fungi_n(p)*fungi_som_ndemand(p,k)
                end do
-               fungi_som_to_npool(p) = 0.5_r8*availc(p)/cpool_to_fungi_n*fungi_som_to_npool(p)
+               fungi_som_to_npool(p) = 0.5_r8*availc(p)/cpool_to_fungi_n(p)*fungi_som_to_npool(p)
             end if
 
-            if (cpool_to_fungi_p > 0.5_r8*availc(p)) then
+            if (cpool_to_fungi_p(p) > 0.5_r8*availc(p)) then
                ! reduce fungal P uptake
-               fungi_pdemand_pot(p) = 0.5_r8*availc(p)/cpool_to_fungi_p*fungi_pdemand_pot(p)
                do k = 1,ndecomp_pools
-                  fungi_som_pdemand(p,k) = 0.5_r8*availc(p)/cpool_to_fungi_p*fungi_som_pdemand(p,k)
+                  fungi_som_pdemand(p,k) = 0.5_r8*availc(p)/cpool_to_fungi_p(p)*fungi_som_pdemand(p,k)
                end do
-               fungi_som_to_ppool(p) = 0.5_r8*availc(p)/cpool_to_fungi_p*fungi_som_to_ppool(p)
+               fungi_som_to_ppool(p) = 0.5_r8*availc(p)/cpool_to_fungi_p(p)*fungi_som_to_ppool(p)
             end if
 
             ! reduce plant mineral nutrient demand by direct fungi uptake
@@ -1369,7 +1379,8 @@ contains
             fungi_som_pdemand(p,1:ndecomp_pools) = 0._r8
             fungi_som_to_npool(p) = 0._r8 
             fungi_som_to_ppool(p) = 0._r8
-            cpool_to_fungi(p) = 0._r8
+            cpool_to_fungi_n(p) = 0._r8
+            cpool_to_fungi_p(p) = 0._r8
          end if
 #endif
       end do ! end pft loop
@@ -2444,7 +2455,6 @@ contains
     real(r8):: cp_stoich_var=0.4    ! variability of CP ratio
     real(r8):: curmr, curmr_ratio   !xsmrpool temporary variables
     real(r8):: xsmr_ratio           ! ratio of mr comes from non-structue carobn hydrate pool
-    real(r8):: cpool_to_fungi_p, cpool_to_fungi_n ! temporary holder for N&P cost of uptaking mycorrhizal fungi nutrient
     !-----------------------------------------------------------------------
 
     associate(                                                                                 &
@@ -2465,6 +2475,8 @@ contains
          astem                        => cnstate_vars%astem_patch                            , & ! Output: [real(r8) (:)   ]  stem allocation coefficient
          fpg                          => cnstate_vars%fpg_col                                , & ! Output: [real(r8) (:)   ]  fraction of potential gpp (no units)
          !!! add phosphorus
+         cpool_to_fungi_n             => cnstate_vars%cpool_to_fungi_n                   , & ! Output: [real(r8) (:)   ]  plants carbohydrates cost for fungal uptake of N
+         cpool_to_fungi_p             => cnstate_vars%cpool_to_fungi_p                   , & ! Output: [real(r8) (:)   ]  plants carbohydrates cost for fungal uptake of P
 
          fpi                          => cnstate_vars%fpi_col            , & ! Output: [real(r8) (:)   ]  fraction of potential immobilization (no units)
 
@@ -2647,16 +2659,20 @@ contains
 
 #ifdef HUM_HOL
                   if (.not. carbon_only) then
-                     ! calculate the carbon cost of mycorrhizal uptake
-                     cpool_to_fungi_n = (fpg(c)*fungi_ndemand_pot(p)+fungi_som_to_npool(p)) * AllocParamsInst%fungi_cost_n
-                     cpool_to_fungi_p = (fpg_p(c)*fungi_pdemand_pot(p)+fungi_som_to_ppool(p)) * AllocParamsInst%fungi_cost_p
+                     ! adjust the carbon cost of mycorrhizal uptake for the N/P limitation
+                     cpool_to_fungi_n(p) = (cpool_to_fungi_n(p) - &
+                        fungi_som_to_npool(p) * AllocParamsInst%fungi_cost_n) * fpg(c) + &
+                        fungi_som_to_npool(p) * AllocParamsInst%fungi_cost_n
+                     cpool_to_fungi_p(p) = (cpool_to_fungi_p(p) - &
+                        fungi_som_to_ppool(p) * AllocParamsInst%fungi_cost_p) * fpg_p(c) + &
+                        fungi_som_to_ppool(p) * AllocParamsInst%fungi_cost_p
 
                      if (carbonnitrogen_only) then
-                        cpool_to_fungi(p) = cpool_to_fungi_n
+                        cpool_to_fungi(p) = cpool_to_fungi_n(p)
                      else if (carbonphosphorus_only) then
-                        cpool_to_fungi(p) = cpool_to_fungi_p
+                        cpool_to_fungi(p) = cpool_to_fungi_p(p)
                      else
-                        cpool_to_fungi(p) = max(cpool_to_fungi_n, cpool_to_fungi_p)
+                        cpool_to_fungi(p) = max(cpool_to_fungi_n(p), cpool_to_fungi_p(p))
                      end if
 
                      ! calculate the PFT-level ratio of satisfied uptake to growth demand
@@ -2672,6 +2688,8 @@ contains
                         fpg_p_patch(p) = (plant_pdemand_pot(p)*fpg_p(c)) / plant_pdemand(p)
                      end if
                   else
+                     cpool_to_fungi_n(p) = 0._r8
+                     cpool_to_fungi_p(p) = 0._r8
                      cpool_to_fungi(p) = 0._r8
                      fpg_patch(p) = fpg(c)
                      fpg_p_patch(p) = fpg_p(c)
