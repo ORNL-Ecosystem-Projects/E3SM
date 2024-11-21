@@ -1256,8 +1256,8 @@ contains
                fungi_ndemand_pot(p) = fungi_ndemand_pot(p) + AllocParamsInst%vmax_fungi_din(ivt(p))*frootc(p)*rootfr(p,j)*ffr_n(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg(p)*ffn_nsc(p)
                fungi_pdemand_pot(p) = fungi_pdemand_pot(p) + AllocParamsInst%vmax_fungi_dip(ivt(p))*frootc(p)*rootfr(p,j)*ffr_p(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg_p(p)*ffn_nsc(p)
 
-               fungi_ndemand_pot_nmm = fungi_ndemand_pot_nmm + AllocParamsInst%vmax_fungi_din(ivt(p))*frootc(p)*rootfr(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg(p)*ffn_nsc(p)
-               fungi_pdemand_pot_pmm = fungi_pdemand_pot_pmm + AllocParamsInst%vmax_fungi_dip(ivt(p))*frootc(p)*rootfr(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg_p(p)*ffn_nsc(p)
+               fungi_ndemand_pot_nmm = fungi_ndemand_pot_nmm + AllocParamsInst%vmax_fungi_din(ivt(p))*frootc(p)*rootfr(p,j)*ffr_n(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg(p)*ffn_nsc(p)
+               fungi_pdemand_pot_pmm = fungi_pdemand_pot_pmm + AllocParamsInst%vmax_fungi_dip(ivt(p))*frootc(p)*rootfr(p,j)*ffr_p(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg_p(p)*ffn_nsc(p)
             end do
             fungi_ndemand_pot(p) = fungi_inhib(p)*fungi_ndemand_pot(p)
             fungi_pdemand_pot(p) = fungi_inhib(p)*fungi_pdemand_pot(p)
