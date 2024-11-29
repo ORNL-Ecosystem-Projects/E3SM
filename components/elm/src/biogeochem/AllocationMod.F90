@@ -1065,7 +1065,7 @@ contains
          ! Murphy, M. T., & Moore, T. R. (2010). Linking root production to aboveground plant characteristics and water table in a temperate bog. Plant and Soil, 336(1), 219–231. https://doi.org/10.1007/s11104-010-0468-1
          if ((ivt(p) /= nc3_arctic_grass) .and. (.not. carbon_only)) then
             ! always use hollow's relative water table height
-            zwt_froot(p) = 10**(- AllocParamsInst%zwt_froot_a(ivt(p))*annavg_zwt_col(c))
+            zwt_froot(p) = 1._r8 ! 10**(- AllocParamsInst%zwt_froot_a(ivt(p))*annavg_zwt_col(c))
          else
             zwt_froot(p) = 1._r8
          end if
@@ -1256,8 +1256,8 @@ contains
                fungi_ndemand_pot(p) = fungi_ndemand_pot(p) + AllocParamsInst%vmax_fungi_din(ivt(p))*frootc(p)*rootfr(p,j)*ffr_n(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg(p)*ffn_nsc(p)
                fungi_pdemand_pot(p) = fungi_pdemand_pot(p) + AllocParamsInst%vmax_fungi_dip(ivt(p))*frootc(p)*rootfr(p,j)*ffr_p(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg_p(p)*ffn_nsc(p)
 
-               fungi_ndemand_pot_nmm = fungi_ndemand_pot_nmm + AllocParamsInst%vmax_fungi_din(ivt(p))*frootc(p)*rootfr(p,j)*ffr_n(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg(p)*ffn_nsc(p)
-               fungi_pdemand_pot_pmm = fungi_pdemand_pot_pmm + AllocParamsInst%vmax_fungi_dip(ivt(p))*frootc(p)*rootfr(p,j)*ffr_p(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg_p(p)*ffn_nsc(p)
+               fungi_ndemand_pot_nmm = fungi_ndemand_pot_nmm + AllocParamsInst%vmax_fungi_din(ivt(p))*frootc(p)*rootfr(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg(p)*ffn_nsc(p) ! ffr_n(p,j)*
+               fungi_pdemand_pot_pmm = fungi_pdemand_pot_pmm + AllocParamsInst%vmax_fungi_dip(ivt(p))*frootc(p)*rootfr(p,j)*ffr_tsoi(p,j)*ffr_swc(p,j)*ffr_fpg_p(p)*ffn_nsc(p) ! *ffr_p(p,j)
             end do
             fungi_ndemand_pot(p) = fungi_inhib(p)*fungi_ndemand_pot(p)
             fungi_pdemand_pot(p) = fungi_inhib(p)*fungi_pdemand_pot(p)
@@ -1269,13 +1269,13 @@ contains
             fungi_som_pdemand(p,1:ndecomp_pools) = 0._r8
             do j = 1,col_pp%nlevbed(c)
                ! calculte the layer's total available organic N/P
-               ! if ((ivt(p) == ndllf_dcd_brl_tree) .or. (ivt(p) == ndllf_evr_brl_tree)) then
-               tot_decomp_npools = (decomp_npools_vr(c,j,i_met_lit) + decomp_npools_vr(c,j,i_cel_lit) + decomp_npools_vr(c,j,i_lig_lit)) * dzsoi_decomp(j)
-               tot_decomp_ppools = (decomp_ppools_vr(c,j,i_met_lit) + decomp_ppools_vr(c,j,i_cel_lit) + decomp_ppools_vr(c,j,i_lig_lit)) * dzsoi_decomp(j)
-               ! else
-               !    tot_decomp_npools = (decomp_npools_vr(c,j,i_met_lit) + decomp_npools_vr(c,j,i_cel_lit)) * dzsoi_decomp(j)
-               !    tot_decomp_ppools = (decomp_ppools_vr(c,j,i_met_lit) + decomp_ppools_vr(c,j,i_cel_lit)) * dzsoi_decomp(j)
-               !end if
+               if ((ivt(p) == ndllf_dcd_brl_tree) .or. (ivt(p) == ndllf_evr_brl_tree)) then
+                  tot_decomp_npools = (decomp_npools_vr(c,j,i_met_lit) + decomp_npools_vr(c,j,i_cel_lit) + decomp_npools_vr(c,j,i_lig_lit)) * dzsoi_decomp(j)
+                  tot_decomp_ppools = (decomp_ppools_vr(c,j,i_met_lit) + decomp_ppools_vr(c,j,i_cel_lit) + decomp_ppools_vr(c,j,i_lig_lit)) * dzsoi_decomp(j)
+               else
+                  tot_decomp_npools = (decomp_npools_vr(c,j,i_met_lit) + decomp_npools_vr(c,j,i_cel_lit)) * dzsoi_decomp(j)
+                  tot_decomp_ppools = (decomp_ppools_vr(c,j,i_met_lit) + decomp_ppools_vr(c,j,i_cel_lit)) * dzsoi_decomp(j)
+               end if
 
                ! calculate the layer's total fungal uptake
                tot_fungi_som_ndemand = min(fungi_inhib(p)*frootc(p)*rootfr(p,j)* & 
@@ -1316,15 +1316,15 @@ contains
                   tot_fungi_som_pdemand * frac_p_i_cel_lit
                ! lignin pool is much larger than the other two pools. I need it
                !! ericoid mycorrhizal fungi cannot access lignin
-               !if ((ivt(p) == ndllf_dcd_brl_tree) .or. (ivt(p) == ndllf_evr_brl_tree)) then
-               fungi_som_ndemand(p,i_lig_lit) = fungi_som_ndemand(p,i_lig_lit) + &
-                  tot_fungi_som_ndemand * frac_n_i_lig_lit
-               fungi_som_pdemand(p,i_lig_lit) = fungi_som_pdemand(p,i_lig_lit) + & 
-                  tot_fungi_som_pdemand * frac_p_i_lig_lit
-               !else
-               !   fungi_som_ndemand(p,i_lig_lit) = 0._r8
-               !   fungi_som_pdemand(p,i_lig_lit) = 0._r8
-               !end if
+               if ((ivt(p) == ndllf_dcd_brl_tree) .or. (ivt(p) == ndllf_evr_brl_tree)) then
+                  fungi_som_ndemand(p,i_lig_lit) = fungi_som_ndemand(p,i_lig_lit) + &
+                     tot_fungi_som_ndemand * frac_n_i_lig_lit
+                  fungi_som_pdemand(p,i_lig_lit) = fungi_som_pdemand(p,i_lig_lit) + & 
+                     tot_fungi_som_pdemand * frac_p_i_lig_lit
+               else
+                  fungi_som_ndemand(p,i_lig_lit) = 0._r8
+                  fungi_som_pdemand(p,i_lig_lit) = 0._r8
+               end if
             end do
 
             ! sum up the organic nutrient uptake
