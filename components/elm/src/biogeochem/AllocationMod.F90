@@ -2700,9 +2700,16 @@ contains
                   plant_p_uptake_flux(c) = plant_p_uptake_flux(c) + plant_pdemand(p) * fpg_p_patch(p) * veg_pp%wtcol(p)
 
                   ! use fpg to calculate next time step's limitation-stimulation on root uptake
-                  ffr_fpg(p) = AllocParamsInst%alpha_fpg / (fpg_patch(p)**2._r8 + AllocParamsInst%alpha_fpg - 1._r8)
-                  ffr_fpg_p(p) = AllocParamsInst%alpha_fpg / (fpg_p_patch(p)**2._r8 + AllocParamsInst%alpha_fpg - 1._r8)
-
+                  if (ivt(p) == ndllf_evr_brl_tree) then
+                     ffr_fpg(p) = 1.1_r8 / (fpg_patch(p)**2._r8 + 1.1_r8 - 1._r8)
+                     ffr_fpg_p(p) = 1.1_r8 / (fpg_p_patch(p)**2._r8 + 1.1_r8 - 1._r8)
+                  !else if (ivt(p) == nbrdlf_dcd_brl_shrub) then
+                  !   ffr_fpg(p) = 1.75_r8 / (fpg_patch(p)**2._r8 + 1.75_r8 - 1._r8)
+                  !   ffr_fpg_p(p) = 1.75_r8 / (fpg_p_patch(p)**2._r8 + 1.75_r8 - 1._r8)
+                  else
+                     ffr_fpg(p) = AllocParamsInst%alpha_fpg / (fpg_patch(p)**2._r8 + AllocParamsInst%alpha_fpg - 1._r8)
+                     ffr_fpg_p(p) = AllocParamsInst%alpha_fpg / (fpg_p_patch(p)**2._r8 + AllocParamsInst%alpha_fpg - 1._r8)
+                  end if
 #else
                   plant_n_uptake_flux(c) = plant_n_uptake_flux(c) + plant_ndemand(p) * fpg(c)*veg_pp%wtcol(p)
                   plant_p_uptake_flux(c) = plant_p_uptake_flux(c) + plant_pdemand(p) * fpg_p(c)*veg_pp%wtcol(p)
