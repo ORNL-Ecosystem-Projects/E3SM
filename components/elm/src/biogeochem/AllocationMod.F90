@@ -85,14 +85,14 @@ module AllocationMod
      real(r8), pointer :: froot_density(:) => null() ! (gC cm-3) fine root density
      real(r8), pointer :: vmax_froot_n(:) => null() ! (gN cm-2 s-1) maximum N uptake rate per unit area of fine root
      real(r8), pointer :: vmax_froot_p(:) => null() ! (gP cm-2 s-1) maximum P uptake rate per unit area of fine root
-     real(r8), pointer :: km_froot_n => null() ! (gN m-3) half saturation point for N uptake rate by fine root
-     real(r8), pointer :: km_froot_p => null() ! (gP m-3) half saturation point for P uptake rate by fine root
+     real(r8), pointer :: km_froot_n(:) => null() ! (gN m-3) half saturation point for N uptake rate by fine root
+     real(r8), pointer :: km_froot_p(:) => null() ! (gP m-3) half saturation point for P uptake rate by fine root
      real(r8), pointer :: q10_upt => null() ! Q10 for temperature sensitivity of nutrient uptake by fine root
      real(r8), pointer :: swc_opt => null() ! (m3 m-3) optimal volumetric soil water content for mycorrhizal growth
      real(r8), pointer :: alpha_fpg => null() ! (unitless) scaling factor controlling the influence of nutrient limitation factor on nutrient uptake
-     real(r8), pointer :: zwt_fungi_a(:) => null() ! sensitivity of fungal inhibition to nutrients
-     real(r8), pointer :: zwt_fungi_b(:) => null() ! sensitivity of fungal inhibition to nutrients
-     real(r8), pointer :: zwt_fungi_c(:) => null() ! sensitivity of fungal inhibition to nutrients
+     real(r8), pointer :: inh_fungi_a(:) => null() ! intercept of fungal inhibition
+     real(r8), pointer :: inh_fungi_b(:) => null() ! sensitivity of fungal inhibition to nitrogen
+     real(r8), pointer :: inh_fungi_c(:) => null() ! sensitivity of fungal inhibition to phosphorus
      real(r8), pointer :: vmax_fungi_din(:) => null() ! (gN g-1 s-1) maximum N uptake rate per unit biomass of fungi-colonized fine root
      real(r8), pointer :: vmax_fungi_dip(:) => null() ! (gP g-1 s-1) maximum P uptake rate per unit biomass of fungi-colonized fine root
      !real(r8), pointer :: km_fungi_din => null() ! (gN m-3) half saturation point for N uptake rate by fungi-colonized fine root
@@ -246,14 +246,14 @@ contains
     allocate(AllocParamsInst%froot_density(0:npft))
     allocate(AllocParamsInst%vmax_froot_n(0:npft))
     allocate(AllocParamsInst%vmax_froot_p(0:npft))
-    allocate(AllocParamsInst%km_froot_n)
-    allocate(AllocParamsInst%km_froot_p)
+    allocate(AllocParamsInst%km_froot_n(0:npft))
+    allocate(AllocParamsInst%km_froot_p(0:npft))
     allocate(AllocParamsInst%q10_upt)
     allocate(AllocParamsInst%swc_opt)
     allocate(AllocParamsInst%alpha_fpg)
-    allocate(AllocParamsInst%zwt_fungi_a(0:npft))
-    allocate(AllocParamsInst%zwt_fungi_b(0:npft))
-    allocate(AllocParamsInst%zwt_fungi_c(0:npft))
+    allocate(AllocParamsInst%inh_fungi_a(0:npft))
+    allocate(AllocParamsInst%inh_fungi_b(0:npft))
+    allocate(AllocParamsInst%inh_fungi_c(0:npft))
     allocate(AllocParamsInst%vmax_fungi_din(0:npft))
     allocate(AllocParamsInst%vmax_fungi_dip(0:npft))
     !allocate(AllocParamsInst%km_fungi_din)
@@ -304,16 +304,16 @@ contains
     call ncd_io(varname=trim(tString),data=AllocParamsInst%alpha_fpg, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
-    tString='zwt_fungi_a'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%zwt_fungi_a, flag='read', ncid=ncid, readvar=readv)
+    tString='inh_fungi_a'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%inh_fungi_a, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
-    tString='zwt_fungi_b'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%zwt_fungi_b, flag='read', ncid=ncid, readvar=readv)
+    tString='inh_fungi_b'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%inh_fungi_b, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
-    tString='zwt_fungi_c'
-    call ncd_io(varname=trim(tString),data=AllocParamsInst%zwt_fungi_c, flag='read', ncid=ncid, readvar=readv)
+    tString='inh_fungi_c'
+    call ncd_io(varname=trim(tString),data=AllocParamsInst%inh_fungi_c, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
 
     tString='vmax_fungi_din'
@@ -1190,26 +1190,25 @@ contains
             tempavg_nu_fungi(p) = tempavg_nu_fungi(p) + nu_fungi * (fracday/dayspyr_mod)
             tempavg_pu_fungi(p) = tempavg_pu_fungi(p) + pu_fungi * (fracday/dayspyr_mod)
 
-            ! always use hollow's water table height for fungal inhibition
             if (carbonnitrogen_only) then
-               fungi_inhib(p) = max(0._r8, min(1._r8, AllocParamsInst%zwt_fungi_a(ivt(p)) + &
-                  AllocParamsInst%zwt_fungi_b(ivt(p)) * annavg_nu_fungi(p)))
+               fungi_inhib(p) = max(0._r8, min(1._r8, AllocParamsInst%inh_fungi_a(ivt(p)) + &
+                  AllocParamsInst%inh_fungi_b(ivt(p)) * annavg_nu_fungi(p)))
             else if (carbonphosphorus_only) then
-               fungi_inhib(p) = max(0._r8, min(1._r8, AllocParamsInst%zwt_fungi_a(ivt(p)) + & 
-                  AllocParamsInst%zwt_fungi_c(ivt(p)) * annavg_pu_fungi(p)))
+               fungi_inhib(p) = max(0._r8, min(1._r8, AllocParamsInst%inh_fungi_a(ivt(p)) + & 
+                  AllocParamsInst%inh_fungi_c(ivt(p)) * annavg_pu_fungi(p)))
             else
-               fungi_inhib(p) = max(0._r8, min(1._r8, AllocParamsInst%zwt_fungi_a(ivt(p)) + &
-                  AllocParamsInst%zwt_fungi_b(ivt(p)) * annavg_nu_fungi(p) + &
-                  AllocParamsInst%zwt_fungi_c(ivt(p)) * annavg_pu_fungi(p)))
+               fungi_inhib(p) = max(0._r8, min(1._r8, AllocParamsInst%inh_fungi_a(ivt(p)) + &
+                  AllocParamsInst%inh_fungi_b(ivt(p)) * annavg_nu_fungi(p) + &
+                  AllocParamsInst%inh_fungi_c(ivt(p)) * annavg_pu_fungi(p)))
             end if
 
             ! fine root potential uptake
             do j = 1,col_pp%nlevbed(c)
                ffr_sra(p,j) = 0.01_r8 * frootc(p) * rootfr(p,j) / AllocParamsInst%froot_radius(ivt(p))**2 / AllocParamsInst%froot_density(ivt(p))
 
-               ffr_n(p,j) = max(smin_nh4_vr(c,j)+smin_no3_vr(c,j), 0._r8) / (AllocParamsInst%km_froot_n + max(smin_nh4_vr(c,j)+smin_no3_vr(c,j), 0._r8))
+               ffr_n(p,j) = max(smin_nh4_vr(c,j)+smin_no3_vr(c,j), 0._r8) / (AllocParamsInst%km_froot_n(ivt(p)) + max(smin_nh4_vr(c,j)+smin_no3_vr(c,j), 0._r8))
 
-               ffr_p(p,j) = max(sminp_vr(c,j), 0._r8) / (AllocParamsInst%km_froot_p + max(sminp_vr(c,j), 0._r8))
+               ffr_p(p,j) = max(sminp_vr(c,j), 0._r8) / (AllocParamsInst%km_froot_p(ivt(p)) + max(sminp_vr(c,j), 0._r8))
 
                ! ffr_tsoi_nh4(p,j) = max(0._r8, min(1._r8, 1._r8+0.2_r8*(t_soisno(c,j)-tfrz)))
                ffr_tsoi(p,j) = AllocParamsInst%q10_upt**((t_soisno(c,j)-tfrz-10._r8)/10._r8)
@@ -2700,16 +2699,16 @@ contains
                   plant_p_uptake_flux(c) = plant_p_uptake_flux(c) + plant_pdemand(p) * fpg_p_patch(p) * veg_pp%wtcol(p)
 
                   ! use fpg to calculate next time step's limitation-stimulation on root uptake
-                  if (ivt(p) == ndllf_evr_brl_tree) then
-                     ffr_fpg(p) = 1.1_r8 / (fpg_patch(p)**2._r8 + 1.1_r8 - 1._r8)
-                     ffr_fpg_p(p) = 1.1_r8 / (fpg_p_patch(p)**2._r8 + 1.1_r8 - 1._r8)
+                  !if (ivt(p) == ndllf_evr_brl_tree) then
+                  !   ffr_fpg(p) = 1.1_r8 / (fpg_patch(p)**2._r8 + 1.1_r8 - 1._r8)
+                  !   ffr_fpg_p(p) = 1.1_r8 / (fpg_p_patch(p)**2._r8 + 1.1_r8 - 1._r8)
                   !else if (ivt(p) == nbrdlf_dcd_brl_shrub) then
                   !   ffr_fpg(p) = 1.75_r8 / (fpg_patch(p)**2._r8 + 1.75_r8 - 1._r8)
                   !   ffr_fpg_p(p) = 1.75_r8 / (fpg_p_patch(p)**2._r8 + 1.75_r8 - 1._r8)
-                  else
+                  !else
                      ffr_fpg(p) = AllocParamsInst%alpha_fpg / (fpg_patch(p)**2._r8 + AllocParamsInst%alpha_fpg - 1._r8)
                      ffr_fpg_p(p) = AllocParamsInst%alpha_fpg / (fpg_p_patch(p)**2._r8 + AllocParamsInst%alpha_fpg - 1._r8)
-                  end if
+                  !end if
 #else
                   plant_n_uptake_flux(c) = plant_n_uptake_flux(c) + plant_ndemand(p) * fpg(c)*veg_pp%wtcol(p)
                   plant_p_uptake_flux(c) = plant_p_uptake_flux(c) + plant_pdemand(p) * fpg_p(c)*veg_pp%wtcol(p)
