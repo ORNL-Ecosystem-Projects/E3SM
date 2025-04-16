@@ -1,4 +1,4 @@
-name: Manual Test Echo
+name: Run 1x1 ELM Test
 
 on:
   pull_request:
@@ -6,17 +6,38 @@ on:
   workflow_dispatch:
 
 jobs:
-  test-echo:
+  ci:
+    if: ${{ github.repository == 'ORNL-Ecosystem-Projects/E3SM' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - SMS_Ln10_P1x1.1x1_smallvilleIA.IELMCNCROP.elm-per_crop
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/e3sm-project/containers-ghci:ghci-0.2.1
     steps:
-      - name: Show branch and test info
+      - 
+        name: Checkout
+        uses: actions/checkout@v4
+        with:
+          show-progress: false
+          submodules: recursive
+      - 
+        name: CIME
+        working-directory: cime/scripts
         run: |
-          echo "Running manual test!"
-          echo "Branch: ${{ github.ref }}"
-          echo "Actor: ${{ github.actor }}"
-          echo "These are the tests we would run:"
-          echo " - SMS_D_Ln5_P4.ne4pg2_oQU480.F2010.ghci-oci_gnu"
-          echo " - ERS_Ld5_P4.ne4pg2_oQU480.F2010-SCREAMv1-MPASSI.ghci-oci_gnu.eamxx-prod"
+          ./create_test ${{ matrix.test }} --wait --debug
+      - 
+        name: Artifacts
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: ${{ matrix.test }}
+          path: |
+            /projects/e3sm/scratch/${{ matrix.test }}*/TestStatus.log
+            /projects/e3sm/scratch/${{ matrix.test }}*/bld/*.bldlog.*
+            /projects/e3sm/scratch/${{ matrix.test }}*/run/*.log.*
+            /projects/e3sm/scratch/${{ matrix.test }}*/run/*.cprnc.out
 
