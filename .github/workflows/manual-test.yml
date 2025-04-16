@@ -1,7 +1,7 @@
 name: Manual Test Echo
 
 on:
-  workflow_dispatch:  # Enables the "Run workflow" button in the Actions tab
+  workflow_dispatch:  
 
 jobs:
   test-echo:
