@@ -1,4 +1,4 @@
-module NitrogenDynamicsMod
+ module NitrogenDynamicsMod
 
   !-----------------------------------------------------------------------
   ! !MODULE: NitrogenDynamicsMod
@@ -28,6 +28,7 @@ module NitrogenDynamicsMod
   use ELMFatesInterfaceMod  , only : hlm_fates_interface_type
   use FrictionVelocityType, only : frictionvel_type
   use SoilStateType       , only : soilstate_type
+  use SoilHydrologyType   , only : soilhydrology_type
   use FanUpdateMod        , only : fan_eval
 
   !
@@ -248,7 +249,7 @@ contains
 #if (defined HUM_HOL)
                if (col_lag_npp(c) /= spval) then
                  !need to put npp in units of gC/m2/yr here first
-                 t = (2.8_r8 * (1._r8 - exp(-0.003_r8 * col_lag_npp(c)*(secspday*dayspyr))))/(secspday*dayspyr)
+                 t = (1.8_r8 * (1._r8 - exp(-0.003_r8 * col_lag_npp(c)*(secspday*dayspyr))))/(secspday*dayspyr)
                  nfix_to_sminn(c) = max(0._r8,t)
 #else
                if (col_lag_npp(c) /= spval) then
@@ -301,7 +302,7 @@ contains
   end subroutine NitrogenFixation
 
   !-----------------------------------------------------------------------
-  subroutine NitrogenLeaching(bounds, num_soilc, filter_soilc, dt )
+  subroutine NitrogenLeaching(bounds, soilhydrology_vars, num_soilc, filter_soilc, dt )
     !
     ! !DESCRIPTION:
     ! On the radiation time step, update the nitrogen leaching rate
@@ -314,6 +315,7 @@ contains
     ! !ARGUMENTS:
     type(bounds_type)        , intent(in)    :: bounds
     integer                  , intent(in)    :: num_soilc       ! number of soil columns in filter
+    type(soilhydrology_type) , intent(in)    :: soilhydrology_vars
     integer                  , intent(in)    :: filter_soilc(:) ! filter for soil columns
     real(r8)                 , intent(in)    :: dt          ! radiation time step (seconds)
 
@@ -327,6 +329,7 @@ contains
     real(r8) :: surface_water(bounds%begc:bounds%endc) ! liquid water to shallow surface depth (kg water/m2)
     real(r8) :: drain_tot(bounds%begc:bounds%endc)     ! total drainage flux (mm H2O /s)
     real(r8), parameter :: depth_runoff_Nloss = 0.05   ! (m) depth over which runoff mixes with soil water for N loss to runoff
+    integer  :: jwt(bounds%begc:bounds%endc)            ! index of the soil layer right above the water table (-)
     !-----------------------------------------------------------------------
 
     associate(& 
@@ -336,7 +339,8 @@ contains
          qflx_surf           => col_wf%qflx_surf              , & ! Input:  [real(r8) (:)   ]  surface runoff (mm H2O /s)                        
          smin_no3_vr         => col_ns%smin_no3_vr        , & ! Input:  [real(r8) (:,:) ]                                                  
          smin_no3_leached_vr => col_nf%smin_no3_leached_vr , & ! Output: [real(r8) (:,:) ]  rate of mineral NO3 leaching (gN/m3/s)          
-         smin_no3_runoff_vr  => col_nf%smin_no3_runoff_vr    & ! Output: [real(r8) (:,:) ]  rate of mineral NO3 loss with runoff (gN/m3/s)  
+         smin_no3_runoff_vr  => col_nf%smin_no3_runoff_vr,    & ! Output: [real(r8) (:,:) ]  rate of mineral NO3 loss with runoff (gN/m3/s)  
+         zwt                 => soilhydrology_vars%zwt_col             & ! Output: [real(r8) (:)   ]  water table depth (m)
          )
 
 
@@ -373,6 +377,19 @@ contains
          drain_tot(c) = qflx_drain(c)
       end do
 
+      !Get the wtaer table layer
+      do fc = 1, num_soilc
+        c = filter_soilc(fc)
+        jwt(c) = nlevbed
+        ! allow jwt to equal zero when zwt is in top layer
+        do j = 1, nlevbed
+          if(zwt(c) <= zisoi(j)) then
+            jwt(c) = j-1
+            exit
+          end if
+        enddo
+      end do
+
       do j = 1,nlevdecomp
          ! Loop through columns
          do fc = 1,num_soilc
@@ -397,9 +414,16 @@ contains
                   disn_conc = (sf_no3 * smin_no3_vr(c,j) * col_pp%dz(c,j) )/(h2osoi_liq(c,j) )
                end if
                !
+
+               !if (j == jwt(c)+1) then 
                ! calculate the N leaching flux as a function of the dissolved
                ! concentration and the sub-surface drainage flux
                smin_no3_leached_vr(c,j) = disn_conc * drain_tot(c) * h2osoi_liq(c,j) / ( tot_water(c) * col_pp%dz(c,j) )
+               !  print*, 'Leach', c, j, zwt(c)
+               !smin_no3_leached_vr(c,j) = disn_conc * drain_tot(c)
+               !else
+               !  smin_no3_leached_vr(c,j) = 0_r8
+               !end if
                !
                ! ensure that leaching rate isn't larger than soil N pool
                smin_no3_leached_vr(c,j) = min(smin_no3_leached_vr(c,j), smin_no3_vr(c,j) / dt )

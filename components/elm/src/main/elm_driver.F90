@@ -1275,7 +1275,7 @@ contains
                filter(nc)%num_soilc, filter(nc)%soilc,             &
                filter(nc)%num_soilp, filter(nc)%soilp,             &
                filter(nc)%num_pcropp, filter(nc)%pcropp, doalb,    &
-               cnstate_vars,  frictionvel_vars, canopystate_vars )
+               cnstate_vars,  soilhydrology_vars, frictionvel_vars, canopystate_vars )
          end if
        end if
 
