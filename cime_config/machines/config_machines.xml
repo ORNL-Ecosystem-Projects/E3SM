@@ -1574,7 +1574,7 @@
     <MPILIBS>mpich</MPILIBS>
     <CIME_OUTPUT_ROOT>/projects/e3sm/scratch</CIME_OUTPUT_ROOT>
     <DIN_LOC_ROOT>/projects/e3sm/inputdata</DIN_LOC_ROOT>
-    <DIN_LOC_ROOT_CLMFORC>/projects/e3sm/ptclm-data</DIN_LOC_ROOT_CLMFORC>
+    <DIN_LOC_ROOT_CLMFORC>/projects/e3sm/inputdata/atm/datm7</DIN_LOC_ROOT_CLMFORC>
     <DOUT_S_ROOT>/projects/e3sm/scratch/archive/$CASE</DOUT_S_ROOT>
     <BASELINE_ROOT>/projects/e3sm/baselines/$COMPILER</BASELINE_ROOT>
     <CCSM_CPRNC>/usr/local/packages/bin/cprnc</CCSM_CPRNC>
