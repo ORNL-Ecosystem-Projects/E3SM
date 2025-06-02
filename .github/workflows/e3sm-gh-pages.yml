@@ -33,7 +33,7 @@ concurrency:
   
 jobs:
   Build-and-Deploy-docs:
-    if: ${{ github.repository == 'E3SM-Project/E3SM' }}
+    if: ${{ github.repository == 'ORNL-Ecosystem-Projects/E3SM' }}
     defaults:
       run:
         shell: bash -leo pipefail {0}
