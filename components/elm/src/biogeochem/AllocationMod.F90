@@ -2659,12 +2659,16 @@ contains
 #ifdef HUM_HOL
                   if (.not. carbon_only) then
                      ! adjust the carbon cost of mycorrhizal uptake for the N/P limitation
+                     !!?? if (fpg(c) < 1._r8) then
                      cpool_to_fungi_n(p) = (cpool_to_fungi_n(p) - &
                         fungi_som_to_npool(p) * AllocParamsInst%fungi_cost_n) * fpg(c) + &
                         fungi_som_to_npool(p) * AllocParamsInst%fungi_cost_n
+                     !!?? end if
+                     !!?? if (fpg_p(c) < 1._r8) then
                      cpool_to_fungi_p(p) = (cpool_to_fungi_p(p) - &
                         fungi_som_to_ppool(p) * AllocParamsInst%fungi_cost_p) * fpg_p(c) + &
                         fungi_som_to_ppool(p) * AllocParamsInst%fungi_cost_p
+                     !!?? end if
 
                      if (carbonnitrogen_only) then
                         cpool_to_fungi(p) = cpool_to_fungi_n(p)
