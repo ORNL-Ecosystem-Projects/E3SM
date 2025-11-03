@@ -71,7 +71,7 @@ contains
     real(r8), intent(in)  :: dtime
     !
     ! !LOCAL VARIABLES:
-    integer  :: c,j,fc,g,l,t,i                             !indices
+    integer  :: c,j,fc,g,l,t,i,topo_index                             !indices
     integer  :: nlevbed                                    !# levels to bedrock
     real(r8) :: xs(bounds%begc:bounds%endc)                !excess soil water above urban ponding limit
     real(r8) :: vol_ice(bounds%begc:bounds%endc,1:nlevgrnd) !partial volume of ice lens in layer
@@ -156,6 +156,8 @@ contains
       do fc = 1, num_hydrologyc
          c = filter_hydrologyc(fc)
          g = col_pp%gridcell(c)
+         t = col_pp%topounit(c)
+         topo_index = top_pp%topo_grc_ind(t)
          fff(c) = fover(g)
          if (zengdecker_2009_with_var_soil_thick) then
             nlevbed = nlev2bed(c)
@@ -186,7 +188,7 @@ contains
 
 #if (defined MARSH)
          fsat(c) = 1.0 * exp(-3.0_r8/humhol_ht*(zwt(c)))   !at 30cm, hummock saturated at 5% changed to 0.1 TAO
-!          if (c .eq. 2) fsat(c) = min(1.0 * exp(-3.0_r8/humhol_ht*(zwt(c)-h2osfc(c)/1000.+humhol_ht)), 1._r8) !TAO 0.3 t0 0.1, 0.15 to 0.35 !bsulman: what does 0.15 represent?
+!          if (topo_index .eq. 2) fsat(c) = min(1.0 * exp(-3.0_r8/humhol_ht*(zwt(c)-h2osfc(c)/1000.+humhol_ht)), 1._r8) !TAO 0.3 t0 0.1, 0.15 to 0.35 !bsulman: what does 0.15 represent?
 #endif
          ! use perched water table to determine fsat (if present)
          if ( frost_table(c) > zwt(c)) then
@@ -201,7 +203,7 @@ contains
 
 #if (defined MARSH)
             fsat(c) = 1.0 * exp(-3.0_r8/humhol_ht*(zwt(c)))   !at 30cm, hummock saturated at 5%
-!             if (c .eq. 2) fsat(c) = min(1.0 * exp(-3.0_r8/humhol_ht*(zwt(c)-h2osfc(c)/1000.+humhol_ht)), 1._r8) !TAO 0.3 t 0.1, 0.15 to 0.35
+!             if (topo_index .eq. 2) fsat(c) = min(1.0 * exp(-3.0_r8/humhol_ht*(zwt(c)-h2osfc(c)/1000.+humhol_ht)), 1._r8) !TAO 0.3 t 0.1, 0.15 to 0.35
 #endif
 
          else
@@ -214,7 +216,7 @@ contains
 
 #if (defined MARSH)
             fsat(c) = 1.0 * exp(-3.0_r8/humhol_ht*(zwt(c))) !at 30cm, hummock saturated at 5%
-!             if (c .eq. 2) fsat(c) = min(1.0 * exp(-3.0_r8/humhol_ht*(zwt(c)-h2osfc(c)/1000.+humhol_ht)), 1._r8) !TAO 0.3 t 1.5, 0.15 to 0.35
+!             if (topo_index .eq. 2) fsat(c) = min(1.0 * exp(-3.0_r8/humhol_ht*(zwt(c)-h2osfc(c)/1000.+humhol_ht)), 1._r8) !TAO 0.3 t 1.5, 0.15 to 0.35
 #endif 
          endif
          if (origflag == 1) then
@@ -233,6 +235,8 @@ contains
       do fc = 1, num_hydrologyc
          c = filter_hydrologyc(fc)
          l = col_pp%landunit(c)
+         t = col_pp%topounit(c)
+         topo_index = top_pp%topo_grc_ind(t)
          ! no qflx_surf in polygonal ground
          if (lun_pp%ispolygon(l)) then
             qflx_surf(c) = 0._r8
@@ -240,13 +244,13 @@ contains
          ! assume qinmax large relative to qflx_top_soil in control
          else if (origflag == 1) then
 #if (defined HUM_HOL)
-           if (c .eq. 1) then  !XS - only compute sfc runoff from hummock, send to hollow 
+           if (topo_index .eq. 1) then  !XS - only compute sfc runoff from hummock, send to hollow
              qflx_surf(c) = fcov(c) * qflx_top_soil(c) !TAO
            else
              qflx_surf(c) = 0._r8   !turn off surface runoff for hollow
            endif
 ! #elif (defined MARSH)
-!             if (c .eq. 1) then  !XS - only compute sfc runoff from hummock, send to hollow 
+!             if (topo_index .eq. 1) then  !XS - only compute sfc runoff from hummock, send to hollow
 !              qflx_surf(c) = fcov(c) * qflx_top_soil(c) !TAO
 !             else
 !              qflx_surf(c) = 0._r8   !turn off surface runoff for hollow
@@ -383,7 +387,7 @@ contains
      real(r8), intent(in)  :: dtime
      !
      ! !LOCAL VARIABLES:
-     integer  :: c,j,l,fc,g                                 ! indices
+     integer  :: c,j,l,fc,g,t,topo_index                                 ! indices
      integer  :: nlevbed                                    !# levels to bedrock
      real(r8) :: s1,su,v                                    ! variable to calculate qinmax
      real(r8) :: qinmax                                     ! maximum infiltration capacity (mm/s)
@@ -550,6 +554,8 @@ contains
        do fc = 1, num_hydrologyc
           c  = filter_hydrologyc(fc)
           g  = cgridcell(c)
+          t = col_pp%topounit(c)
+          topo_index = top_pp%topo_grc_ind(t)
           pc = pc_grid(g)
           
           ! partition moisture fluxes between soil and h2osfc
@@ -580,7 +586,7 @@ contains
              !1. partition surface inputs between soil and h2osfc
 #if (defined HUM_HOL)
              hol_frac = 1.0_r8 - hum_frac
-             if (c .eq. 1) then
+             if (topo_index .eq. 1) then
                qflx_surf_input(1) = 0._r8 !hummock TAO KEEP AT ZERO!!!
                qflx_surf_input(2) = qflx_surf(1)*(hum_frac/hol_frac)     !hollow  TAO
              end if
@@ -658,7 +664,7 @@ contains
              qflx_infl(c) = qflx_in_soil(c) - qflx_infl_excess(c)
              qflx_in_h2osfc(c) =  qflx_in_h2osfc(c) + qflx_infl_excess(c)
 #if (defined HUM_HOL)
-             if (c .eq. 1) then
+             if (topo_index .eq. 1) then
                ! qflx_surf is surface runoff. So this means there is no surface runoff from hollow (channel) to hummock (marsh?)
                 qflx_surf(1) = qflx_surf(1) + qflx_in_h2osfc(c)
                 qflx_surf_input(2) = qflx_surf_input(2) + qflx_in_h2osfc(c)
@@ -714,11 +720,12 @@ contains
 #if (defined HUM_HOL)
                if (h2osfc(c) .gt. 0._r8) then
                   qflx_h2osfc_surf(c) = min(qflx_h2osfc_surfrate*h2osfc(c)**2.0,h2osfc(c) / dtime)
+               endif
 #elif (defined MARSH)   
-             qflx_tide(c) = 0._r8
-             if (h2osfc(c) .gt. 0._r8) then
+               qflx_tide(c) = 0._r8
+               if (h2osfc(c) .gt. 0._r8) then
                 qflx_h2osfc_surf(c) = min(qflx_h2osfc_surfrate*h2osfc(c)**2.0_r8,h2osfc(c) / dtime) 
-
+               endif
 #else
                 ! limit runoff to value of storage above S(pc)
                 if(h2osfc(c) >= h2osfc_thresh(c) .and. h2osfcflag/=0) then
@@ -783,9 +790,9 @@ contains
                   s_node = min(1.0_r8, s_node)
                   s1 = 0.5_r8*(1.0+s_node)
                   s1 = min(1._r8, s1)
-                  if (c .eq. 1) ka_hu = ka_hu+(hksat(c,j)*s1**(2._r8*bsw(c,j)+3._r8))* &
+                  if (topo_index .eq. 1) ka_hu = ka_hu+(hksat(c,j)*s1**(2._r8*bsw(c,j)+3._r8))* &
                                 dzmm(c,j)/sum(dzmm(c,jwt(c)+1:nlevbed))
-                  if (c .eq. 2) ka_ho = ka_ho+(hksat(c,j)*s1**(2._r8*bsw(c,j)+3._r8))* &
+                  if (topo_index .eq. 2) ka_ho = ka_ho+(hksat(c,j)*s1**(2._r8*bsw(c,j)+3._r8))* &
                                 dzmm(c,j)/sum(dzmm(c,jwt(c)+1:nlevbed))
                 end do
              else
@@ -793,16 +800,16 @@ contains
                   s_node = min(1.0_r8, s_node)
                   s1 = 0.5_r8*(1.0+s_node)
                   s1 = min(1._r8, s1)
-                  if (c .eq. 1) ka_hu = ka_hu+(hksat(c,jwt(c))*s1**(2._r8*bsw(c,jwt(c))+3._r8))
-                  if (c .eq. 2) ka_ho = ka_ho+(hksat(c,jwt(c))*s1**(2._r8*bsw(c,jwt(c))+3._r8))
+                  if (topo_index .eq. 1) ka_hu = ka_hu+(hksat(c,jwt(c))*s1**(2._r8*bsw(c,jwt(c))+3._r8))
+                  if (topo_index .eq. 2) ka_ho = ka_ho+(hksat(c,jwt(c))*s1**(2._r8*bsw(c,jwt(c))+3._r8))
              end if
 
-             if (c.eq.1) then
+             if (topo_index .eq. 1) then
                zwt_hu = zwt(1)
                zwt_hu = zwt_hu - h2osfc(1)/1000._r8
              endif
 
-             if (c.eq.2) then
+             if (topo_index .eq. 2) then
                zwt_ho = zwt(2)
                ka_ho = max(ka_ho, 1e-5_r8)
                ka_hu = max(ka_hu, 1e-5_r8)
@@ -998,7 +1005,7 @@ contains
      real(r8), intent(in)  :: dtime
      !
      ! !LOCAL VARIABLES:
-     integer  :: c,j,fc,i,l,g                            ! indices
+     integer  :: c,j,fc,i,l,g,t,topo_index                            ! indices
      integer  :: nlevbed                                 ! # layers to bedrock
      real(r8) :: xs(bounds%begc:bounds%endc)             ! water needed to bring soil moisture to watmin (mm)
      real(r8) :: dzmm(bounds%begc:bounds%endc,1:nlevgrnd) ! layer thickness (mm)
@@ -1215,6 +1222,8 @@ contains
 ! Water table changes due to lateral flux between hommock and hollow in aquifer 
        do fc = 1, num_hydrologyc
            c = filter_hydrologyc(fc)
+           t = col_pp%topounit(c)
+           topo_index = top_pp%topo_grc_ind(t)
 
            qflx_lat_aqu_layer(c,:) = 0.0
     
@@ -1268,7 +1277,7 @@ contains
                    if (qflx_lat_aqu_tot <= 0.) then
                      exit
                    else if (j .eq. 1) then
-                       ! if (c .eq. 2) then !hollow:  send excess to surface water
+                       ! if (topo_index .eq. 2) then !hollow:  send excess to surface water
                           h2osfc(c) = h2osfc(c) + qflx_lat_aqu_tot !DMR 6/13/13
                        ! else               !hummock:  send to drainage
                        !   qflx_rsub_sat(c) = qflx_lat_aqu_tot / dtime
@@ -1468,7 +1477,7 @@ contains
      !
      ! !LOCAL VARIABLES:
      !character(len=32) :: subname = 'Drainage'           ! subroutine name
-     integer  :: c,j,fc,i                                ! indices
+     integer  :: c,j,fc,i,t,topo_index                             ! indices
      integer  :: nlevbed                                 ! # layers to bedrock
      real(r8) :: xs(bounds%begc:bounds%endc)             ! water needed to bring soil moisture to watmin (mm)
      real(r8) :: dzmm(bounds%begc:bounds%endc,1:nlevgrnd) ! layer thickness (mm)
@@ -1635,6 +1644,8 @@ contains
        do fc = 1, num_hydrologyc
           c = filter_hydrologyc(fc)
              nlevbed = nlev2bed(c)
+          t = col_pp%topounit(c)
+          topo_index = top_pp%topo_grc_ind(t)
 
           !  specify maximum drainage rate
           q_perch_max = 1.e-5_r8 * sin(col_pp%topo_slope(c) * (rpi/180._r8))
@@ -1836,7 +1847,7 @@ contains
 #if (defined HUM_HOL)
           deep_seep = 0._r8 !100.0_r8 / 365._r8 / 86400._r8  !rate per second
           !changes for hummock hollow topography
-          if (c .eq. 1) then !hummock
+          if (topo_index .eq. 1) then !hummock
             if (zwt(c) < (0.7_r8 + 3.0_r8 * humhol_ht/2.0_r8)) then
                rsub_top(c)    = deep_seep + imped * rsub_top_max* exp(-fff(c)*zwt(c)) - &
                  imped * rsub_top_max * exp(-fff(c)*(0.7_r8+3.0_r8*humhol_ht/2.0_r8))
