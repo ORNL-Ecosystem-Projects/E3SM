@@ -453,7 +453,7 @@ contains
                     !metdata_fname = 'WCYCL1850S.ne30_' // trim(metvars(v)) // '_0076-0100_z' // zst(2:3) // '.nc'
                     metdata_fname = 'CBGC1850S.ne30_' // trim(metvars(v)) // '_0566-0590_z' // zst(2:3) // '.nc'
             else if (atm2lnd_vars%metsource == 6) then
-                metdata_fname = 'elmforc.TRENDY.c2025_0.5x0.5_' // trim(atm2lnd_vars%metvars(v)) // '_1901-2024_z' // zst(2:3) // '.nc'
+                metdata_fname = 'elmforc.TRENDY.c2025_0.5x0.5_' // trim(metvars(v)) // '_1901-2024_z' // zst(2:3) // '.nc'
             end if
   
             ierr = nf90_open(trim(metdata_bypass) // '/' // trim(metdata_fname), NF90_NOWRITE, met_ncids(v))
@@ -663,7 +663,7 @@ contains
           e = esati(tdc(tbot))
         end if
         qsat = 0.622_r8*e / (atm2lnd_vars%forc_pbot_not_downscaled_grc(g) - 0.378_r8*e)
-        if (trim(adjustl(atm2lnd_vars%metvars(3))) == 'RH') then                            !convert RH to qbot, when input is actually RH
+        if (trim(adjustl(metvars(3))) == 'RH') then                            !convert RH to qbot, when input is actually RH
            atm2lnd_vars%forc_q_not_downscaled_grc(g) = qsat * atm2lnd_vars%forc_q_not_downscaled_grc(g) / 100.0_r8
         else if(atm2lnd_vars%forc_q_not_downscaled_grc(g)>qsat) then     ! data checking for specific humidity
            atm2lnd_vars%forc_q_not_downscaled_grc(g) = qsat
