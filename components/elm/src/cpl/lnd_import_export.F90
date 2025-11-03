@@ -105,7 +105,7 @@ contains
     character(len=200) metsource_str, thisline
     character(len=*), parameter :: sub = 'lnd_import_mct'
     integer :: av, v, n, nummetdims, g3, gtoget, ztoget, line, mystart, tod_start, thistimelen  
-    character(len=20) aerovars(14), metvars(14)
+    character(len=20) aerovars(14)
     character(len=3) zst
     integer :: stream_year_first_lightng, stream_year_last_lightng, model_year_align_lightng
     integer :: stream_year_first_popdens, stream_year_last_popdens, model_year_align_popdens
@@ -255,34 +255,51 @@ contains
               use_w5e5 = .true.
           end if
 
- 
-          metvars(1) = 'TBOT'
-          metvars(2) = 'PSRF'
-          metvars(3) = 'QBOT'
-          !if (atm2lnd_vars%metsource .eq. 2) metvars(3) = 'RH'
-          if (atm2lnd_vars%metsource .ne. 5) metvars(4) = 'FSDS'
-          if (atm2lnd_vars%metsource .ne. 5) metvars(5) = 'PRECTmms'
-          if (atm2lnd_vars%metsource .ne. 5) metvars(6) = 'WIND'
-          metvars(4) = 'FSDS'
-          metvars(5) = 'PRECTmms'
-          metvars(6) = 'WIND'
-          metvars(7) = 'FLDS'
-          metvars(8) = 'ZWT'
-          if (atm2lnd_vars%metsource .eq. 5) then 
-              metvars(4) = 'SWNDF'
-              metvars(5) = 'RAINC'
-              metvars(6) = 'U'
-              metvars(8) = 'SWNDR'
-              metvars(9) = 'SWVDF'
-              metvars(10) = 'SWVDR'
-              metvars(11) = 'RAINL'
-              metvars(12) = 'SNOWC'
-              metvars(13) = 'SNOWL'
-              metvars(14) = 'V'
+          atm2lnd_vars%metvars(1) = 'TBOT'
+          atm2lnd_vars%metvars(2) = 'PSRF'
+          atm2lnd_vars%metvars(3) = 'QBOT'
+          if (atm2lnd_vars%metsource .ne. 5) atm2lnd_vars%metvars(4) = 'FSDS'
+          if (atm2lnd_vars%metsource .ne. 5) atm2lnd_vars%metvars(5) = 'PRECTmms'
+          if (atm2lnd_vars%metsource .ne. 5) atm2lnd_vars%metvars(6) = 'WIND'
+          atm2lnd_vars%metvars(7) = 'FLDS'
+          atm2lnd_vars%metvars(8) = 'ZWT'
+          if (atm2lnd_vars%metsource .eq. 5) then
+              atm2lnd_vars%metvars(4) = 'SWNDF'
+              atm2lnd_vars%metvars(5) = 'RAINC'
+              atm2lnd_vars%metvars(6) = 'U'
+              atm2lnd_vars%metvars(8) = 'SWNDR'
+              atm2lnd_vars%metvars(9) = 'SWVDF'
+              atm2lnd_vars%metvars(10) = 'SWVDR'
+              atm2lnd_vars%metvars(11) = 'RAINL'
+              atm2lnd_vars%metvars(12) = 'SNOWC'
+              atm2lnd_vars%metvars(13) = 'SNOWL'
+              atm2lnd_vars%metvars(14) = 'V'
           else
-              metvars(4) = 'FSDS'
-              metvars(5) = 'PRECTmms'
-              metvars(6) = 'WIND'
+              atm2lnd_vars%metvars(4) = 'FSDS'
+              atm2lnd_vars%metvars(5) = 'PRECTmms'
+              atm2lnd_vars%metvars(6) = 'WIND'
+          end if
+
+          !Check if site file and QBOT doesn't exist, use RH instead
+          if (atm2lnd_vars%metsource == 2) then  ! site data
+              ! Check if QBOT exists in the site file, if not use RH
+              ierr = nf90_open(trim(metdata_bypass) // '/all_hourly.nc', nf90_nowrite, ncid)
+              if (ierr == 0) then
+                  ierr = nf90_inq_varid(ncid, 'QBOT', varid)
+                  if (ierr /= 0) then
+                      ! QBOT not found, check for RH
+                      ierr = nf90_inq_varid(ncid, 'RH', varid)
+                      if (ierr == 0) then
+                          atm2lnd_vars%metvars(3) = 'RH'
+                          if (masterproc) write(iulog,*) 'QBOT not found in site file, using RH instead'
+                      else
+                          call endrun(sub//' ERROR: Neither QBOT nor RH found in site meteorology file')
+                      end if
+                  end if
+                  ierr = nf90_close(ncid)
+              else
+                  call endrun(sub//' ERROR: Cannot open site meteorology file to check variables')
+              end if
           end if
 
           !set defaults
@@ -395,41 +412,41 @@ contains
           do v=1,met_nvars
             write(zst, '(I3)') 100+ztoget
             if (atm2lnd_vars%metsource == 0) then 
-                metdata_fname =  trim(metsource_str) // '_' // trim(metvars(v)) // '_z' // zst(2:3) // '.nc'
+                metdata_fname =  trim(metsource_str) // '_' // trim(atm2lnd_vars%metvars(v)) // '_z' // zst(2:3) // '.nc'
             else if (atm2lnd_vars%metsource == 1) then 
-                metdata_fname = 'CRUNCEP.v5_' // trim(metvars(v)) // '_1901-2013_z' // zst(2:3) // '.nc'
+                metdata_fname = 'CRUNCEP.v5_' // trim(atm2lnd_vars%metvars(v)) // '_1901-2013_z' // zst(2:3) // '.nc'
                 if (use_livneh .and. ztoget .ge. 16 .and. ztoget .le. 20) then 
-                    metdata_fname = 'CRUNCEP5_Livneh_' // trim(metvars(v)) // '_1950-2013_z' // zst(2:3) // '.nc'
+                    metdata_fname = 'CRUNCEP5_Livneh_' // trim(atm2lnd_vars%metvars(v)) // '_1950-2013_z' // zst(2:3) // '.nc'
                 else if (use_daymet .and. ztoget .ge. 16 .and. ztoget .le. 20) then 
-                    metdata_fname = 'CRUNCEP5_Daymet3_' // trim(metvars(v)) // '_1980-2013_z' // zst(2:3) // '.nc'
+                    metdata_fname = 'CRUNCEP5_Daymet3_' // trim(atm2lnd_vars%metvars(v)) // '_1980-2013_z' // zst(2:3) // '.nc'
                 end if
             else if (atm2lnd_vars%metsource == 2) then
                 metdata_fname = 'all_hourly.nc'
             else if (atm2lnd_vars%metsource == 3) then 
-               metdata_fname = 'Princeton_' // trim(metvars(v)) // '_1901-2012_z' // zst(2:3) // '.nc'
+               metdata_fname = 'Princeton_' // trim(atm2lnd_vars%metvars(v)) // '_1901-2012_z' // zst(2:3) // '.nc'
                 if (use_livneh .and. ztoget .ge. 16 .and. ztoget .le. 20) then
-                    metdata_fname = 'Princeton_Livneh_' // trim(metvars(v)) // '_1950-2012_z' // zst(2:3) // '.nc'
+                    metdata_fname = 'Princeton_Livneh_' // trim(atm2lnd_vars%metvars(v)) // '_1950-2012_z' // zst(2:3) // '.nc'
                 else if (use_daymet .and. ztoget .ge. 16 .and. ztoget .le. 20) then
-                    metdata_fname = 'Princeton_Daymet3_' // trim(metvars(v)) // '_1980-2012_z' // zst(2:3) // '.nc'
+                    metdata_fname = 'Princeton_Daymet3_' // trim(atm2lnd_vars%metvars(v)) // '_1980-2012_z' // zst(2:3) // '.nc'
                 end if
             else if (atm2lnd_vars%metsource == 4) then 
-                metdata_fname = 'GSWP3_' // trim(metvars(v)) // '_1901-2014_z' // zst(2:3) // '.nc'
+                metdata_fname = 'GSWP3_' // trim(atm2lnd_vars%metvars(v)) // '_1901-2014_z' // zst(2:3) // '.nc'
                 if(index(metdata_type, 'v1') .gt. 0) &
-                    metdata_fname = 'GSWP3_' // trim(metvars(v)) // '_1901-2010_z' // zst(2:3) // '.nc'
+                    metdata_fname = 'GSWP3_' // trim(atm2lnd_vars%metvars(v)) // '_1901-2010_z' // zst(2:3) // '.nc'
 
                 if (use_livneh .and. ztoget .ge. 16 .and. ztoget .le. 20) then 
-                    metdata_fname = 'GSWP3_Livneh_' // trim(metvars(v)) // '_1950-2010_z' // zst(2:3) // '.nc'                
+                    metdata_fname = 'GSWP3_Livneh_' // trim(atm2lnd_vars%metvars(v)) // '_1950-2010_z' // zst(2:3) // '.nc'                
                 else if (use_daymet .and. (index(metdata_type, 'daymet4') .gt. 0) ) then
                    !daymet v4 with GSWP3 v2 for NA with user-defined zone-mappings.txt
-                    metdata_fname = 'GSWP3_daymet4_' // trim(metvars(v)) // '_1980-2014_z' // zst(2:3) // '.nc'
+                    metdata_fname = 'GSWP3_daymet4_' // trim(atm2lnd_vars%metvars(v)) // '_1980-2014_z' // zst(2:3) // '.nc'
                 else if (use_daymet .and. ztoget .ge. 16 .and. ztoget .le. 20) then 
-                    metdata_fname = 'GSWP3v1_Daymet_' // trim(metvars(v)) // '_1980-2010_z' // zst(2:3) // '.nc'
+                    metdata_fname = 'GSWP3v1_Daymet_' // trim(atm2lnd_vars%metvars(v)) // '_1980-2010_z' // zst(2:3) // '.nc'
                 else if (use_w5e5) then 
-                    metdata_fname = 'gswp_w5e5_' // trim(metvars(v)) // '_1901-2019_z' // zst(2:3) // '.nc'
+                    metdata_fname = 'gswp_w5e5_' // trim(atm2lnd_vars%metvars(v)) // '_1901-2019_z' // zst(2:3) // '.nc'
                 end if
             else if (atm2lnd_vars%metsource == 5) then 
-                    !metdata_fname = 'WCYCL1850S.ne30_' // trim(metvars(v)) // '_0076-0100_z' // zst(2:3) // '.nc'
-                    metdata_fname = 'CBGC1850S.ne30_' // trim(metvars(v)) // '_0566-0590_z' // zst(2:3) // '.nc'
+                    !metdata_fname = 'WCYCL1850S.ne30_' // trim(atm2lnd_vars%metvars(v)) // '_0076-0100_z' // zst(2:3) // '.nc'
+                    metdata_fname = 'CBGC1850S.ne30_' // trim(atm2lnd_vars%metvars(v)) // '_0566-0590_z' // zst(2:3) // '.nc'
             end if
   
             ierr = nf90_open(trim(metdata_bypass) // '/' // trim(metdata_fname), NF90_NOWRITE, met_ncids(v))
@@ -448,7 +465,7 @@ contains
             atm2lnd_vars%npf(v)            = 86400d0*(timetemp(2)-timetemp(1))/get_step_size()  
             atm2lnd_vars%timelen_spinup(v) = nyears_spinup*(365*nint(24./atm2lnd_vars%timeres(v)))
     
-            ierr = nf90_inq_varid(met_ncids(v), trim(metvars(v)), varid)
+            ierr = nf90_inq_varid(met_ncids(v), trim(atm2lnd_vars%metvars(v)), varid)
 
             !get the conversion factors
             ierr = nf90_get_att(met_ncids(v), varid, 'scale_factor', atm2lnd_vars%scale_factors(v))
@@ -623,12 +640,11 @@ contains
           e = esati(tdc(tbot))
         end if
         qsat = 0.622_r8*e / (atm2lnd_vars%forc_pbot_not_downscaled_grc(g) - 0.378_r8*e)
-        !if (atm2lnd_vars%metsource == 2) then                            !convert RH to qbot, when input is actually RH
-        !  atm2lnd_vars%forc_q_not_downscaled_grc(g) = qsat * atm2lnd_vars%forc_q_not_downscaled_grc(g) / 100.0_r8
-        !else if(atm2lnd_vars%forc_q_not_downscaled_grc(g)>qsat) then     ! data checking for specific humidity
-        !  atm2lnd_vars%forc_q_not_downscaled_grc(g) = qsat
-        !end if
-
+        if (trim(adjustl(atm2lnd_vars%metvars(3))) == 'RH') then                            !convert RH to qbot, when input is actually RH
+           atm2lnd_vars%forc_q_not_downscaled_grc(g) = qsat * atm2lnd_vars%forc_q_not_downscaled_grc(g) / 100.0_r8
+        else if(atm2lnd_vars%forc_q_not_downscaled_grc(g)>qsat) then     ! data checking for specific humidity
+           atm2lnd_vars%forc_q_not_downscaled_grc(g) = qsat
+        end if
         !use longwave from file if provided
         atm2lnd_vars%forc_lwrad_not_downscaled_grc(g) = ((atm2lnd_vars%atm_input(7,g,1,tindex(7,1))*atm2lnd_vars%scale_factors(7)+ &
                                                         atm2lnd_vars%add_offsets(7))*wt1(7) + (atm2lnd_vars%atm_input(7,g,1,tindex(7,2)) &
