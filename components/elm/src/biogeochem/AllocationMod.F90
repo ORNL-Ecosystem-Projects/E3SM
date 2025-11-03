@@ -630,15 +630,8 @@ contains
 
             xsmrpool_recover(p) = -xsmrpool(p)/(dayscrecover*secspday)
             !DMR note - Modification from orignial code to use cpool
-
-            !if (xsmrpool_recover(p) < availc(p)) then
-            !   ! available carbon reduced by amount for xsmrpool recovery
-            !   availc(p) = availc(p) - xsmrpool_recover(p)
-            !else
-            !   ! all of the available carbon goes to xsmrpool recovery
-            !   xsmrpool_recover(p) = availc(p)
-            !   availc(p) = 0.0_r8
-            if (cpool(p) < 10.0_r8 * xsmrpool_recover(p)*dt) then 
+#if (defined HUM_HOL)
+            if (cpool(p) < 10.0_r8 * xsmrpool_recover(p)*dt) then
                !Take xsmr recovery from existing cpool, if cpool too small then
                !use availc
                if (xsmrpool_recover(p) < availc(p)) then
@@ -649,8 +642,18 @@ contains
                   xsmrpool_recover(p) = availc(p)
                   availc(p) = 0.0_r8
                end if
- 
-            end if 
+
+            end if
+#else
+            if (xsmrpool_recover(p) < availc(p)) then
+               ! available carbon reduced by amount for xsmrpool recovery
+               availc(p) = availc(p) - xsmrpool_recover(p)
+            else
+               ! all of the available carbon goes to xsmrpool recovery
+               xsmrpool_recover(p) = availc(p)
+               availc(p) = 0.0_r8
+            end if
+#endif
             cpool_to_xsmrpool(p) = xsmrpool_recover(p)
          end if
 

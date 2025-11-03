@@ -457,14 +457,22 @@ contains
                 this%leafc_storage_patch(p) = 0._r8
              else
                 if (veg_vp%evergreen(veg_pp%itype(p)) == 1._r8) then
+#if (defined HUM_HOL)
                    this%leafc_patch(p)         = 50._r8 * ratio
+#else
+                   this%leafc_patch(p)         = 1._r8 * ratio
+#endif
                    this%leafc_storage_patch(p) = 0._r8
                 else if (iscft(veg_pp%itype(p))) then ! prognostic crop types
                    this%leafc_patch(p) = 0._r8
                    this%leafc_storage_patch(p) = 0._r8
                 else
                    this%leafc_patch(p) = 0._r8
+#if (defined HUM_HOL)
                    this%leafc_storage_patch(p) = 50._r8 * ratio
+#else
+                   this%leafc_storage_patch(p) = 1._r8 * ratio
+#endif
                 end if
              end if
              this%leafc_xfer_patch(p) = 0._r8
