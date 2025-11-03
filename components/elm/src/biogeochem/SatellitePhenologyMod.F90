@@ -48,11 +48,33 @@ module SatellitePhenologyMod
   public :: SatellitePhenologyInit ! Dynamically allocate memory
   public :: interpMonthlyVeg       ! interpolate monthly vegetation data
   public :: readAnnualVegetation   ! Read in annual vegetation (needed for Dry-deposition)
+  public :: readSatPhenolParams    ! Read in satellite phenology parameters
   !
   ! !PRIVATE MEMBER FUNCTIONS:
   private :: readMonthlyVegetation   ! read monthly vegetation data for two months
   private :: lai_init    ! position datasets for LAI
   private :: lai_interp  ! interpolates between two years of LAI data
+  type, private :: SatPhenolParamsType
+     real(r8), pointer :: crit_dayl        => null() ! critical day length for senescence
+                                                     ! from Biome-BGC, v4.1.2
+     real(r8), pointer :: crit_dayl_stress => null() ! critical day length for senescence (stress)
+     real(r8), pointer :: cumprec_onset    => null() ! 10-day cumulative precipitation threshold for onset
+     real(r8), pointer :: ndays_on         => null() ! number of days to complete leaf onset
+     real(r8), pointer :: ndays_off        => null() ! number of days to complete leaf offset
+     real(r8), pointer :: fstor2tran       => null() ! fraction of storage to move to transfer for each onset
+     real(r8), pointer :: crit_onset_fdd   => null() ! critical number of freezing days to set gdd counter
+     real(r8), pointer :: crit_onset_swi   => null() ! critical number of days > soilpsi_on for onset
+     real(r8), pointer :: soilpsi_on       => null() ! critical soil water potential for leaf onset
+     real(r8), pointer :: crit_offset_fdd  => null() ! critical number of freezing days to initiate offset
+     real(r8), pointer :: crit_offset_swi  => null() ! critical number of water stress days to initiate offset
+     real(r8), pointer :: soilpsi_off      => null() ! critical soil water potential for leaf offset
+     real(r8), pointer :: lwtop            => null() ! live wood turnover proportion (annual fraction)
+     real(r8), pointer :: crit_gdd1        => null() ! critical growing degree days for onset 1
+     real(r8), pointer :: crit_gdd2        => null() ! critical growing degree days for onset 2
+  end type SatPhenolParamsType
+
+  ! SatPhenolParamsInst is populated in readSatPhenolParams
+  type(SatPhenolParamsType), public ::  SatPhenolParamsInst
 
   ! !PRIVATE MEMBER DATA:
   type(shr_strdata_type) :: sdat_lai           ! LAI input data stream
@@ -73,6 +95,142 @@ contains
   ! lai_init
   !
   !-----------------------------------------------------------------------
+  subroutine readSatPhenolParams ( ncid )
+    !
+    ! !DESCRIPTION:
+    !
+    ! !USES:
+    use ncdio_pio    , only: file_desc_t,ncd_io
+    use elm_varcon   , only: secspday
+
+    ! !ARGUMENTS:
+    implicit none
+    type(file_desc_t),intent(inout) :: ncid   ! pio netCDF file id
+    !
+    ! !LOCAL VARIABLES:
+    character(len=32)  :: subname = 'SatPhenolParamsType'
+    character(len=100) :: errCode = '-Error reading in parameters file:'
+    logical            :: readv ! has variable been read in or not
+    real(r8)           :: tempr ! temporary to read in parameter
+    character(len=100) :: tString ! temp. var for reading
+    !-----------------------------------------------------------------------
+
+     allocate(SatPhenolParamsInst%crit_dayl       )
+     allocate(SatPhenolParamsInst%crit_dayl_stress)
+     allocate(SatPhenolParamsInst%cumprec_onset   )
+     allocate(SatPhenolParamsInst%ndays_on        )
+     allocate(SatPhenolParamsInst%ndays_off       )
+     allocate(SatPhenolParamsInst%fstor2tran      )
+     allocate(SatPhenolParamsInst%crit_onset_fdd  )
+     allocate(SatPhenolParamsInst%crit_onset_swi  )
+     allocate(SatPhenolParamsInst%soilpsi_on      )
+     allocate(SatPhenolParamsInst%crit_offset_fdd )
+     allocate(SatPhenolParamsInst%crit_offset_swi )
+     allocate(SatPhenolParamsInst%soilpsi_off     )
+     allocate(SatPhenolParamsInst%lwtop           )
+     allocate(SatPhenolParamsInst%crit_gdd1       )
+     allocate(SatPhenolParamsInst%crit_gdd2       )
+    !
+    ! read in parameters
+    !
+    tString='crit_dayl'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun( msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    SatPhenolParamsInst%crit_dayl=tempr
+
+    tString='crit_dayl_stress'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) then
+      SatPhenolParamsInst%crit_dayl_stress = SatPhenolParamsInst%crit_dayl
+    else
+      SatPhenolParamsInst%crit_dayl_stress = tempr
+    end if
+
+    tString='cumprec_onset'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) then
+       SatPhenolParamsInst%cumprec_onset = 0._r8 
+    else
+       SatPhenolParamsInst%cumprec_onset=tempr
+    end if
+
+    tString='ndays_on'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun( msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    SatPhenolParamsInst%ndays_on=tempr
+
+    tString='ndays_off'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun( msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    SatPhenolParamsInst%ndays_off=tempr
+
+    tString='fstor2tran'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun( msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    SatPhenolParamsInst%fstor2tran=tempr
+
+    tString='crit_onset_fdd'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun( msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    SatPhenolParamsInst%crit_onset_fdd=tempr
+
+    tString='crit_onset_swi'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun( msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    SatPhenolParamsInst%crit_onset_swi=tempr
+
+    tString='soilpsi_on'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun( msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    SatPhenolParamsInst%soilpsi_on=tempr
+
+    tString='crit_offset_fdd'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun( msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    SatPhenolParamsInst%crit_offset_fdd=tempr
+
+    tString='crit_offset_swi'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun( msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    SatPhenolParamsInst%crit_offset_swi=tempr
+
+    tString='soilpsi_off'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun( msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    SatPhenolParamsInst%soilpsi_off=tempr
+
+    tString='lwtop_ann'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun( msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    SatPhenolParamsInst%lwtop=tempr
+
+    tString='crit_gdd1'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun( msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    SatPhenolParamsInst%crit_gdd1=tempr
+
+    tString='crit_gdd2'
+    call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if ( .not. readv ) call endrun( msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+    SatPhenolParamsInst%crit_gdd2=tempr
+
+     !!!!========== Update to device ========= !!!
+     !$acc update device(SatPhenolParamsInst%crit_dayl, &
+     !$acc SatPhenolParamsInst%crit_dayl_stress, &
+     !$acc SatPhenolParamsInst%cumprec_onset   , &
+     !$acc SatPhenolParamsInst%ndays_on        , &
+     !$acc SatPhenolParamsInst%ndays_off       , &
+     !$acc SatPhenolParamsInst%fstor2tran      , &
+     !$acc SatPhenolParamsInst%crit_onset_fdd  , &
+     !$acc SatPhenolParamsInst%crit_onset_swi  , &
+     !$acc SatPhenolParamsInst%soilpsi_on      , &
+     !$acc SatPhenolParamsInst%crit_offset_fdd , &
+     !$acc SatPhenolParamsInst%crit_offset_swi , &
+     !$acc SatPhenolParamsInst%soilpsi_off     , &
+     !$acc SatPhenolParamsInst%lwtop           )
+
+  end subroutine readSatPhenolParams
+
   subroutine lai_init(bounds)
     !
     ! Initialize data stream information for LAI.
@@ -316,11 +474,6 @@ contains
     use elm_varcon      , only : secspday
     use elm_varctl      , only : use_fates_sp
     use pftvarcon, only : noveg, nbrdlf_dcd_brl_shrub, season_decid, stress_decid
-!if defined HUM_HOL
-    use pftvarcon, only : phen_a, phen_b, phen_c, phen_topt, phen_fstar, phen_tc
-    use pftvarcon, only : phen_cstar, phen_tforce, phen_tchil, phen_pstart, phen_tb, phen_ycrit 
-    use pftvarcon, only : phen_spring, phen_autumn, phen_tbase, phen_crit_dayl
-!endif
     !
     ! !ARGUMENTS:
     type(bounds_type)      , intent(in)    :: bounds                          
@@ -338,7 +491,7 @@ contains
     real(r8) :: onset_gdd, fracday, dt, ndays_on, ndays_off, crit_dayl
     real(r8) :: soilpsi_off, soilpsi_on, crit_onset_swi, crit_offset_swi
     real(r8) :: crit_offset_fdd, crit_onset_fdd, ws_flag, crit_onset_gdd
-    integer spring_threshold, autumn_threshold
+    real(r8) :: crit_gdd1, crit_gdd2, spring_threshold, autumn_threshold
     !-----------------------------------------------------------------------
  
     associate(                                                           &
@@ -397,15 +550,18 @@ contains
          ! top height      HTOP <- mhvt1 and mhvt2
          ! bottom height   HBOT <- mhvb1 and mhvb2
  
-         !Parameter values (note - these should be retrieved from the parameter file)
-         ndays_on  = 30._r8
-         ndays_off = 15._r8
-         crit_onset_swi  = 15._r8
-         crit_onset_fdd  = 15._r8  !Functionality not implemented
-         crit_offset_swi = 15._r8
-         crit_offset_fdd = 15._r8
-         soilpsi_off = -2._r8
-         soilpsi_on = -2._r8
+         !Parameter values 
+         crit_onset_swi  = SatPhenolParamsInst%crit_onset_swi
+         crit_dayl       = SatPhenolParamsInst%crit_dayl
+         ndays_on        = SatPhenolParamsInst%ndays_on
+         ndays_off       = SatPhenolParamsInst%ndays_off
+         crit_onset_fdd  = SatPhenolParamsInst%crit_onset_fdd  !Functionality not implemented
+         crit_offset_swi = SatPhenolParamsInst%crit_offset_swi
+         crit_offset_fdd = SatPhenolParamsInst%crit_offset_fdd
+         soilpsi_off     = SatPhenolParamsInst%soilpsi_off
+         soilpsi_on      = SatPhenolParamsInst%soilpsi_on
+         crit_gdd1       = SatPhenolParamsInst%crit_gdd1
+         crit_gdd2       = SatPhenolParamsInst%crit_gdd2 
 
          if (.not. use_lai_streams) then
             tlai(p) = timwt(1)*mlai2t(p,1) + timwt(2)*mlai2t(p,2)
@@ -418,51 +574,16 @@ contains
               ws_flag = 0._r8
             end if
             !------ Seasonal deciduous phenology ----------------------
-#if defined HUM_HOL
-            !DMR note 2/19/24 - this does not currently work
-            !crit_onset_gdd = exp(4.8_r8 + 0.13_r8*(tmean(p) - SHR_CONST_TKFRZ))
-            crit_onset_gdd = phen_fstar
+            crit_onset_gdd = exp(crit_gdd1 + crit_gdd2*(tmean(p) - SHR_CONST_TKFRZ))
             if (.not. use_cn .and. season_decid(ivt(p)) == 1._r8) then
                tlai(p) = maxval(annlai(:,p))
-               crit_dayl = phen_crit_dayl !39300_r8
                !Spring phenology
                !Increment GDD and chilling days, check threshold according to model formulation
                spring_threshold = 0 
-               if (ws_flag == 1._r8 .and. phen_spring == 0) then 
+               if (ws_flag == 1._r8) then 
                  !Default model
                  sp_gdd(p) = sp_gdd(p) + max((t_soisno(c,3) - SHR_CONST_TKFRZ)*fracday, 0._r8)
                  if (sp_gdd(p) .ge. crit_onset_gdd) spring_threshold = 1
-               else if (ws_flag == 1._r8 .and. phen_spring == 1) then 
-                 !PAR model
-                 if (t_ref2m(p) > phen_tbase) sp_gdd(p) = sp_gdd(p) + &
-                   (28.4_r8 / (1._r8 + exp(3.4_r8 - (t_ref2m(p) -SHR_CONST_TKFRZ)*0.185_r8)))*fracday 
-                 if (t_ref2m(p) > phen_topt .and. t_ref2m(p) < (phen_topt + 10.4_r8)) then 
-                   sp_chil(p) = sp_chil(p) + (((t_ref2m(p) - SHR_CONST_TKFRZ)-10.4_r8)/(phen_topt-10.4_r8))*fracday 
-                 end if
-                 if (t_ref2m(p) > phen_topt-3.4_r8 .and. t_ref2m(p) <= phen_topt) then
-                   sp_chil(p) = sp_chil(p) + (((t_ref2m(p) - SHR_CONST_TKFRZ)+3.4_r8)/(phen_topt+3.4_r8))*fracday
-                 end if
-                 if (sp_gdd(p) > phen_a + phen_b * exp(sp_chil(p))) spring_threshold = 1 
-               else if (ws_flag == 1._r8 .and. phen_spring == 2) then
-                 !ALT model
-                 if (t_ref2m(p) > phen_tbase) sp_gdd(p) = sp_gdd(p) + (t_ref2m(p)-phen_tbase)*fracday
-                 if (t_ref2m(p) > 263.0_r8 .and. t_ref2m(p) < phen_tbase) sp_chil(p) = sp_chil(p) + fracday
-                 if (sp_gdd(p) > phen_a + phen_b * exp(phen_c * sp_chil(p))) spring_threshold = 1
-               else if (ws_flag == 1._r8 .and. phen_spring == 3) then 
-                 !SEQ model
-                 if (t_ref2m(p) < phen_tchil .and. t_ref2m(p) > 263._r8) sp_chil(p)=sp_chil(p)+fracday
-                 if (sp_chil(p) > phen_cstar .and. t_ref2m(p) > phen_tforce) then 
-                   sp_gdd(p) = sp_gdd(p) + (t_ref2m(p)-phen_tforce)*fracday
-                 end if
-                 if (sp_gdd(p) > phen_fstar) spring_threshold = 1
-               else if (ws_flag == 1._r8 .and. phen_spring == 4) then
-                 !SW model
-                 sp_gdd(p) = sp_gdd(p) + (28.4_r8 / (1.0_r8 + exp(3.4_r8-(t_ref2m(p)-SHR_CONST_TKFRZ)*0.185_r8)))*fracday
-                 if (sp_gdd(p) .ge. phen_fstar) spring_threshold = 1
-               end if
-               !Increment dayl_temp (DM only)
-               if (tlai(p) > 0._r8 .and. dayl(g) < phen_pstart .and. t_ref2m(p) < phen_tb) then 
-                 sp_dayl_temp(p) = sp_dayl_temp(p) + (phen_tb - t_ref2m(p))**2 * (1.0_r8 -dayl(g)/phen_pstart)**2
                end if
              
                if (ws_flag == 1._r8) then   !Onset period
@@ -482,18 +603,11 @@ contains
                  sp_gdd(p)        = 0._r8
                  autumn_threshold = 0
                  !default senescence model
-                 if (phen_autumn == 0 .and. dayl(g) .lt. crit_dayl) autumn_threshold = 1
-                 !WM
-                 if (phen_autumn == 1 .and. ((dayl(g) .lt. crit_dayl .and. t_soisno(c,3) < phen_tb) .or. &
-                       t_soisno(c,3) < phen_tc)) then
-                   autumn_threshold = 1
+                 if (dayl(g) .lt. crit_dayl) autumn_threshold = 1
+                 if (autumn_threshold == 1) then
+                   sp_offset_day(p) = min(sp_offset_day(p)+fracday, ndays_off)
                  end if
-                 !DM
-                 if (phen_autumn == 2 .and. sp_dayl_temp(p) > phen_ycrit) autumn_threshold = 1
-                 if (autumn_threshold == 1) then 
-                   sp_offset_day(p) = sp_offset_day(p)+fracday
-                 end if
-                 tlai(p) = max(tlai(p) * (ndays_off - sp_offset_day(p)) / ndays_off, 0._r8)
+                 tlai(p) = max(tlai(p) * (1.0_r8 - sp_offset_day(p) / ndays_off), 0._r8)
                end if
             end if
  
@@ -542,7 +656,6 @@ contains
                 sp_fdd_off(p)    = 0._r8
               end if
            endif
-#endif
          endif
 
          tsai(p) = timwt(1)*msai2t(p,1) + timwt(2)*msai2t(p,2)

@@ -97,7 +97,7 @@ contains
     use elm_varcon         , only : sb, cpair, hvap, vkc, grav, denice
     use elm_varcon         , only : denh2o, tfrz, csoilc, tlsai_crit, alpha_aero
     use elm_varcon         , only : isecspday, degpsec
-    use pftvarcon          , only : irrigated
+    use pftvarcon          , only : irrigated, slatop
     use elm_varcon         , only : c14ratio
 
     !NEW
@@ -319,7 +319,7 @@ contains
     real(r8) :: tau_diff(bounds%begp:bounds%endp) ! Difference from previous iteration tau
     real(r8) :: prev_tau(bounds%begp:bounds%endp) ! Previous iteration tau
     real(r8) :: prev_tau_diff(bounds%begp:bounds%endp) ! Previous difference in iteration tau
-
+    real(r8) :: liquid_vol_3, liquid_vol_4        ! liquid water volume in soil layers 3 and 4
     character(len=64) :: event !! timing event
     !------------------------------------------------------------------------------
 
@@ -870,13 +870,15 @@ contains
             if (veg_pp%itype(p) == 12) then
                 !DMRicciuto 12/4/2015 - changed to use average of layer 3 and 4 
                 !h2o_moss_inter(p) = 8.05_r8 * (1.0_r8 - min(max((0.15_r8-zwt(c))/(0.15_r8-0.5_r8),0._r8),1._r8))
-
-                h2o_moss_inter(p) = -18032 * ((h2osoi_vol(c,3)+h2osoi_vol(c,4))/2._r8)**4 +  &
-                                7248.1 * ((h2osoi_vol(c,3)+h2osoi_vol(c,4))/2._r8)**3 -  &
-                                591.74 * ((h2osoi_vol(c,3)+h2osoi_vol(c,4))/2._r8)**2 +  &
-                                6.9031 * ((h2osoi_vol(c,3)+h2osoi_vol(c,4))/2._r8)       &
-                                + 0.4945
-                if ((h2osoi_vol(c,3) + h2osoi_vol(c,4))/2._r8 .gt. 0.25) then
+                ! Use only liquid water 
+                liquid_vol_3 = h2osoi_liq(c,3) / (denh2o * col_pp%dz(c,3))  ! Convert to volumetric
+                liquid_vol_4 = h2osoi_liq(c,4) / (denh2o * col_pp%dz(c,4))  ! Convert to volumetric
+    
+                h2o_moss_inter(p) = -18032 * ((liquid_vol_3 + liquid_vol_4)/2._r8)**4 + &
+                        7248.1 * ((liquid_vol_3 + liquid_vol_4)/2._r8)**3 - &
+                        591.74 * ((liquid_vol_3 + liquid_vol_4)/2._r8)**2 + &
+                        6.9031 * ((liquid_vol_3 + liquid_vol_4)/2._r8) + 0.4945
+                if ((h2osoi_liq(c,3) + h2osoi_vol(c,4))/2._r8 .gt. 0.25) then
                     h2o_moss_inter(p) = -18032 *0.25**4 + 7248.1 * 0.25**3 &
                                      -591.74 *0.25**2 + 6.9031*0.25 + 0.4954
                 endif

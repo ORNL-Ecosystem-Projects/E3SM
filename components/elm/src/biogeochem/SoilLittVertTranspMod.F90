@@ -35,7 +35,7 @@ module SoilLittVertTranspMod
 
   !
 #if (defined HUM_HOL)
-  real(r8), public :: som_adv_flux =  0.0004_r8 / (86400_r8 * 365_r8)    ! m/s advection - long term peat accumulation rate at SPR
+  real(r8), public :: som_adv_flux =  0.0004_r8 / (86400_r8 * 365_r8)    ! was 0.0004 m/s advection - long term peat accumulation rate at SPR
 #else
   real(r8), public :: som_adv_flux =  0._r8    ! m/s advection
 #endif
