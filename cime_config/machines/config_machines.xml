@@ -4282,6 +4282,7 @@
       <env name="PNETCDF_PATH">$ENV{OLCF_PARALLEL_NETCDF_ROOT}</env>
       <env name="BLASLAPACK_LIBDIR">$ENV{OLCF_OPENBLAS_ROOT}/lib</env>
      </environment_variables>
+  </machine>
 
   <machine MACH="docker">
     <DESC>Docker</DESC>
