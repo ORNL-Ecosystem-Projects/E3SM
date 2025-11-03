@@ -29,6 +29,7 @@
   use FrictionVelocityType, only : frictionvel_type
   use SoilStateType       , only : soilstate_type
   use SoilHydrologyType   , only : soilhydrology_type
+  use CanopyStateType     , only : canopystate_type
   use FanUpdateMod        , only : fan_eval
 
   !
@@ -120,7 +121,8 @@ contains
   !-----------------------------------------------------------------------
   subroutine NitrogenDeposition( bounds, &
        atm2lnd_vars, frictionvel_vars,  &
-       soilstate_vars, filter_soilc, num_soilc, dt )
+       soilstate_vars, canopystate_vars, &
+       filter_soilc, num_soilc, dt )
     !
     ! !DESCRIPTION:
     ! On the radiation time step, update the nitrogen deposition rate
@@ -135,25 +137,73 @@ contains
     type(atm2lnd_type)       , intent(in)    :: atm2lnd_vars
     type(frictionvel_type)   , intent(in)    :: frictionvel_vars
     type(soilstate_type)     , intent(in)    :: soilstate_vars
+    type(canopystate_type)   , intent(in)    :: canopystate_vars
     integer                  , intent(in)    :: filter_soilc(:) ! filter for soil columns
     integer                  , intent(in)    :: num_soilc       ! number of soil columns in filter
     real(r8),   intent(in) :: dt
     !
     ! !LOCAL VARIABLES:
-    integer :: g,c                    ! indices
+    integer :: g,c,p                    ! indices
+#if (defined HUM_HOL)
+    real(r8) :: moss_column_lai        ! effective moss LAI for column
+    real(r8) :: moss_ndep_fraction      ! fraction of N deposition going to moss
+    real(r8) :: total_ndep_flux         ! total N deposition flux
+    real(r8), parameter :: k_intercept = 1.2_r8  ! interception coefficient
+#endif
     !-----------------------------------------------------------------------
 
     associate(&
          forc_ndep     =>  atm2lnd_vars%forc_ndep_grc           , & ! Input:  [real(r8) (:)]  nitrogen deposition rate (gN/m2/s)
+         elai          =>  canopystate_vars%elai_patch         , & ! Input:  [real(r8) (:)   ]  one-sided leaf area index with burying by snow
+         ndep_to_npool =>  veg_nf%ndep_to_npool   , & ! Output: [real(r8) (:)] N deposition to plant N pool (gN/m2/s)
          ndep_to_sminn =>  col_nf%ndep_to_sminn   & ! Output: [real(r8) (:)]
-         )
+    )      
+    !-----------------------------------------------------------------------
 
       ! Loop through columns
       do c = bounds%begc, bounds%endc
          g = col_pp%gridcell(c)
-         ndep_to_sminn(c) = forc_ndep(g)
 #if (defined HUM_HOL)
-         ndep_to_sminn(c) = 0.57_r8 / (86400_r8 * 365_r8)
+         ! Calculate moss LAI and fractional cover for this column
+         moss_column_lai = 0._r8
+       
+         do p = col_pp%pfti(c), col_pp%pftf(c)
+            if (veg_pp%active(p) .and. veg_pp%itype(p) == 12) then  ! moss PFT
+              moss_column_lai = moss_column_lai + elai(p) * veg_pp%wtcol(p)
+            endif
+         enddo
+         if (moss_column_lai > 0._r8) then
+           ! Exponential canopy interception following Beer's law
+           ! Based on light extinction principles applied to deposition
+           ! Fraction of N deposition intercepted by moss canopy
+           moss_ndep_fraction = 1._r8 - exp(-k_intercept * moss_column_lai)
+         else
+           moss_ndep_fraction = 0._r8
+         end if
+
+         ! Calculate N deposition partitioning
+         total_ndep_flux = 0.57_r8 / (86400_r8 * 365_r8) !forc_ndep(g)  ! convert from gN/m2/yr to gN/m2/s
+         ndep_to_sminn(c) = total_ndep_flux
+
+         ! Partition N deposition to moss patches
+         do p = col_pp%pfti(c), col_pp%pftf(c)
+           if (veg_pp%active(p) .and. veg_pp%itype(p) == 12) then  ! moss PFT
+              ! Distribute moss N deposition proportionally by patch weight
+              if (moss_column_lai > 0._r8) then
+                 ndep_to_npool(p) = total_ndep_flux * moss_ndep_fraction / veg_pp%wtcol(p)
+                 ndep_to_sminn(c) = ndep_to_sminn(c) - ndep_to_npool(p) * veg_pp%wtcol(p)
+              else
+                 ndep_to_npool(p) = 0._r8
+              endif
+           else
+                  ndep_to_npool(p) = 0._r8 ! Non-moss PFTs don't receive direct N deposition
+           endif
+         enddo         
+#else
+       ndep_to_sminn(c) = forc_ndep(g)
+       do p = col_pp%pfti(c), col_pp%pftf(c)
+         ndep_to_npool(p) = 0._r8
+       enddo
 #endif
       end do
 

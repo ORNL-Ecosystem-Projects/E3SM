@@ -605,20 +605,21 @@ contains
        end if 
     end if
     
-    this%tcs_month_beg(begg:endg) = spval
-    call hist_addfld1d (fname='TCS_MONTH_BEGIN',  units='gC/m^2',  &
+    if ( carbon_type == 'c12' ) then
+      this%tcs_month_beg(begg:endg) = spval
+      call hist_addfld1d (fname='TCS_MONTH_BEGIN',  units='gC/m^2',  &
          avgflag='I', long_name='total carbon storage at the beginning of a month', &
          ptr_lnd=this%tcs_month_beg)
 
-    this%tcs_month_end(begg:endg) = spval
-    call hist_addfld1d (fname='TCS_MONTH_END',  units='gC/m^2',  &
+     this%tcs_month_end(begg:endg) = spval
+     call hist_addfld1d (fname='TCS_MONTH_END',  units='gC/m^2',  &
          avgflag='I', long_name='total carbon storage at the end of a month', &
          ptr_lnd=this%tcs_month_end)
 
-    call hist_addfld1d (fname='CMASS_BALANCE_ERROR',  units='gC/m^2',  &
+     call hist_addfld1d (fname='CMASS_BALANCE_ERROR',  units='gC/m^2',  &
          avgflag='A', long_name='Gridcell carbon mass balance error', &
          ptr_lnd=this%errcb)
-
+    endif
     !-----------------------------------------------------------------------
     ! set cold-start initial values for select members of grc_cs
     !-----------------------------------------------------------------------
@@ -645,12 +646,13 @@ contains
     ! !LOCAL VARIABLES:
     logical :: readvar   ! determine if variable is on initial file
     !-----------------------------------------------------------------------
-    call restartvar(ncid=ncid, flag=flag, varname='TCS_MONTH_BEGIN', xtype=ncd_double,  &
+
+      call restartvar(ncid=ncid, flag=flag, varname='TCS_MONTH_BEGIN', xtype=ncd_double,  &
          dim1name='gridcell', &
          long_name='total carbon storage at the beginning of a month', units='gC/m^2', &
           interpinic_flag='interp', readvar=readvar, data=this%tcs_month_beg)
 
-    call restartvar(ncid=ncid, flag=flag, varname='TCS_MONTH_END', xtype=ncd_double,  &
+      call restartvar(ncid=ncid, flag=flag, varname='TCS_MONTH_END', xtype=ncd_double,  &
          dim1name='gridcell', &
          long_name='total carbon storage at the end of a month', units='gC/m^2', &
           interpinic_flag='interp', readvar=readvar, data=this%tcs_month_end)

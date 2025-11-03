@@ -380,7 +380,7 @@ contains
     call t_start_lnd(event)
     call NitrogenDeposition(bounds, &
          atm2lnd_vars, frictionvel_vars,  &
-         soilstate_vars, filter_soilc, num_soilc, dt )
+         soilstate_vars, canopystate_vars, filter_soilc, num_soilc, dt )
     call t_stop_lnd(event)
 
     event = 'CNFixation'

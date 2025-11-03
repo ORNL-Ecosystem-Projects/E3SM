@@ -370,6 +370,7 @@ contains
     associate(                                                                             &
          totcoln                   =>    col_ns%totcoln                  , & ! Input:  [real(r8) (:)]  (gN/m2) total column nitrogen, incl veg
          ndep_to_sminn             =>    col_nf%ndep_to_sminn             , & ! Input:  [real(r8) (:)]  atmospheric N deposition to soil mineral N (gN/m2/s)
+         ndep_to_npool             =>    veg_nf%ndep_to_npool             , & ! Input:  [real(r8) (:)]  atmospheric N deposition to plant N pool (gN/m2/s)
          nfix_to_sminn             =>    col_nf%nfix_to_sminn             , & ! Input:  [real(r8) (:)]  symbiotic/asymbiotic N fixation to soil mineral N (gN/m2/s)
          nfix_to_ecosysn           =>    col_nf%nfix_to_ecosysn           , &
          fert_to_sminn             =>    col_nf%fert_to_sminn             , & ! Input:  [real(r8) (:)]
@@ -451,6 +452,7 @@ contains
             do p = col_pp%pfti(c), col_pp%pftf(c)
                if (veg_pp%active(p) .and. (veg_pp%itype(p) .ne. noveg)) then
                   col_ninputs(c) = col_ninputs(c) + supplement_to_plantn(p) * veg_pp%wtcol(p)
+                  col_ninputs(c) = col_ninputs(c) + ndep_to_npool(p) * veg_pp%wtcol(p)
                end if
             end do
 
@@ -557,7 +559,7 @@ contains
             write(iulog,*)'DON                   = ',col_ns%totDON(c)
             write(iulog,*)'DON_runoff            = ',col_nf%DON_runoff(c)*dt
          endif
-         !call endrun(msg=errMsg(__FILE__, __LINE__))
+         call endrun(msg=errMsg(__FILE__, __LINE__))
 #endif
 
       end if
@@ -788,7 +790,7 @@ contains
             write(iulog,*)'SOP erosion = ',som_p_yield(c)*dt
             write(iulog,*)'SIP erosion = ',(labilep_yield(c)+secondp_yield(c)+occlp_yield(c)+primp_yield(c))*dt
          end if
-         !call endrun(msg=errMsg(__FILE__, __LINE__))
+         call endrun(msg=errMsg(__FILE__, __LINE__))
 #endif
       end if
 
@@ -1174,7 +1176,7 @@ contains
          write(iulog,*)'endcb                 = ',endcb_grc(g)
          write(iulog,*)'delta store           = ',endcb_grc(g)-begcb_grc(g)
          
-         !call endrun(msg=errMsg(__FILE__, __LINE__))
+         call endrun(msg=errMsg(__FILE__, __LINE__))
 #endif
       end if
 
@@ -1264,7 +1266,7 @@ contains
          write(iulog,*)''
          write(iulog,*)'dwt_seedn_leaf          ',dwt_seedn_to_leaf_grc(g)
          write(iulog,*)'dwt_seedn_deadstem      ',dwt_seedn_to_deadstem_grc(g)
-         !call endrun(msg=errMsg(__FILE__, __LINE__))
+         call endrun(msg=errMsg(__FILE__, __LINE__))
 #endif
       end if
 
@@ -1350,7 +1352,7 @@ contains
          write(iulog,*)'begpb                 = ',begpb_grc(g)
          write(iulog,*)'endpb                 = ',endpb_grc(g)
          write(iulog,*)'delta store           = ',endpb_grc(g)-begpb_grc(g)
-         !call endrun(msg=errMsg(__FILE__, __LINE__))
+         call endrun(msg=errMsg(__FILE__, __LINE__))
 #endif
       end if
 
