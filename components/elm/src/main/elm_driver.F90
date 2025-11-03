@@ -289,14 +289,18 @@ contains
     ! ============================================================================
 
     if (.not.use_fates) then
-       !if (use_cn) then
+       if (use_cn) then
           ! For dry-deposition need to call CLMSP so that mlaidiff is obtained
-          if ( n_drydep > 0 .and. drydep_method == DD_XLND .or. doalb) then
+          if ( n_drydep > 0 .and. drydep_method == DD_XLND) then 
              call t_startf('interpMonthlyVeg')
              call interpMonthlyVeg(bounds_proc, canopystate_vars)
              call t_stopf('interpMonthlyVeg')
           endif
-       !end if
+       else
+          call t_startf('interpMonthlyVeg')
+          call interpMonthlyVeg(bounds_proc, canopystate_vars)
+          call t_stopf('interpMonthlyVeg')
+       end if
     elseif(use_fates) then
        if(use_fates_sp) then
        

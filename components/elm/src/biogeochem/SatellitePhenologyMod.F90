@@ -551,17 +551,19 @@ contains
          ! bottom height   HBOT <- mhvb1 and mhvb2
  
          !Parameter values 
-         crit_onset_swi  = SatPhenolParamsInst%crit_onset_swi
-         crit_dayl       = SatPhenolParamsInst%crit_dayl
-         ndays_on        = SatPhenolParamsInst%ndays_on
-         ndays_off       = SatPhenolParamsInst%ndays_off
-         crit_onset_fdd  = SatPhenolParamsInst%crit_onset_fdd  !Functionality not implemented
-         crit_offset_swi = SatPhenolParamsInst%crit_offset_swi
-         crit_offset_fdd = SatPhenolParamsInst%crit_offset_fdd
-         soilpsi_off     = SatPhenolParamsInst%soilpsi_off
-         soilpsi_on      = SatPhenolParamsInst%soilpsi_on
-         crit_gdd1       = SatPhenolParamsInst%crit_gdd1
-         crit_gdd2       = SatPhenolParamsInst%crit_gdd2 
+         if (.not. use_cn) then 
+            crit_onset_swi  = SatPhenolParamsInst%crit_onset_swi
+            crit_dayl       = SatPhenolParamsInst%crit_dayl
+            ndays_on        = SatPhenolParamsInst%ndays_on
+            ndays_off       = SatPhenolParamsInst%ndays_off
+            crit_onset_fdd  = SatPhenolParamsInst%crit_onset_fdd  !Functionality not implemented
+            crit_offset_swi = SatPhenolParamsInst%crit_offset_swi
+            crit_offset_fdd = SatPhenolParamsInst%crit_offset_fdd
+            soilpsi_off     = SatPhenolParamsInst%soilpsi_off
+            soilpsi_on      = SatPhenolParamsInst%soilpsi_on
+            crit_gdd1       = SatPhenolParamsInst%crit_gdd1
+            crit_gdd2       = SatPhenolParamsInst%crit_gdd2 
+         end if
 
          if (.not. use_lai_streams) then
             tlai(p) = timwt(1)*mlai2t(p,1) + timwt(2)*mlai2t(p,2)

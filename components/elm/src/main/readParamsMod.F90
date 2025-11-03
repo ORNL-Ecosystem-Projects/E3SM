@@ -170,7 +170,9 @@ contains
     if(use_hydrstress)then
       call params_inst%readParams( ncid )
     endif
-    call readSatPhenolParams( ncid )
+    if (.not. use_cn) then
+       call readSatPhenolParams( ncid )
+    end if  
 
     !
     ! close CN params file
