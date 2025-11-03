@@ -525,12 +525,9 @@ contains
     use ELMFatesInterfaceMod  , only: ELMFatesTimesteps
     use FATESFireFactoryMod   , only : scalar_lightning
     use FanStreamMod          , only : fanstream_init, fanstream_interp
-<<<<<<< HEAD
     use dynFATESLandUseChangeMod, only : dynFatesLandUseInit
-=======
     use ExternalModelConstants   , only : EM_ID_ALQUIMIA, EM_ALQUIMIA_COLDSTART_STAGE
     use ExternalModelInterfaceMod, only : EMI_Driver, EMI_Init_EM
->>>>>>> 6f26ff2160 (Set up initial Alquimia external model interface and demo simulation including C and N pools)
     !
     ! !ARGUMENTS
     implicit none

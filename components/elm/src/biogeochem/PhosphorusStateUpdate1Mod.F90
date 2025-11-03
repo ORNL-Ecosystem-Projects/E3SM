@@ -286,17 +286,17 @@ contains
                   veg_ps%livecrootp(p) = veg_ps%livecrootp(p) - veg_pf%livecrootp_to_retransp(p)*dt
                   veg_ps%retransp(p)   = veg_ps%retransp(p)   + veg_pf%livecrootp_to_retransp(p)*dt
               end if
-              if (ivt(p) >= npcropmin) then ! Beth adds retrans from froot
-                  veg_ps%frootp(p)     = veg_ps%frootp(p)     - veg_pf%frootp_to_retransp(p)*dt
-                  veg_ps%retransp(p)   = veg_ps%retransp(p)   + veg_pf%frootp_to_retransp(p)*dt
-                  veg_ps%livestemp(p)  = veg_ps%livestemp(p)  - veg_pf%livestemp_to_litter(p)*dt
-                  veg_ps%livestemp(p)  = veg_ps%livestemp(p)  - veg_pf%livestemp_to_retransp(p)*dt
-                  veg_ps%retransp(p)   = veg_ps%retransp(p)   + veg_pf%livestemp_to_retransp(p)*dt
-                  veg_ps%grainp(p)     = veg_ps%grainp(p)     - veg_pf%grainp_to_food(p)*dt
-
-                  veg_ps%cropseedp_deficit(p) = veg_ps%cropseedp_deficit(p) &
-                        - veg_pf%crop_seedp_to_leaf(p) * dt
-              end if
+              !if (ivt(p) >= npcropmin) then ! Beth adds retrans from froot
+              !    veg_ps%frootp(p)     = veg_ps%frootp(p)     - veg_pf%frootp_to_retransp(p)*dt
+              !    veg_ps%retransp(p)   = veg_ps%retransp(p)   + veg_pf%frootp_to_retransp(p)*dt
+              !    veg_ps%livestemp(p)  = veg_ps%livestemp(p)  - veg_pf%livestemp_to_litter(p)*dt
+              !    veg_ps%livestemp(p)  = veg_ps%livestemp(p)  - veg_pf%livestemp_to_retransp(p)*dt
+              !    veg_ps%retransp(p)   = veg_ps%retransp(p)   + veg_pf%livestemp_to_retransp(p)*dt
+              !    veg_ps%grainp(p)     = veg_ps%grainp(p)     - veg_pf%grainp_to_food(p)*dt
+              ! 
+              !    veg_ps%cropseedp_deficit(p) = veg_ps%cropseedp_deficit(p) &
+              !          - veg_pf%crop_seedp_to_leaf(p) * dt
+              !end if
 
               ! uptake from soil mineral N pool
               veg_ps%ppool(p) = &

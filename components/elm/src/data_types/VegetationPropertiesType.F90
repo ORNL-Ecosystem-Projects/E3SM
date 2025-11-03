@@ -358,8 +358,8 @@ contains
     allocate(this%stocking(0:numpft))                            ; this%stocking(:)              =spval
     allocate(this%taper(0:numpft))                               ; this%taper(:)                 =spval
 
-    allocate( this%crit_gdd1(0:numpft))                          ; this%crit_gdd1(:)             =nan
-    allocate( this%crit_gdd2(0:numpft))                          ; this%crit_gdd2(:)             =nan
+    allocate( this%crit_gdd1(0:numpft))                          ; this%crit_gdd1(:)             =spval
+    allocate( this%crit_gdd2(0:numpft))                          ; this%crit_gdd2(:)             =spval
  
     allocate( this%sal_threshold(0:numpft))        ; this%sal_threshold(:)       =spval
     allocate( this%KM_salinity(0:numpft))          ; this%KM_salinity(:)         =spval
