@@ -222,18 +222,17 @@ contains
             do j = 1,nlevdecomp
                do fc = 1,num_soilc
                   c = filter_soilc(fc)
-#ifdef HUM_HOL
-                  if ( (decomp_npools_vr(c,j,l) - som_n_to_fungi_vr(c,j,l)*dtime) > 0._r8 ) then
-                     ! Reduce the litter nitrogen pool by fungi uptake based on the idea 
-                     ! that fungi outcompete saprotrophs in uptaking litter nitrogen
-                     cn_decomp_pools(c,j,l) = decomp_cpools_vr(c,j,l) / (decomp_npools_vr(c,j,l) - som_n_to_fungi_vr(c,j,l)*dtime)
+                  if (nu_com .eq. 'MYCI') then
+                     if ( (decomp_npools_vr(c,j,l) - som_n_to_fungi_vr(c,j,l)*dtime) > 0._r8 ) then
+                        ! Reduce the litter nitrogen pool by fungi uptake based on the idea 
+                        ! that fungi outcompete saprotrophs in uptaking litter nitrogen
+                        cn_decomp_pools(c,j,l) = decomp_cpools_vr(c,j,l) / (decomp_npools_vr(c,j,l) - som_n_to_fungi_vr(c,j,l)*dtime)
+                     end if
+                  else
+                     if ( decomp_npools_vr(c,j,l) > 0._r8 ) then
+                        cn_decomp_pools(c,j,l) = decomp_cpools_vr(c,j,l) / decomp_npools_vr(c,j,l)
+                     end if
                   end if
-
-#else
-                  if ( decomp_npools_vr(c,j,l) > 0._r8 ) then
-                     cn_decomp_pools(c,j,l) = decomp_cpools_vr(c,j,l) / decomp_npools_vr(c,j,l)
-                  end if
-#endif
                end do
             end do
          else
@@ -252,17 +251,17 @@ contains
             do j = 1,nlevdecomp
                do fc = 1,num_soilc
                   c = filter_soilc(fc)
-#ifdef HUM_HOL
-                  if ( (decomp_ppools_vr(c,j,l) - som_p_to_fungi_vr(c,j,l)*dtime) > 0._r8 ) then
-                     ! Reduce the litter phosphorus pool by fungi uptake based on the idea 
-                     ! that fungi outcompete saprotrophs in uptaking litter phosphorus
-                     cp_decomp_pools(c,j,l) = decomp_cpools_vr(c,j,l) / (decomp_ppools_vr(c,j,l) - som_p_to_fungi_vr(c,j,l)*dtime)
+                  if (nu_com .eq. 'MYCI') then
+                     if ( (decomp_ppools_vr(c,j,l) - som_p_to_fungi_vr(c,j,l)*dtime) > 0._r8 ) then
+                        ! Reduce the litter phosphorus pool by fungi uptake based on the idea 
+                        ! that fungi outcompete saprotrophs in uptaking litter phosphorus
+                        cp_decomp_pools(c,j,l) = decomp_cpools_vr(c,j,l) / (decomp_ppools_vr(c,j,l) - som_p_to_fungi_vr(c,j,l)*dtime)
+                     end if
+                  else
+                     if ( decomp_ppools_vr(c,j,l) > 0._r8 ) then
+                        cp_decomp_pools(c,j,l) = decomp_cpools_vr(c,j,l) / decomp_ppools_vr(c,j,l)
+                     end if
                   end if
-#else
-                  if ( decomp_ppools_vr(c,j,l) > 0._r8 ) then
-                     cp_decomp_pools(c,j,l) = decomp_cpools_vr(c,j,l) / decomp_ppools_vr(c,j,l)
-                  end if
-#endif
                end do
             end do
          else
@@ -418,7 +417,6 @@ contains
                cnstate_vars,                                        &
                soilstate_vars, dtime,                               &
                alm_fates)
-
       call t_stop_lnd(event)
 
 

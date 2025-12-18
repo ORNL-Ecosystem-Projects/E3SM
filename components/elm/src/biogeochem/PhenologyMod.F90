@@ -612,8 +612,8 @@ contains
             lgsf(p)  = 0._r8
 
             ! B. Sulman: Allow evergreen plants to transfer C/N/P from storage pools to growth, at a constant rate (for now)
-            leafc_storage_to_xfer(p)  = bgtr(p) * leafc_storage(p)
-            frootc_storage_to_xfer(p)  = bgtr(p) * frootc_storage(p)
+            leafc_storage_to_xfer(p)      = bgtr(p) * leafc_storage(p)
+            frootc_storage_to_xfer(p)     = bgtr(p) * frootc_storage(p)
             gresp_storage_to_xfer(p)      = bgtr(p) * gresp_storage(p)
             livecrootc_storage_to_xfer(p) = bgtr(p) * livecrootc_storage(p) ! For graminoid rhizomes
             
