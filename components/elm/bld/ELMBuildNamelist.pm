@@ -219,8 +219,9 @@ OPTIONS
                                 c    = Carbon only
                                 cn   = Carbon + Nitrogen
                                 cnp  = Carbon + Nitrogen + Phosphorous
-     -nutrient_comp_pathway    Nutrient competition pathway [rd | eca]
+     -nutrient_comp_pathway    Nutrient competition pathway [rd | myci | eca]
                                 rd   = Relative demand (RD)
+                                myci = Mycorrhizal implicit (MYCI)
                                 eca  = Equilibrium chemistry approximation (ECA)
      -rcp "value"             Representative concentration pathway (rcp) to use for
                               future scenarios.
@@ -1291,6 +1292,26 @@ sub setup_cmdl_nutrient_comp {
         }
 
         $nl_flags->{$var} = 'RD';
+
+      } elsif ($val eq "myci") {
+
+        $var = "nu_com";
+        $val = "'MYCI'";
+
+        if ( defined($nl->get_value($var)) && $nl->get_value($var) ne $val ) {
+          fatal_error("$var is inconsistent with the commandline setting of -nutrient_comp_pathway");
+        }
+
+        my $group = $definition->get_group_name($var);
+        $nl_flags->{$var} = $val;
+        $nl->set_variable_value($group, $var, $val);
+
+        if (  ! $definition->is_valid_value( $var, $val ) ) {
+          my @valid_values   = $definition->get_valid_values( $var );
+          fatal_error("$var has a value ($val) that is NOT valid. Valid values are: @valid_values\n");
+        }
+
+        $nl_flags->{$var} = 'MYCI';
 
       } elsif ($val eq "eca") {
         $var = "nu_com";

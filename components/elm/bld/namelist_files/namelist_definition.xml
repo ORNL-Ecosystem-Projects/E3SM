@@ -103,10 +103,11 @@ over-productive.
 
 
 <entry id="nu_com" type="char*15" category="elm_physics"
-       group="elm_inparm" valid_values="RD,ECA,MIC" >
+       group="elm_inparm" valid_values="RD,ECA,MIC,MYCI" >
 Nutrient competition mode. In each specific mode, plants/soil microbes have the different
 priority to access soil nitrogen and phosphorus.
     RD           = competition scaled by relative nutrient demand
+    MYCI         = competition scaled by relative nutrient demand but plants have mycorrhizal pathways
     ECA          = competition scaled by equilibrium chemical approximation theory
     MIC          = always assume that soil microbes out-compete plants
 </entry>

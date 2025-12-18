@@ -145,6 +145,36 @@
   </compset>
 
   <compset>
+    <alias>I1850CMYCICTCBC</alias>
+    <lname>1850_DATM%QIA_ELM%CMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>I1850CNMYCICTCBC</alias>
+    <lname>1850_DATM%QIA_ELM%CNMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>I1850CNPMYCICTCBC</alias>
+    <lname>1850_DATM%QIA_ELM%CNPMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>ICB1850CMYCICTCBC</alias>
+    <lname>1850_SATM_ELM%CMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>ICB1850CNMYCICTCBC</alias>
+    <lname>1850_SATM_ELM%CNMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>ICB1850CNPMYCICTCBC</alias>
+    <lname>1850_SATM_ELM%CNPMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
     <alias>I1850CECACTCBC</alias>
     <lname>1850_DATM%QIA_ELM%CECACTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
   </compset>
@@ -207,6 +237,21 @@
   <compset>
     <alias>ICNPRDCTCBC</alias>
     <lname>2000_DATM%QIA_ELM%CNPRDCTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+   <compset>
+    <alias>ICMYCICTCBC</alias>
+    <lname>2000_DATM%QIA_ELM%CMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>ICNMYCICTCBC</alias>
+    <lname>2000_DATM%QIA_ELM%CNMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>ICNPMYCICTCBC</alias>
+    <lname>2000_DATM%QIA_ELM%CNMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
   </compset>
 
   <compset>
@@ -280,6 +325,16 @@
    </compset>
 
    <compset>
+     <alias>I20TRCNMYCICNTBC</alias>
+     <lname>20TR_DATM%QIA_ELM%CNMYCICNTBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+   </compset>
+
+   <compset>
+     <alias>I20TRCNPMYCICTCBC</alias>
+     <lname>20TR_DATM%QIA_ELM%CNPMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+   </compset>
+
+   <compset>
      <alias>ICB20TRCNECACTCBC</alias>
      <lname>20TR_SATM_ELM%CNECACTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
    </compset>
@@ -312,6 +367,21 @@
    <compset>
      <alias>ICB20TRCNPRDCTCBC</alias>
      <lname>20TR_SATM_ELM%CNPRDCTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+   </compset>
+
+   <compset>
+     <alias>ICB20TRCMYCICTCBC</alias>
+     <lname>20TR_SATM_CLM45%CMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+   </compset>
+
+   <compset>
+     <alias>ICB20TRCNMYCICTCBC</alias>
+     <lname>20TR_SATM_ELM%CNMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+   </compset>
+
+   <compset>
+     <alias>ICB20TRCNPMYCICTCBC</alias>
+     <lname>20TR_SATM_ELM%CNPMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
    </compset>
 
    <!---I CRUNCEP compsets -->
@@ -377,6 +447,21 @@
   </compset>
 
   <compset>
+    <alias>ICRUCMYCICTCBC</alias>
+    <lname>2000_DATM%CRU_ELM%CMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>ICRUCNMYCICTCBC</alias>
+    <lname>2000_DATM%CRU_ELM%CNMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>ICRUCNPMYCICTCBC</alias>
+    <lname>2000_DATM%CRU_ELM%CNPMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
     <alias>ICRUCNECACTCBC</alias>
     <lname>2000_DATM%CRU_ELM%CNECACTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
   </compset>
@@ -399,6 +484,21 @@
   <compset>
     <alias>ICRUM2000CNPRDCTCBC</alias>
     <lname>2000_DATM%CRU_ELM%CNPRDCTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>ICRUM2000CMYCICTCBC</alias>
+    <lname>2000_DATM%CRU_ELM%CMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>ICRUM2000CNMYCICTCBC</alias>
+    <lname>2000_DATM%CRU_ELM%CNMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>ICRUM2000CNPMYCICTCBC</alias>
+    <lname>2000_DATM%CRU_ELM%CNPMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
   </compset>
 
   <compset>
@@ -480,7 +580,27 @@
     <alias>I20TRCRUCNPRDCTCBC</alias>
     <lname>20TR_DATM%CRU_ELM%CNPRDCTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
    </compset>
-   
+
+   <compset>
+     <alias>I1850CRUCNMYCICTCBC</alias>
+     <lname>1850_DATM%CRU_ELM%CNMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+   </compset>
+
+   <compset>
+    <alias>I1850CRUCNPMYCICTCBC</alias>
+    <lname>1850_DATM%CRU_ELM%CNPMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+   </compset>
+
+   <compset>
+     <alias>I20TRCRUCNMYCICTCBC</alias>
+     <lname>20TR_DATM%CRU_ELM%CNMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+   </compset>
+
+   <compset>
+    <alias>I20TRCRUCNPMYCICTCBC</alias>
+    <lname>20TR_DATM%CRU_ELM%CNPMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+   </compset>
+
    <!---I GSWP3 compsets-->
   <compset>
     <alias>IGSWELM</alias>
@@ -538,6 +658,21 @@
   </compset>
 
   <compset>
+    <alias>IGSWCMYCICTCBC</alias>
+    <lname>2000_DATM%GSWP3v1_ELM%CMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>IGSWCNMYCICTCBC</alias>
+    <lname>2000_DATM%GSWP3v1_ELM%CNMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>IGSWCNPMYCICTCBC</alias>
+    <lname>2000_DATM%GSWP3v1_ELM%CNPMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
     <alias>IGSWCNECACTCBC</alias>
     <lname>2000_DATM%GSWP3v1_ELM%CNECACTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
   </compset>
@@ -560,6 +695,21 @@
   <compset>
     <alias>IGSWM2000CNPRDCTCBC</alias>
     <lname>2000_DATM%GSWP3v1_ELM%CNPRDCTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>IGSWM2000CMYCICTCBC</alias>
+    <lname>2000_DATM%GSWP3v1_ELM%CMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>IGSWM2000CNMYCICTCBC</alias>
+    <lname>2000_DATM%GSWP3v1_ELM%CNMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>IGSWM2000CNPMYCICTCBC</alias>
+    <lname>2000_DATM%GSWP3v1_ELM%CNPMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
   </compset>
 
   <compset>
@@ -642,6 +792,26 @@
     <lname>20TR_DATM%GSWP3v1_ELM%CNPRDCTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
    </compset>
 
+   <compset>
+     <alias>I1850GSWCNMYCICTCBC</alias>
+     <lname>1850_DATM%GSWP3v1_ELM%CNMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+   </compset>
+
+   <compset>
+    <alias>I1850GSWCNPMYCICTCBC</alias>
+    <lname>1850_DATM%GSWP3v1_ELM%CNPMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+   </compset>
+
+   <compset>
+     <alias>I20TRGSWCNMYCICTCBC</alias>
+     <lname>20TR_DATM%GSWP3v1_ELM%CNMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+   </compset>
+
+   <compset>
+    <alias>I20TRGSWCNPMYCICTCBC</alias>
+    <lname>20TR_DATM%GSWP3v1_ELM%CNPMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+   </compset>
+
   <!---I compset system tests -->
 
   <compset>
@@ -668,6 +838,11 @@
   <compset>
     <alias>I1850CRDCTCBC</alias>
     <lname>1850_DATM%QIA_ELM%CRDCTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+  </compset>
+
+  <compset>
+    <alias>I1850CMYCICTCBC</alias>
+    <lname>1850_DATM%QIA_ELM%CMYCICTCBC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
   </compset>
 
   <compset>

@@ -126,6 +126,9 @@
       <value compset="_ELM%[^_]*CRDCTCBC"   >-bgc bgc -nutrient c   -nutrient_comp_pathway rd  -soil_decomp ctc -methane </value>
       <value compset="_ELM%[^_]*CNRDCTCBC"  >-bgc bgc -nutrient cn  -nutrient_comp_pathway rd  -soil_decomp ctc -methane </value>
       <value compset="_ELM%[^_]*CNPRDCTCBC" >-bgc bgc -nutrient cnp -nutrient_comp_pathway rd  -soil_decomp ctc -methane </value>
+      <value compset="_ELM%[^_]*CMYCICTCBC"   >-bgc bgc -nutrient c   -nutrient_comp_pathway myci  -soil_decomp ctc -methane </value>
+      <value compset="_ELM%[^_]*CNMYCICTCBC"  >-bgc bgc -nutrient cn  -nutrient_comp_pathway myci  -soil_decomp ctc -methane </value>
+      <value compset="_ELM%[^_]*CNPMYCICTCBC" >-bgc bgc -nutrient cnp -nutrient_comp_pathway myci  -soil_decomp ctc -methane </value>
       <value compset="_ELM%[^_]*CNECACTCBC" >-bgc bgc -nutrient cn  -nutrient_comp_pathway eca -soil_decomp ctc -methane </value>
       <value compset="_ELM%[^_]*CNPECACTCBC">-bgc bgc -nutrient cnp -nutrient_comp_pathway eca -soil_decomp ctc -methane </value>
       <value compset="_ELM%[^_]*CNPRDCTCBCTOP">-bgc bgc -nutrient cnp -nutrient_comp_pathway rd  -soil_decomp ctc -methane -solar_rad_scheme top</value>
@@ -240,6 +243,9 @@
     <desc compset="_ELM%[^_]*CRDCTCBC"   >alm1.0 C only, nutirent competition via relative demand, ctc soil cascade with black carbon deposition:</desc>
     <desc compset="_ELM%[^_]*CNRDCTCBC"  >alm1.0 C-N, nutirent competition via relative demand, ctc soil cascade with black carbon deposition:</desc>
     <desc compset="_ELM%[^_]*CNPRDCTCBC" >alm1.0 C-N-P, nutirent competition via relative demand, ctc soil cascade with black carbon deposition:</desc>
+    <desc compset="_ELM%[^_]*CMYCICTCBC"   >alm1.0 C only, nutirent competition via relative demand, plant has mycorrhizal, ctc soil cascade with black carbon deposition:</desc>
+    <desc compset="_ELM%[^_]*CNMYCICTCBC"  >alm1.0 C-N, nutirent competition via relative demand, plant has mycorrhizal, ctc soil cascade with black carbon deposition:</desc>
+    <desc compset="_ELM%[^_]*CNPMYCICTCBC" >alm1.0 C-N-P, nutirent competition via relative demand, plant has mycorrhizal, ctc soil cascade with black carbon deposition:</desc>
     <desc compset="_ELM%[^_]*CNECACTCBC" >alm1.0 C-N, nutirent competition via equilibrium chemistry approximation, ctc soil cascade with black carbon deposition:</desc>
     <desc compset="_ELM%[^_]*CNPECACTCBC">alm1.0 C-N-P, nutirent competition via equilibrium chemistry approximation, ctc soil cascade with black carbon deposition:</desc>
     <desc compset="_ELM50"               >clm5.0 physics:</desc>
