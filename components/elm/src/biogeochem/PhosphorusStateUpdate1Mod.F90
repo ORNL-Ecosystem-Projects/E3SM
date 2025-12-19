@@ -322,10 +322,10 @@ contains
               veg_ps%ppool(p)    = veg_ps%ppool(p)    + veg_pf%retransp_to_ppool(p)*dt
               veg_ps%retransp(p) = veg_ps%retransp(p) - veg_pf%retransp_to_ppool(p)*dt
 
-#ifdef HUM_HOL
-              ! deployment from fungi uptake pool
-              veg_ps%ppool(p)    = veg_ps%ppool(p) + veg_pf%fungi_som_to_ppool(p)*dt
-#endif
+              if (nu_com .eq. 'MYCI') then
+               ! deployment from fungi uptake pool
+               veg_ps%ppool(p)    = veg_ps%ppool(p) + veg_pf%fungi_som_to_ppool(p)*dt
+              end if
 
               ! allocation fluxes
               veg_ps%ppool(p)           = veg_ps%ppool(p)          - veg_pf%ppool_to_leafp(p)*dt
