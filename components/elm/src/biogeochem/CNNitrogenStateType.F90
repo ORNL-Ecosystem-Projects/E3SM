@@ -594,7 +594,7 @@ contains
              this%deadstemn_patch(p) = 0._r8
           end if
           
-          if (nu_com .ne. 'RD') then
+          if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
               ! ECA competition calculate root NP uptake as a function of fine root biomass
               ! better to initialize root CNP pools with a non-zero value
               if (veg_pp%itype(p) .ne. noveg) then

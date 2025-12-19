@@ -2655,7 +2655,7 @@ contains
                frootc_to_litter(p) = prev_frootc_to_litter(p) + t1*(frootc(p) - prev_frootc_to_litter(p)*offset_counter(p))
             end if
 
-            if ( nu_com .eq. 'RD') then
+            if ( nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
                if (ivt(p) >= npcropmin) then
                   if (offset_counter(p) == dt) then
                       t1 = 1.0_r8 / dt
@@ -2805,7 +2805,7 @@ contains
             leafc_to_litter(p)  = bglfr(p) * leafc(p)
             frootc_to_litter(p) = bglfr(p) * frootc(p)
 
-            if ( nu_com .eq. 'RD') then
+            if ( nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
                ! calculate the leaf N litterfall and retranslocation
                leafn_to_litter(p)   = leafc_to_litter(p)  / lflitcn(ivt(p))
                leafn_to_litter(p)   = leafn_to_litter(p) * pheno_indicator(pid_leafn_to_litter)
@@ -2910,7 +2910,7 @@ contains
 
          ! only calculate these fluxes for woody types
          if (woody(ivt(p)) > 0._r8) then
-            if ( nu_com .eq. 'RD') then
+            if ( nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
                ! live stem to dead stem turnover
 
                ctovr = livestemc(p) * lwtop

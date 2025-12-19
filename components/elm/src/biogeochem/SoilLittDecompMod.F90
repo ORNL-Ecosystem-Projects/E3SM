@@ -491,7 +491,7 @@ contains
          end do
       end do
 
-      if (nu_com .eq. 'RD') then
+      if (nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
          do fc = 1,num_soilc
             c = filter_soilc(fc)
             do j = 1,nlevdecomp
@@ -514,42 +514,42 @@ contains
           end do
       end if
 
-      if (nu_com .ne. 'RD') then
-      do fc = 1,num_soilc
-          c = filter_soilc(fc)
-          soil_n_immob_flux(c) =0.0_r8
-          soil_p_immob_flux(c) = 0.0_r8
-          soil_n_grossmin_flux(c) = 0.0_r8
-          soil_p_grossmin_flux(c) = 0.0_r8
-          do j = 1,nlevdecomp
-              soil_n_immob_flux_vr(c,j) = 0.0_r8
-              soil_p_immob_flux_vr(c,j) = 0.0_r8
-              gross_nmin_vr(c,j) = 0.0_r8
-              gross_pmin_vr(c,j) = 0.0_r8
-          end do
-      end do
-      do k = 1, ndecomp_cascade_transitions
-         do j = 1,nlevdecomp
-            do fc = 1,num_soilc
-               c = filter_soilc(fc)
-                   if (pmnf_decomp_cascade(c,j,k) > 0._r8) then
-                   soil_n_immob_flux(c) = soil_n_immob_flux(c) + pmnf_decomp_cascade(c,j,k)*dzsoi_decomp(j)
-                   soil_n_immob_flux_vr(c,j) = soil_n_immob_flux_vr(c,j) + pmnf_decomp_cascade(c,j,k)
-               else
-                   soil_n_grossmin_flux(c) = soil_n_grossmin_flux(c) -1.0_r8*pmnf_decomp_cascade(c,j,k)*dzsoi_decomp(j)
-                   gross_nmin_vr(c,j) = gross_nmin_vr(c,j) - 1.0_r8*pmnf_decomp_cascade(c,j,k)
-               end if
-               if (pmpf_decomp_cascade(c,j,k) > 0._r8) then
-                   soil_p_immob_flux(c) = soil_p_immob_flux(c) + pmpf_decomp_cascade(c,j,k)*dzsoi_decomp(j)
-                   soil_p_immob_flux_vr(c,j) = soil_p_immob_flux_vr(c,j) + pmpf_decomp_cascade(c,j,k)
-               else
-                   soil_p_grossmin_flux(c) = soil_p_grossmin_flux(c) -1.0_r8*pmpf_decomp_cascade(c,j,k)*dzsoi_decomp(j)
-                   gross_pmin_vr(c,j) = gross_pmin_vr(c,j) - 1.0_r8*pmpf_decomp_cascade(c,j,k)
-               end if
-             end do
-          end do
-       end do
-       end if
+      if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
+         do fc = 1,num_soilc
+            c = filter_soilc(fc)
+            soil_n_immob_flux(c) =0.0_r8
+            soil_p_immob_flux(c) = 0.0_r8
+            soil_n_grossmin_flux(c) = 0.0_r8
+            soil_p_grossmin_flux(c) = 0.0_r8
+            do j = 1,nlevdecomp
+               soil_n_immob_flux_vr(c,j) = 0.0_r8
+               soil_p_immob_flux_vr(c,j) = 0.0_r8
+               gross_nmin_vr(c,j) = 0.0_r8
+               gross_pmin_vr(c,j) = 0.0_r8
+            end do
+         end do
+         do k = 1, ndecomp_cascade_transitions
+            do j = 1,nlevdecomp
+               do fc = 1,num_soilc
+                  c = filter_soilc(fc)
+                     if (pmnf_decomp_cascade(c,j,k) > 0._r8) then
+                     soil_n_immob_flux(c) = soil_n_immob_flux(c) + pmnf_decomp_cascade(c,j,k)*dzsoi_decomp(j)
+                     soil_n_immob_flux_vr(c,j) = soil_n_immob_flux_vr(c,j) + pmnf_decomp_cascade(c,j,k)
+                  else
+                     soil_n_grossmin_flux(c) = soil_n_grossmin_flux(c) -1.0_r8*pmnf_decomp_cascade(c,j,k)*dzsoi_decomp(j)
+                     gross_nmin_vr(c,j) = gross_nmin_vr(c,j) - 1.0_r8*pmnf_decomp_cascade(c,j,k)
+                  end if
+                  if (pmpf_decomp_cascade(c,j,k) > 0._r8) then
+                     soil_p_immob_flux(c) = soil_p_immob_flux(c) + pmpf_decomp_cascade(c,j,k)*dzsoi_decomp(j)
+                     soil_p_immob_flux_vr(c,j) = soil_p_immob_flux_vr(c,j) + pmpf_decomp_cascade(c,j,k)
+                  else
+                     soil_p_grossmin_flux(c) = soil_p_grossmin_flux(c) -1.0_r8*pmpf_decomp_cascade(c,j,k)*dzsoi_decomp(j)
+                     gross_pmin_vr(c,j) = gross_pmin_vr(c,j) - 1.0_r8*pmpf_decomp_cascade(c,j,k)
+                  end if
+               end do
+            end do
+         end do
+      end if
 
       if (use_lch4) then
          ! Calculate total fraction of potential HR, for methane code

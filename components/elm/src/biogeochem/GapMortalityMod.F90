@@ -125,7 +125,7 @@ contains
       k_mort = CNGapMortParamsInst%k_mort
 
 #ifndef HUM_HOL
-      if (nu_com .eq. 'RD') then
+      if (nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
           call mortality_rate_soilorder(num_soilp,filter_soilp,cnstate_vars)
       end if
 #endif
@@ -138,7 +138,7 @@ contains
          am = CNGapMortParamsInst%am(ivt(p))
 
 #ifndef HUM_HOL
-         if (nu_com .eq. 'RD') then
+         if (nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
              am = cnstate_vars%r_mort_cal_patch(p)
          end if
 #endif

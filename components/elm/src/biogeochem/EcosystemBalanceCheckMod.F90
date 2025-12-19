@@ -728,7 +728,7 @@ contains
              end if
          end if
 
-         if ((nu_com .ne. 'RD') .and. ECA_Pconst_RGspin) then
+         if ((nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') .and. ECA_Pconst_RGspin) then
             do j = 1, nlevdecomp
                col_poutputs(c) = col_poutputs(c) + &
                   (col_ps%solutionp_vr_cur(c,j) -  col_ps%solutionp_vr_prev(c,j)  + &

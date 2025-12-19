@@ -1706,7 +1706,7 @@ contains
                this%gr_patch(p) + &
                this%xr_patch(p) + &
                this%xsmrpool_to_atm_patch(p) ! xsmr... is -ve (slevis)
-          if (nu_com .ne. 'RD' ) then
+          if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
              this%ar_patch(p) = this%ar_patch(p) + &
                   this%xsmrpool_turnover_patch(p)
           end if
@@ -1715,7 +1715,7 @@ contains
                this%mr_patch(p) + &
                this%gr_patch(p) + &
                this%xr_patch(p)
-          if (nu_com .ne. 'RD' ) then
+          if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
              this%ar_patch(p) = this%ar_patch(p) + &
                   this%xsmrpool_turnover_patch(p)
           end if

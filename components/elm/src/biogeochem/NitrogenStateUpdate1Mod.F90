@@ -355,7 +355,7 @@ contains
               ! uptake from soil mineral N pool
               veg_ns%npool(p) = &
                     veg_ns%npool(p) + veg_nf%sminn_to_npool(p)*dt
-              if (nu_com .ne. 'RD') veg_ns%npool(p) = veg_ns%npool(p) + veg_nf%supplement_to_plantn(p)*dt
+              if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') veg_ns%npool(p) = veg_ns%npool(p) + veg_nf%supplement_to_plantn(p)*dt
               if (NFIX_PTASE_plant) veg_ns%npool(p) = veg_ns%npool(p) + veg_nf%nfix_to_plantn(p)*dt
 
               ! deployment from retranslocation pool

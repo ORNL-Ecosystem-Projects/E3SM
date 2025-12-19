@@ -170,7 +170,7 @@ contains
     PhenolParamsInst%crit_dayl=tempr
 
 
-    if (nu_com .ne. 'RD') then
+    if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
        PhenolParamsInst%crit_dayl_stress = secspqtrday    !needed for BFB test
     else
        tString='crit_dayl_stress'
@@ -1378,7 +1378,7 @@ contains
                end if
                ! Require cumulative precipitation threshold for onset
                ! Dahlin et al., Biogeosciences 2015.
-               if (prec10(t) * 86400._r8 * 10._r8 < PhenolParamsInst%cumprec_onset .and. nu_com .eq. 'RD') then
+               if (prec10(t) * 86400._r8 * 10._r8 < PhenolParamsInst%cumprec_onset .and. (nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI')) then
                   onset_flag(p) = 0._r8
                end if
 
@@ -3247,7 +3247,7 @@ contains
                frootc_to_litter(p) = prev_frootc_to_litter(p) + t1*(frootc(p) - prev_frootc_to_litter(p)*offset_counter(p))
             end if
 
-            if ( nu_com .eq. 'RD') then
+            if ( nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
                if (ivt(p) >= npcropmin) then
                   if (offset_counter(p) == dt) then
                       t1 = 1.0_r8 / dt
@@ -3390,7 +3390,7 @@ contains
             leafc_to_litter(p)  = bglfr_leaf(p) * leafc(p)
             frootc_to_litter(p) = bglfr_froot(p) * frootc(p)
 
-            if ( nu_com .eq. 'RD') then
+            if ( nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
                ! calculate the leaf N litterfall and retranslocation
                leafn_to_litter(p)   = leafc_to_litter(p)  / lflitcn(ivt(p))
                leafn_to_retransn(p) = (leafc_to_litter(p) / leafcn(ivt(p))) - leafn_to_litter(p)
@@ -3501,7 +3501,7 @@ contains
             livecrootn_to_litter(p) = 0.0_r8
             livecrootp_to_litter(p) = 0.0_r8
             
-            if ( nu_com .eq. 'RD') then
+            if ( nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
                ! live stem to dead stem turnover
 
                ctovr = livestemc(p) * lwtop
@@ -3554,7 +3554,7 @@ contains
             end if
 
          else  ! If not woody, do rhizome turnover
-           if ( nu_com .eq. 'RD') then
+           if ( nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
                if(rhizome_long(ivt(p))>0.0_r8) then
                  ctovr = livecrootc(p) / (rhizome_long(ivt(p))*dayspyr*secspday)
                  ntovr = livecrootn(p) / (rhizome_long(ivt(p))*dayspyr*secspday)

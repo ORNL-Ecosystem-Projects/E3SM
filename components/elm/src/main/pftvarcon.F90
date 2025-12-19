@@ -968,7 +968,7 @@ contains
     call ncd_io('max_SH_planting_date',mxSHplantdate(0:npft-1), 'read', ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=' ERROR: error in reading in pft data'//errMsg(__FILE__, __LINE__))
 
-    if (nu_com .ne. 'RD') then
+    if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
 
         call ncd_io('VMAX_MINSURF_P_vr',VMAX_MINSURF_P_vr, 'read', ncid, readvar=readv)
         if ( .not. readv ) call endrun(msg=' ERROR: error in reading in soil order VMAX_MINSURF_P_vr'//errMsg(__FILE__, __LINE__))

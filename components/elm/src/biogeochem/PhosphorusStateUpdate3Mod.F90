@@ -130,7 +130,7 @@ contains
            end do
         end do
 
-      if (nu_com .eq. 'RD') then
+      if (nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
         do j = 1, nlevdecomp
           do fc = 1,num_soilc
             c = filter_soilc(fc)
@@ -229,7 +229,7 @@ contains
          enddo
       end if
 
-      if (nu_com .eq. 'RD') then
+      if (nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
          do j = 1, nlevdecomp
             do fc = 1,num_soilc
                c = filter_soilc(fc)
@@ -267,7 +267,7 @@ contains
       ! rationale: observed P pools should be our best representation of present-day soil P conditions
       ! If we use observed P to initialize regular spinup, soil P pools will dramatically deplete during the spinup
       ! Then, the transient simulation will start with a much lower soil phosphorus availability that is inconsistent with obs
-      if ((nu_com .ne. 'RD') .and. ECA_Pconst_RGspin ) then
+      if ((nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') .and. ECA_Pconst_RGspin ) then
          do j = 1, nlevdecomp
             do fc = 1,num_soilc
                c = filter_soilc(fc)

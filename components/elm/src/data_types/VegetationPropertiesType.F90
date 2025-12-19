@@ -487,7 +487,7 @@ contains
            this%decompmicc_patch_vr(m,j) = decompmicc_patch_vr(j,m)
         end do
 
-        if (nu_com .ne. 'RD') then ! use new stoichiometry for eca and mic competition
+        if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then ! use new stoichiometry for eca and mic competition
            this%leafcn(m)     = leafcn_obs(m)
            this%frootcn(m)    = frootcn_obs(m)
            this%livewdcn(m)   = livewdcn_obs(m)

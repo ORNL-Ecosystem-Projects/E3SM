@@ -78,30 +78,28 @@ module AllocationMod
      real(r8), pointer :: compet_denit      => null() ! (unitless) relative competitiveness of denitrifiers for NO3
      real(r8), pointer :: compet_nit        => null() ! (unitless) relative competitiveness of nitrifiers for NH4
 
-     if (nu_com .eq. 'MYCI') then
-      real(r8), pointer :: zwt_froot_a(:) => null() ! sensitivity of fine root allocation to water table depth
-      real(r8), pointer :: froot_radius(:) => null() ! (cm) fine root radious
-      real(r8), pointer :: froot_density(:) => null() ! (gC cm-3) fine root density
-      real(r8), pointer :: vmax_froot_n(:) => null() ! (gN cm-2 s-1) maximum N uptake rate per unit area of fine root
-      real(r8), pointer :: vmax_froot_p(:) => null() ! (gP cm-2 s-1) maximum P uptake rate per unit area of fine root
-      real(r8), pointer :: km_froot_n(:) => null() ! (gN m-3) half saturation point for N uptake rate by fine root
-      real(r8), pointer :: km_froot_p(:) => null() ! (gP m-3) half saturation point for P uptake rate by fine root
-      real(r8), pointer :: q10_upt => null() ! Q10 for temperature sensitivity of nutrient uptake by fine root
-      real(r8), pointer :: swc_opt => null() ! (m3 m-3) optimal volumetric soil water content for mycorrhizal growth
-      real(r8), pointer :: alpha_fpg => null() ! (unitless) scaling factor controlling the influence of nutrient limitation factor on nutrient uptake
-      real(r8), pointer :: inh_fungi_a(:) => null() ! intercept of fungal inhibition
-      real(r8), pointer :: inh_fungi_b(:) => null() ! sensitivity of fungal inhibition to nitrogen
-      real(r8), pointer :: inh_fungi_c(:) => null() ! sensitivity of fungal inhibition to phosphorus
-      real(r8), pointer :: vmax_fungi_din(:) => null() ! (gN g-1 s-1) maximum N uptake rate per unit biomass of fungi-colonized fine root
-      real(r8), pointer :: vmax_fungi_dip(:) => null() ! (gP g-1 s-1) maximum P uptake rate per unit biomass of fungi-colonized fine root
-      !real(r8), pointer :: km_fungi_din => null() ! (gN m-3) half saturation point for N uptake rate by fungi-colonized fine root
-      !real(r8), pointer :: km_fungi_dip => null() ! (gP m-3) half saturation point for P uptake rate by fungi-colonized fine root
-      real(r8), pointer :: km_nsc => null() ! half saturation parameter for plant carbohydrate excess
-      real(r8), pointer :: vmax_fungi_son(:) => null() ! (gN gC-1 s-1) maximum fungal organic nutrient uptake rate per unit available excess plant nonstructural carbon
-      real(r8), pointer :: vmax_fungi_sop(:) => null() ! (gP gC-1 s-1) maximum fungal organic nutrient uptake rate per unit available excess plant nonstructural carbon
-      real(r8), pointer :: fungi_cost_n => null() ! (gC gN-1) carbon cost per unit fungi mined nitrogen
-      real(r8), pointer :: fungi_cost_p => null() ! (gC gP-1) carbon cost per unit fungi mined phosphorus
-     end if
+     real(r8), pointer :: zwt_froot_a(:) => null() ! sensitivity of fine root allocation to water table depth
+     real(r8), pointer :: froot_radius(:) => null() ! (cm) fine root radious
+     real(r8), pointer :: froot_density(:) => null() ! (gC cm-3) fine root density
+     real(r8), pointer :: vmax_froot_n(:) => null() ! (gN cm-2 s-1) maximum N uptake rate per unit area of fine root
+     real(r8), pointer :: vmax_froot_p(:) => null() ! (gP cm-2 s-1) maximum P uptake rate per unit area of fine root
+     real(r8), pointer :: km_froot_n(:) => null() ! (gN m-3) half saturation point for N uptake rate by fine root
+     real(r8), pointer :: km_froot_p(:) => null() ! (gP m-3) half saturation point for P uptake rate by fine root
+     real(r8), pointer :: q10_upt => null() ! Q10 for temperature sensitivity of nutrient uptake by fine root
+     real(r8), pointer :: swc_opt => null() ! (m3 m-3) optimal volumetric soil water content for mycorrhizal growth
+     real(r8), pointer :: alpha_fpg => null() ! (unitless) scaling factor controlling the influence of nutrient limitation factor on nutrient uptake
+     real(r8), pointer :: inh_fungi_a(:) => null() ! intercept of fungal inhibition
+     real(r8), pointer :: inh_fungi_b(:) => null() ! sensitivity of fungal inhibition to nitrogen
+     real(r8), pointer :: inh_fungi_c(:) => null() ! sensitivity of fungal inhibition to phosphorus
+     real(r8), pointer :: vmax_fungi_din(:) => null() ! (gN g-1 s-1) maximum N uptake rate per unit biomass of fungi-colonized fine root
+     real(r8), pointer :: vmax_fungi_dip(:) => null() ! (gP g-1 s-1) maximum P uptake rate per unit biomass of fungi-colonized fine root
+     !real(r8), pointer :: km_fungi_din => null() ! (gN m-3) half saturation point for N uptake rate by fungi-colonized fine root
+     !real(r8), pointer :: km_fungi_dip => null() ! (gP m-3) half saturation point for P uptake rate by fungi-colonized fine root
+     real(r8), pointer :: km_nsc => null() ! half saturation parameter for plant carbohydrate excess
+     real(r8), pointer :: vmax_fungi_son(:) => null() ! (gN gC-1 s-1) maximum fungal organic nutrient uptake rate per unit available excess plant nonstructural carbon
+     real(r8), pointer :: vmax_fungi_sop(:) => null() ! (gP gC-1 s-1) maximum fungal organic nutrient uptake rate per unit available excess plant nonstructural carbon
+     real(r8), pointer :: fungi_cost_n => null() ! (gC gN-1) carbon cost per unit fungi mined nitrogen
+     real(r8), pointer :: fungi_cost_p => null() ! (gC gP-1) carbon cost per unit fungi mined phosphorus
 
   end type AllocParamsType
   !
@@ -350,8 +348,7 @@ contains
       tString='fungi_cost_p'
       call ncd_io(varname=trim(tString),data=AllocParamsInst%fungi_cost_p, flag='read', ncid=ncid, readvar=readv)
       if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
-      end if
-   end if
+    end if
 
   end subroutine readCNAllocParams
 
@@ -493,6 +490,11 @@ contains
        nu_com_root_kinetics   = .false.
        nu_com_phosphatase     = .false.
        nu_com_nfix            = .false.
+    case('MYCI') ! relative demand mode, same as CLM-CNP Yang 2014, plus plant mycorrhizal
+       nu_com_leaf_physiology = .false.
+       nu_com_root_kinetics   = .false.
+       nu_com_phosphatase     = .false.
+       nu_com_nfix            = .false.
     case('ECA') ! ECA competition version of CLM-CNP
        nu_com_leaf_physiology = .true. ! leaf level physiology must be true if using ECA
        nu_com_root_kinetics   = .true. ! root uptake kinetics must be true if using ECA
@@ -583,7 +585,7 @@ contains
     real(r8):: fungi_ndemand_pot_nmm, fungi_pdemand_pot_pmm ! temporary holder for mineral N/P potential uptake by fungi, without Michaelis-Menten factor
     real(r8):: tot_fungi_som_ndemand, tot_fungi_som_pdemand, frac_n_i_met_lit, frac_n_i_cel_lit, frac_p_i_met_lit, frac_p_i_cel_lit, tot_decomp_npools, tot_decomp_ppools, frac_n_i_lig_lit, frac_p_i_lig_lit
     real(r8):: son_uptake_prof(bounds%begc:bounds%endc, 1:nlevdecomp, 1:ndecomp_pools), sop_uptake_prof(bounds%begc:bounds%endc, 1:nlevdecomp, 1:ndecomp_pools)
-    real(r8):: son_uptake_vert(bounds%begc:bounds%endc, 1:ndecomp_pools), sop_uptake_vert(bounds%begc, 1:ndecomp_pools)
+    real(r8):: son_uptake_vert(bounds%begc:bounds%endc, 1:ndecomp_pools), sop_uptake_vert(bounds%begc:bounds%endc, 1:ndecomp_pools)
   !-----------------------------------------------------------------------
 
     associate(                                                                                   &
@@ -1168,8 +1170,7 @@ contains
 
             ! only alter the competitive edge when actual nutrients demand exists
             if (((ivt(p) == ndllf_evr_brl_tree) .or. (ivt(p) == ndllf_dcd_brl_tree) .or. & 
-               (ivt(p) == nbrdlf_dcd_brl_shrub)) .and. (.not. carbon_only) .and. & 
-               (nu_com .eq. 'RD')) then
+               (ivt(p) == nbrdlf_dcd_brl_shrub)) .and. (.not. carbon_only)) then
 
                ! fungi inhibition factor: accumulate the top 30cm
                nu_fungi = 0._r8
@@ -1383,7 +1384,7 @@ contains
          end if
       end do ! end pft loop
 
-      if (nu_com .eq. 'RD') then
+      if (nu_com .eq. 'MYCI') then
          ! now use the p2c routine to get the column-averaged plant_ndemand
          call p2c(bounds, num_soilc, filter_soilc, &
             plant_ndemand_pot(bounds%begp:bounds%endp), &
@@ -1437,7 +1438,7 @@ contains
          end do
       endif
 
-      if (nu_com .eq. 'MYCI')
+      if (nu_com .eq. 'MYCI') then
          ! pool-wise vertical profile of uptake
          do fc=1, num_soilc
             c = filter_soilc(fc)
@@ -1709,7 +1710,7 @@ contains
            pci     = 1
            pcf     = n_pcomp
            
-           if( nu_com.eq.'RD') then
+           if( nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
 
               ! Overwrite the column level demands, since fates plants are all sharing
               ! the same space, in units per the same square meter, we just add demand
@@ -1773,7 +1774,7 @@ contains
            pci     = col_pp%pfti(c) ! Initial plant competitor index
            pcf     = col_pp%pftf(c) ! Final plant competitor index
            
-           if (nu_com .eq. 'RD') then
+           if (nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
 
               do j = 1, nlevdecomp
                  col_plant_ndemand_vr(c,j) = plant_ndemand_col(c) * nuptake_prof(c,j)
@@ -1856,7 +1857,7 @@ contains
         ! (3) no second pass nutrient uptake for plants
         ! ============================================================= 
         
-        if (nu_com .eq. 'RD') then
+        if (nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
 
            ! Estimate actual allocation rates via Relative Demand
            ! approach (RD)
@@ -1952,7 +1953,7 @@ contains
                  actual_immob_nh4_vr(c,j) = potential_immob_vr(c,j) -  actual_immob_no3_vr(c,j)
               end if
 
-              if (nu_com .eq. 'RD') then
+              if (nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
                  if ( smin_no3_to_plant_vr(c,j) + smin_nh4_to_plant_vr(c,j) < col_plant_ndemand_vr(c,j)) then
                     supplement_to_sminn_vr(c,j) = supplement_to_sminn_vr(c,j) + &
                          col_plant_ndemand_vr(c,j) - (smin_no3_to_plant_vr(c,j) + smin_nh4_to_plant_vr(c,j))
@@ -1978,7 +1979,7 @@ contains
         ! Starting resolving P limitation !!!
         ! =============================================================
 
-        if (nu_com .eq. 'RD') then
+        if (nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
 
            ! Relative Demand (RD)
            
@@ -2045,7 +2046,7 @@ contains
               .not.carbonphosphorus_only .and. &
               .not.carbonnitrogen_only ) then
 
-           if (nu_com .eq. 'RD') then
+           if (nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
               do j = 1, nlevdecomp
                  if( fpi_vr(c,j) <= fpi_p_vr(c,j) )then ! more N limited
                     do k = 1, ndecomp_cascade_transitions
@@ -2278,7 +2279,7 @@ contains
      end do
 
      ! for np imbalance (impacts fixation, NA with FATES)
-     if (nu_com .ne. 'RD' .and. .not.use_fates) then
+     if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI' .and. .not.use_fates) then
         do fc=1,num_soilc
            c = filter_soilc(fc)
            do p = col_pp%pfti(c), col_pp%pftf(c)
@@ -2309,7 +2310,7 @@ contains
            s = elm_fates%f2hmap(ci)%hsites(c)
            n_pcomp = elm_fates%fates(ci)%bc_out(s)%num_plant_comps
 
-           if (nu_com .eq. 'RD') then
+           if (nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
 
               if( plant_ndemand_col(c)>tiny(plant_ndemand_col(c)) ) then
                  do f = 1,n_pcomp
@@ -3210,7 +3211,7 @@ contains
          nlc = plant_calloc(p) / c_allometry(p)
          ! recover allocation fraction,  which is possibly changed due to previous time step allocation adjustment
          !fcur = fcur2(ivt(p))
-         if (nu_com .ne. 'RD' .and. nu_com .ne 'MYCI') then
+         if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
             ! under ECA or MIC mode, CNP stoichiometry is flexible
             ! If nutrient is limited, plant will accumulate non-structural carbon hydrate (sink strength limitation)
             ! e.g., in the model if allocatable C is too much, allocate excess C to storage pool, later could be respired
@@ -3378,7 +3379,7 @@ contains
          !nlc = plant_calloc(p) / c_allometry(p)
          ! recover allocation fraction,  which is possibly changed due to previous time step allocation adjustment
          !fcur = fcur2(ivt(p))
-         if (nu_com .ne. 'RD' .and. nu_com .ne. 'ECA') then
+         if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
             if ( carbon_only ) then ! C only mode
                ! nothing to adjust
             else ! CN/ CP/ CNP mode

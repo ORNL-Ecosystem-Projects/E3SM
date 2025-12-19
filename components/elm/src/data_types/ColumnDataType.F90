@@ -5246,7 +5246,7 @@ contains
                    ! assume soil below 50 cm has the same p pool concentration
                    ! divide 0.5m when convert p pools from g/m2 to g/m3
                    ! assume p pools evenly distributed at dif layers
-                   if (nu_com .eq. 'RD') then 
+                   if (nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then 
                        smax_c = smax(isoilorder(c))
                        ks_sorption_c = ks_sorption(isoilorder(c))
                        this%solutionp_vr(c,j) = (cnstate_vars%labp_col(c)/0.5_r8*ks_sorption_c)/&
@@ -5270,7 +5270,7 @@ contains
                    this%secondp_vr(c,1) = cnstate_vars%secp_col(c)
                    this%occlp_vr(c,1) = cnstate_vars%occp_col(c)
                    this%primp_vr(c,1) = cnstate_vars%prip_col(c)
-                else if (nu_com .eq. 'RD') then
+                else if (nu_com .eq. 'RD' .or. nu_com .eq. 'MYCI') then
                    a = 1.0_r8
                    b = smax(cnstate_vars%isoilorder(c)) + &
                        ks_sorption(cnstate_vars%isoilorder(c)) - cnstate_vars%labp_col(c)/0.5_r8

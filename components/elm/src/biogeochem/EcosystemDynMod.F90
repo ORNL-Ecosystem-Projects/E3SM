@@ -414,7 +414,7 @@ contains
     end if
 
 
-    if ( nu_com .ne. 'RD') then
+    if ( nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
        ! for P competition purpose, calculate P fluxes that will potentially increase solution P pool
        ! then competitors take up solution P
        event ='PhosphorusWeathering'

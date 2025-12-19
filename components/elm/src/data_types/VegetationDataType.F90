@@ -2520,7 +2520,7 @@ module VegetationDataType
              this%deadstemc_storage(p)  = 0._r8
              this%deadstemc_xfer(p)     = 0._r8
 
-             if (nu_com .ne. 'RD') then
+             if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
                 ! ECA competition calculate root NP uptake as a function of fine root biomass
                 ! better to initialize root CNP pools with a non-zero value
                 if (veg_pp%itype(p) .ne. noveg) then
@@ -3990,7 +3990,7 @@ module VegetationDataType
              this%deadstemn(p) = 0._r8
           end if
 
-          if (nu_com .ne. 'RD') then
+          if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
               ! ECA competition calculate root NP uptake as a function of fine root biomass
               ! better to initialize root CNP pools with a non-zero value
               if (veg_pp%itype(p) .ne. noveg) then
@@ -4674,7 +4674,7 @@ module VegetationDataType
              this%deadstemp(p) = 0._r8
           end if
 
-          if (nu_com .ne. 'RD') then
+          if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
               ! ECA competition calculate root NP uptake as a function of fine root biomass
               ! better to initialize root CNP pools with a non-zero value
               if (veg_pp%itype(p) .ne. noveg) then
@@ -4897,7 +4897,7 @@ module VegetationDataType
           end if
           this%deadstemp(i)  = this%deadstemp(i) * m_veg
           this%deadcrootp(i) = this%deadcrootp(i) * m_veg
-          if (nu_com == 'RD' .and. exit_spinup) then
+          if ((nu_com == 'RD' .or. nu_com == 'MYCI') .and. exit_spinup) then
              !Initialize plant P storage pool when exiting spinup from CN only mode
              if (this%ppool(i) .lt. this%leafp(i)) then
                 this%ppool(i) = this%leafp(i)
@@ -6719,7 +6719,7 @@ module VegetationDataType
             avgflag='A', long_name='C flux assigned to recovery of negative xsmrpool', &
             ptr_patch=this%xsmrpool_recover, default='inactive')
 
-       if (nu_com .ne. 'RD' ) then
+       if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
           this%allocation_leaf(begp:endp) = spval
           call hist_addfld1d (fname='allocation_leaf', units='', &
                avgflag='A', long_name='fraction of availc allocated to leaf', &
@@ -8292,7 +8292,7 @@ module VegetationDataType
                this%gr(p) + &
                this%xr(p) + &
                this%xsmrpool_to_atm(p) ! xsmr... is -ve (slevis)
-          if (nu_com .ne. 'RD' ) then
+          if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
              this%ar(p) = this%ar(p) + &
                   this%xsmrpool_turnover(p)
           end if
@@ -8301,7 +8301,7 @@ module VegetationDataType
                this%mr(p) + &
                this%gr(p) + &
                this%xr(p)
-          if (nu_com .ne. 'RD' ) then
+          if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
              this%ar(p) = this%ar(p) + &
                   this%xsmrpool_turnover(p)
           end if
