@@ -132,6 +132,7 @@ attributes from the config_cache.xml file (with keys converted to upper-case).
 <!-- soil order related parameters (relative to {csmdata}) -->
 <fsoilordercon             >lnd/clm2/paramdata/CNP_parameters_c131108.nc</fsoilordercon>
 <fsoilordercon nu_com="RD" >lnd/clm2/paramdata/CNP_parameters_c180529.nc</fsoilordercon>
+<fsoilordercon nu_com="MYCI" >lnd/clm2/paramdata/CNP_parameters_c180529.nc</fsoilordercon>
 <fsoilordercon nu_com="ECA">lnd/clm2/paramdata/CNP_parameters_c180312.nc'</fsoilordercon>
 
 <!-- HOMME grid ne4 resolution -->
