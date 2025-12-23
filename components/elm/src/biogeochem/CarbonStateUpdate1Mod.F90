@@ -336,9 +336,9 @@ contains
          if (nu_com .ne. 'RD' .and. nu_com .ne. 'MYCI') then
             veg_cs%xsmrpool(p) = veg_cs%xsmrpool(p) - veg_cf%xsmrpool_turnover(p)*dt
          end if
-         !if (nu_com .eq. 'MYCI') then
-         !   veg_cs%xsmrpool(p) = veg_cs%xsmrpool(p) - veg_cf%cpool_to_fungi(p)*dt
-         !end if
+         if (nu_com .eq. 'MYCI') then
+            veg_cs%xsmrpool(p) = veg_cs%xsmrpool(p) - veg_cf%cpool_to_fungi(p)*dt
+         end if
          if (woody(ivt(p)) >= 1._r8) then
             veg_cs%xsmrpool(p) = veg_cs%xsmrpool(p) - veg_cf%livestem_xsmr(p)*dt
          end if

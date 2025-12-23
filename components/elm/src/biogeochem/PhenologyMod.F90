@@ -3622,7 +3622,9 @@ contains
          leafc_to_litter                     =>    veg_cf%leafc_to_litter           , & ! Input:  [real(r8) (:)   ]  leaf C litterfall (gC/m2/s)
          frootc_to_litter                    =>    veg_cf%frootc_to_litter          , & ! Input:  [real(r8) (:)   ]  fine root N litterfall (gN/m2/s)
          livestemc_to_litter                 =>    veg_cf%livestemc_to_litter       , & ! Input:  [real(r8) (:)   ]  live stem C litterfall (gC/m2/s)
-         livecrootc_to_litter                 =>    veg_cf%livecrootc_to_litter       , & ! Input:  [real(r8) (:)   ]  live coarse root/rhizome C litterfall (gC/m2/s)  
+         livecrootc_to_litter                =>    veg_cf%livecrootc_to_litter      , & ! Input:  [real(r8) (:)   ]  live coarse root/rhizome C litterfall (gC/m2/s)  
+         cpool_to_fungi                      =>    veg_cf%cpool_to_fungi            , & ! Input: [real(r8) (:) ]  C transfered to mycorrhizal fungi (gC/m2/s)
+
 !         grainc_to_food                      =>    veg_cf%grainc_to_food            , & ! Input:  [real(r8) (:)   ]  grain C to food (gC/m2/s)
          phenology_c_to_litr_met_c           =>    col_cf%phenology_c_to_litr_met_c   , & ! Output: [real(r8) (:,:) ]  C fluxes associated with phenology (litterfall and crop) to litter metabolic pool (gC/m3/s)
          phenology_c_to_litr_cel_c           =>    col_cf%phenology_c_to_litr_cel_c   , & ! Output: [real(r8) (:,:) ]  C fluxes associated with phenology (litterfall and crop) to litter cellulose pool (gC/m3/s)
@@ -3675,6 +3677,14 @@ contains
                   + leafp_to_litter(p) * lf_fcel(ivt(p)) * wt_col * leaf_prof(p,j)
             phenology_p_to_litr_lig_p(c,j) = phenology_p_to_litr_lig_p(c,j) &
                   + leafp_to_litter(p) * lf_flig(ivt(p)) * wt_col * leaf_prof(p,j)
+
+            ! add cpool_to_fungi as a flux into soil analogous to fine root
+            phenology_c_to_litr_met_c(c,j) = phenology_c_to_litr_met_c(c,j) &
+                  + cpool_to_fungi(p) * fr_flab(ivt(p)) * wt_col * froot_prof(p,j)
+            phenology_c_to_litr_cel_c(c,j) = phenology_c_to_litr_cel_c(c,j) &
+                  + cpool_to_fungi(p) * fr_fcel(ivt(p)) * wt_col * froot_prof(p,j)
+            phenology_c_to_litr_lig_c(c,j) = phenology_c_to_litr_lig_c(c,j) &
+                  + cpool_to_fungi(p) * fr_flig(ivt(p)) * wt_col * froot_prof(p,j)
 
             ! fine root litter carbon fluxes
             phenology_c_to_litr_met_c(c,j) = phenology_c_to_litr_met_c(c,j) &
