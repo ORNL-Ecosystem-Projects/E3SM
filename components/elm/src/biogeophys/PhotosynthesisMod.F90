@@ -227,6 +227,7 @@ contains
     use elm_varcon     , only : rgas, tfrz
     use elm_varctl     , only : carbon_only
     use pftvarcon      , only : vcmax_np1, vcmax_np2, vcmax_np3, vcmax_np4, jmax_np1, jmax_np2, jmax_np3
+    use pftvarcon      , only : vpd_max_moss, vpd_min_moss
     !
     ! !ARGUMENTS:
     type(bounds_type)      , intent(in)    :: bounds
@@ -361,8 +362,6 @@ contains
     real(r8) :: total_lai
     integer  :: rad_layers_patch
     real(r8) :: wcscaler, vpd_pa, vpd_stress
-    real(r8), parameter :: vpd_min_moss = 600.0_r8  ! Pa (0.5 kPa) - no stress below this
-    real(r8), parameter :: vpd_max_moss = 1200.0_r8  ! Pa (1.0 kPa) - full stress above this
     !------------------------------------------------------------------------------
     ! Temperature and soil water response functions
 
@@ -866,7 +865,6 @@ contains
             if (veg_pp%itype(p) == 12) then
                vcmax_z(p,iv) = vcmax_z(p,iv) * wcscaler
                lmr_z(p,iv) = lmr_z(p,iv) * wcscaler
-               print*, wcscaler, vcmax_z(p,iv)
             else
                vcmax_z(p,iv) = vcmax_z(p,iv) * btran(p)
                lmr_z(p,iv) = lmr_z(p,iv) * btran(p) !will this carry over from the earlier if marsh statement? -SLL 4-8-21
