@@ -411,7 +411,7 @@ contains
      real(r8) :: f_sno
      real(r8) :: imped
      real(r8) :: d
-     real(r8) :: h2osoi_vol
+     !real(r8) :: h2osoi_vol
      real(r8) :: basis                                      ! temporary, variable soil moisture holding capacity
      real(r8) :: vdep                                       ! temporary, ice wedge polygon volumetric depression depth (m)
      real(r8) :: phi_eff                                    ! temporary, polygonal ground effective subsidence (maxes out at 0.4) (m)
@@ -437,6 +437,7 @@ contains
      integer  :: ii
    !   real(r8) :: h2osfc_tide
      real(r8) :: h2osfc_before
+     real(r8) :: dryness_factor
      logical :: obs_zwt_forcing = .true.    !use observed water table foring (HUMHOL option) 
      !-----------------------------------------------------------------------
 
@@ -466,7 +467,7 @@ contains
           iwp_subsidence       =>    col_ws%iwp_subsidence       , & ! Input:  [real(r8) (:)   ]  ice wedge polygon ground subsidence (m)
           salinity             =>    col_ws%salinity            , & ! Input:  [real(r8) (:,:)   ] salinity concentration (ppt)
           h2osfc_tide          =>    col_ws%h2osfc_tide         , & ! Output: [real(r8) (:) ] Tide height above surface (mm)
-
+         
           qflx_ev_soil         =>    col_wf%qflx_ev_soil         , & ! Input:  [real(r8) (:)   ]  evaporation flux from soil (W/m**2) [+ to atm]
           qflx_evap_soi        =>    col_wf%qflx_evap_soi        , & ! Input:  [real(r8) (:)   ]  ground surface evaporation rate (mm H2O/s) [+]
           qflx_evap_grnd       =>    col_wf%qflx_evap_grnd       , & ! Input:  [real(r8) (:)   ]  ground surface evaporation rate (mm H2O/s) [+]
@@ -489,7 +490,7 @@ contains
           bsw                  =>    soilstate_vars%bsw_col                  , & ! Input:  [real(r8) (:,:) ]  Clapp and Hornberger "b"
           hksat                =>    soilstate_vars%hksat_col                , & ! Input:  [real(r8) (:,:) ]  hydraulic conductivity at saturation (mm H2O /s)
           eff_porosity         =>    soilstate_vars%eff_porosity_col         , & ! Output: [real(r8) (:,:) ]  effective porosity = porosity - vol_ice
-
+          watfc_col            =>    soilstate_vars%watfc_col                , & ! Input:  [real(r8) (:)   ]  field capacity (volumetric)
           h2osfc_thresh        =>    soilhydrology_vars%h2osfc_thresh_col    , & ! Input:  [real(r8) (:)   ]  level at which h2osfc "percolates"
           zwt                  =>    soilhydrology_vars%zwt_col              , & ! Input:  [real(r8) (:)   ]  water table depth (m)
           zwt_perched          =>    soilhydrology_vars%zwt_perched_col      , & ! Input:  [real(r8) (:)   ]  perched water table depth (m)
@@ -639,7 +640,8 @@ contains
                 if ( use_modified_infil ) then
                   qinmax=minval(10._r8**(-e_ice*(icefrac(c,1:3)))*hksat(c,1:3))
                 else
-                  qinmax=(1._r8 - fsat(c)) * minval(10._r8**(-e_ice*(icefrac(c,1:3)))*hksat(c,1:3))
+                  dryness_factor = 1.0_r8 !max(min((h2osoi_vol(c,1)/watfc_col(c,1))**4, 1.0_r8), 0.01_r8)
+                  qinmax=(1._r8 - fsat(c)) * dryness_factor * minval(10._r8**(-e_ice*(icefrac(c,1:3)))*hksat(c,1:3))
                 end if
              end if
              

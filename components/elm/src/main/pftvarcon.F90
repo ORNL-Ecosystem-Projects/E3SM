@@ -329,6 +329,11 @@ module pftvarcon
   real(r8)              :: humhol_ht
   real(r8)              :: hum_frac
   real(r8)              :: humhol_dist
+  real(r8)              :: vpd_max_moss
+  real(r8)              :: vpd_min_moss
+  real(r8)              :: blower_u0           ! reference blower wind magnitude at surface [m/s]
+  real(r8)              :: blower_lambda       ! vertical decay e-folding length [m]
+  
 ! Tidal cycle controls
   integer               :: num_tide_comps      ! Number of tidal cycle components
   real(r8)              :: tide_baseline            ! Base tide level (mean of cycle) (mm)
@@ -1132,6 +1137,14 @@ contains
     if ( .not. readv) hum_frac = 0.5_r8
     call ncd_io('qflx_h2osfc_surfrate', qflx_h2osfc_surfrate, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if ( .not. readv) qflx_h2osfc_surfrate = 1.0e-7_r8
+    call ncd_io('vpd_max_moss', vpd_max_moss, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if ( .not. readv) vpd_max_moss = 1500.0_r8
+    call ncd_io('vpd_min_moss', vpd_min_moss, 'read', ncid, readvar=readv, posNOTonfile=.true.) 
+    if ( .not. readv) vpd_min_moss = 1000.0_r8
+    call ncd_io('blower_u0', blower_u0, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if ( .not. readv) blower_u0 = 0.0_r8
+    call ncd_io('blower_lambda', blower_lambda, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if ( .not. readv) blower_lambda = 2.0_r8
 
 #ifdef MARSH
 ! Tidal cycle parameters

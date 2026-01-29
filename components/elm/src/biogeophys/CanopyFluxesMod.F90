@@ -17,7 +17,7 @@ module CanopyFluxesMod
   use elm_varctl            , only : use_hydrstress
   use elm_varpar            , only : nlevgrnd, nlevsno
   use elm_varcon            , only : namep
-  use pftvarcon             , only : crop, nfixer
+  use pftvarcon             , only : crop, nfixer, blower_u0, blower_lambda
   use decompMod             , only : bounds_type
   use PhotosynthesisMod     , only : Photosynthesis, PhotosynthesisTotal, Fractionation, PhotoSynthesisHydraulicStress
   use SoilMoistStressMod    , only : calc_effective_soilporosity, calc_volumetric_h2oliq
@@ -99,6 +99,7 @@ contains
     use elm_varcon         , only : isecspday, degpsec
     use pftvarcon          , only : irrigated, slatop
     use elm_varcon         , only : c14ratio
+    use elm_time_manager   , only : get_curr_date
 
     !NEW
     use elm_varsur         , only : firrig
@@ -173,6 +174,7 @@ contains
     real(r8) :: zeta                                 ! dimensionless height used in Monin-Obukhov theory
     real(r8) :: wc                                   ! convective velocity [m/s]
     real(r8) :: ugust_total(bounds%begp:bounds%endp) ! gustiness including convective velocity [m/s]
+    real(r8) :: ublow(bounds%begp:bounds%endp)       ! blower-induced effective wind component [m/s]
     real(r8) :: dth(bounds%begp:bounds%endp)         ! diff of virtual temp. between ref. height and surface
     real(r8) :: dthv(bounds%begp:bounds%endp)        ! diff of vir. poten. temp. between ref. height and surface
     real(r8) :: dqh(bounds%begp:bounds%endp)         ! diff of humidity between ref. height and surface
@@ -320,6 +322,7 @@ contains
     real(r8) :: prev_tau(bounds%begp:bounds%endp) ! Previous iteration tau
     real(r8) :: prev_tau_diff(bounds%begp:bounds%endp) ! Previous difference in iteration tau
     real(r8) :: liquid_vol_3, liquid_vol_4        ! liquid water volume in soil layers 3 and 4
+    integer  :: yr, mon, day, sec
     character(len=64) :: event !! timing event
     !------------------------------------------------------------------------------
 
@@ -715,17 +718,32 @@ contains
          qaf(p) = (forc_q(t)+qg(c))/2._r8
 
          ! Initialize winds for iteration.
+         !Get the model year to determine if SPRUCE blowers are active
+         call get_curr_date(yr, mon, day, sec)
          if (implicit_stress) then
             wind_speed0(p) = max(0.01_r8, hypot(forc_u(t), forc_v(t)))
             wind_speed_adj(p) = wind_speed0(p)
-            ur(p) = max(1.0_r8, sqrt(wind_speed_adj(p)**2 + ugust(t)**2))
+            ! Blower-induced effective wind component with vertical decay
+            ! Decay height uses min(reference height above displacement, canopy top)
+            ! Set blower_u0 > 0 to enable; default is off (0))
+            ublow(p) = 0.0_r8
+            if (blower_u0 > 0.0_r8 .and. yr >= 2015) then
+               ublow(p) = blower_u0 * exp( - min( htop(p), max( 0.0_r8, forc_hgt_u_patch(p) - displa(p) ) ) / max(blower_lambda, 1.0e-6_r8) )
+            end if
+            ur(p) = max(1.0_r8, sqrt(wind_speed_adj(p)**2 + ugust(t)**2 + ublow(p)**2))
 
             prev_tau(p) = tau_est(t)
          else
-            ur(p) = max(1.0_r8,sqrt(forc_u(t)*forc_u(t)+forc_v(t)*forc_v(t)+ugust(t)*ugust(t)))
+            ! Blower-induced effective wind component with vertical decay
+            ublow(p) = 0.0_r8
+            if (blower_u0 > 0.0_r8 .and. yr >= 2015) then
+               ublow(p) = blower_u0 * exp( - min( htop(p), max( 0.0_r8, forc_hgt_u_patch(p) - displa(p) ) ) / max(blower_lambda, 1.0e-6_r8) )
+            end if
+            ur(p) = max(1.0_r8, sqrt(forc_u(t)*forc_u(t) + forc_v(t)*forc_v(t) + ugust(t)*ugust(t) + ublow(p)*ublow(p)))
          end if
          tau_diff(p) = 1.e100_r8
-         ugust_total(p) = ugust(t)
+         ! Treat blower-induced component as mechanical gustiness added in quadrature
+         ugust_total(p) = sqrt( ugust(t)*ugust(t) + ublow(p)*ublow(p) )
 
          dth(p) = thm(p)-taf(p)
          dqh(p) = forc_q(t)-qaf(p)
@@ -803,7 +821,7 @@ contains
                call shr_flux_update_stress(wind_speed0(p), wsresp(t), tau_est(t), &
                     tau(p), prev_tau(p), tau_diff(p), prev_tau_diff(p), &
                     wind_speed_adj(p))
-               ur(p) = max(1.0_r8, sqrt(wind_speed_adj(p)**2 + ugust(t)**2))
+               ur(p) = max(1.0_r8, sqrt(wind_speed_adj(p)**2 + ugust(t)**2 + ublow(p)**2))
             end if
 
             ! Bulk boundary layer resistance of leaves
@@ -1168,7 +1186,8 @@ contains
                zeta = max(-100._r8,min(zeta,-0.01_r8))
                if ((.not. atm_gustiness) .or. force_land_gustiness) then
                   wc = beta*(-grav*ustar(p)*thvstar*zii/thv(c))**0.333_r8
-                  ugust_total(p) = sqrt(ugust(t)**2 + wc**2)
+                  ! Include blower-induced mechanical component in total gustiness
+                  ugust_total(p) = sqrt( ugust(t)**2 + wc**2 + ublow(p)**2 )
                   um(p) = sqrt(ur(p)*ur(p)+wc*wc)
                else
                   um(p) = max(ur(p),0.1_r8)
