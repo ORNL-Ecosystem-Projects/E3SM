@@ -438,7 +438,7 @@ contains
    !   real(r8) :: h2osfc_tide
      real(r8) :: h2osfc_before
      real(r8) :: dryness_factor
-     logical :: obs_zwt_forcing = .true.    !use observed water table foring (HUMHOL option) 
+     logical :: obs_zwt_forcing = .false.    !use observed water table foring (HUMHOL option) 
      !-----------------------------------------------------------------------
 
      associate(                                                    &
