@@ -7,7 +7,7 @@ module SoilHydrologyMod
   use shr_kind_mod      , only : r8 => shr_kind_r8
   use shr_log_mod       , only : errMsg => shr_log_errMsg
   use decompMod         , only : bounds_type
-  use elm_varctl        , only : iulog, use_vichydro
+   use elm_varctl        , only : iulog, use_vichydro, obs_zwt_forcing
   use elm_varctl        , only : use_lnd_rof_two_way, lnd_rof_coupling_nstep
   use elm_varctl        , only : use_modified_infil
   use elm_varcon        , only : e_ice, denh2o, denice, rpi
@@ -438,7 +438,7 @@ contains
    !   real(r8) :: h2osfc_tide
      real(r8) :: h2osfc_before
      real(r8) :: dryness_factor
-     logical :: obs_zwt_forcing = .false.    !use observed water table foring (HUMHOL option) 
+   ! obs_zwt_forcing is set via namelist (elm_inparm) in elm_varctl
      !-----------------------------------------------------------------------
 
      associate(                                                    &

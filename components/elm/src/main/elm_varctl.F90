@@ -378,6 +378,8 @@ module elm_varctl
   logical, public :: use_vertsoilc       = .false.
   logical, public :: use_extralakelayers = .false.
   logical, public :: use_vichydro        = .false.
+  ! Use observed water table forcing (HUM_HOL option)
+  logical, public :: obs_zwt_forcing     = .false.
   logical, public :: use_century_decomp  = .false.
   logical, public :: use_cn              = .false.
   logical, public :: use_cndv            = .false.
