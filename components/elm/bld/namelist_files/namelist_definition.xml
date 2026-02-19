@@ -819,6 +819,11 @@ Toggle to turn on the VIC hydrologic parameterizations
 (vichydro=".true." is EXPERIMENTAL NOT SUPPORTED!)
 </entry>
 
+<entry id="obs_zwt_forcing" type="logical" category="physics"
+       group="elm_inparm" valid_values="" value=".false.">
+If TRUE, use observed water-table forcing (HUM_HOL option) instead of model-calculated zwt.
+</entry>
+
 <entry id="use_crop" type="logical" category="physics"
        group="elm_inparm" valid_values="" value=".false.">
 Toggle to turn on the prognostic crop model
