@@ -889,11 +889,16 @@ contains
 
       ! local variables
       integer           :: fp                         ! non-urban filter patch index
+      integer           :: fp_shrub                   ! helper index for searching shrub patches
       integer           :: p                          ! patch index
       integer           :: t                          ! topounit index
       integer           :: g                          ! gridcell index
       integer           :: iv                         ! canopy layer index
       integer,parameter :: ipar = 1                   ! The band index for PAR
+      real(r8) :: shrub_lai     ! To store shrub LAI for the current column
+      real(r8) :: transmission  ! Transmission fraction (0.0 to 1.0)
+      real(r8), parameter :: extinction_k = 0.5_r8  ! Extinction coefficient for shrubs
+      integer :: p_shrub, itype
 
       associate(   &
             tlai_z      => surfalb_vars%tlai_z_patch,     & ! tlai increment for canopy layer
@@ -918,6 +923,32 @@ contains
 
            p = filter_nourbanp(fp)
            t = veg_pp%topounit(p)
+           g = veg_pp%gridcell(p)
+! --- BEER-LAMBERT LIGHT COMPETITION LOGIC ---
+      
+      shrub_lai = 0.0_r8
+      transmission = 1.0_r8 ! Default: no shading
+      
+      ! 1. If the current patch is Moss (PFT 12), find the Shrub (PFT 11) LAI in this gridcell
+      if (veg_pp%itype(p) == 12) then
+         
+         ! Note: In ELM, we typically look at the column or gridcell level.
+         ! For this implementation, we assume we need to find the specific shrub patch.
+         ! Searching for PFT 11 LAI:
+         do fp_shrub = 1, num_nourbanp
+            p_shrub = filter_nourbanp(fp_shrub)
+            ! Check if this patch belongs to the same gridcell/column and is a Shrub
+            if (veg_pp%gridcell(p_shrub) == g .and. veg_pp%itype(p_shrub) == 11) then
+               shrub_lai = elai(p_shrub)*0.25_r8
+               exit
+            end if
+         end do
+         ! extinction_k (k) is typically 0.5 for shrubs
+         if (shrub_lai > 0.0_r8) then
+            transmission = exp(-extinction_k * shrub_lai)
+         end if
+      end if
+      ! ---------------------------------------------
 
            do iv = 1, nrad(p)
               parsun_z(p,iv) = 0._r8
@@ -948,15 +979,23 @@ contains
            ! Absorbed PAR profile through canopy
            ! If sun/shade big leaf code, nrad=1 and fluxes from SurfaceAlbedo
            ! are canopy integrated so that layer values equal big leaf values.
+           !We multiply the incident radiation by the 'transmission' factor.
+           ! If the patch is NOT moss, transmission is 1.0 (no change).
+           ! If the patch IS moss, transmission is the fraction of light passing through shrubs.
+
 
            g = veg_pp%gridcell(p)
-
+           
            do iv = 1, nrad(p)
-              parsun_z(p,iv) = forc_solad(t,ipar)*fabd_sun_z(p,iv) + forc_solai(t,ipar)*fabi_sun_z(p,iv)
-              parsha_z(p,iv) = forc_solad(t,ipar)*fabd_sha_z(p,iv) + forc_solai(t,ipar)*fabi_sha_z(p,iv)
+              parsun_z(p,iv) = (forc_solad(t,ipar) * transmission) * fabd_sun_z(p,iv) + &
+                          (forc_solai(t,ipar) * transmission) * fabi_sun_z(p,iv)
+
+             parsha_z(p,iv) = (forc_solad(t,ipar) * transmission) * fabd_sha_z(p,iv) + &
+                          (forc_solai(t,ipar) * transmission) * fabi_sha_z(p,iv)
            end do
 
-        end do ! end of fp = 1,num_nourbanp loop
+        end do ! end of fp loop
+
       end associate
 
       return
