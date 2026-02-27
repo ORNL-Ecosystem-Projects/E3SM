@@ -14,6 +14,7 @@ module SoilMoistStressMod
   ! Created by Jinyun Tang, Feb., 2014
   !
   use ColumnDataType   , only : col_es, col_ws
+  use VegetationPropertiesType, only: veg_vp
   !
   implicit none
   save
@@ -416,7 +417,7 @@ contains
                   rootr(p,j) = rootfr_unf(p,j)*rresis(p,j)
                end if
 #if (defined HUM_HOL)
-               if (veg_pp%itype(p) == 12 .and. h2osoi_liqvol(c,j) .ge. 0.05_r8) then
+               if (nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1 .and. h2osoi_liqvol(c,j) .ge. 0.05_r8) then
                   rootr(p,j) = rootfr(p,j)  !Don't consider resistance for moss
                end if
 #endif      

@@ -168,8 +168,8 @@ contains
          moss_column_lai = 0._r8
        
          do p = col_pp%pfti(c), col_pp%pftf(c)
-            if (veg_pp%active(p) .and. veg_pp%itype(p) == 12) then  ! moss PFT
-              moss_column_lai = moss_column_lai + elai(p) * veg_pp%wtcol(p)
+            if (veg_pp%active(p) .and. nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then  ! moss PFT
+               moss_column_lai = moss_column_lai + elai(p) * veg_pp%wtcol(p)
             endif
          enddo
          if (moss_column_lai > 0._r8) then
@@ -187,7 +187,7 @@ contains
 
          ! Partition N deposition to moss patches
          do p = col_pp%pfti(c), col_pp%pftf(c)
-           if (veg_pp%active(p) .and. veg_pp%itype(p) == 12) then  ! moss PFT
+           if (veg_pp%active(p) .and. nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then  ! moss PFT
               ! Distribute moss N deposition proportionally by patch weight
               if (moss_column_lai > 0._r8) then
                  ndep_to_npool(p) = total_ndep_flux * moss_ndep_fraction / veg_pp%wtcol(p)

@@ -7,7 +7,8 @@ module SurfaceRadiationMod
   ! !USES:
   use shr_kind_mod      , only : r8 => shr_kind_r8
   use shr_log_mod       , only : errMsg => shr_log_errMsg
-  use elm_varctl        , only : use_snicar_frc, use_fates, iulog
+   use elm_varctl        , only : use_snicar_frc, use_fates, iulog, use_shrub_moss_shading
+   use VegetationPropertiesType, only: veg_vp
   use abortutils        , only : endrun
   use decompMod         , only : bounds_type
   use elm_varcon        , only : namec, spval, ispval
@@ -914,24 +915,23 @@ contains
       
       shrub_lai = 0.0_r8
       transmission = 1.0_r8 ! Default: no shading
-      
-      ! 1. If the current patch is Moss (PFT 12), find the Shrub (PFT 11) LAI in this gridcell
-      if (veg_pp%itype(p) == 12) then
-         
-         ! Note: In ELM, we typically look at the column or gridcell level.
-         ! For this implementation, we assume we need to find the specific shrub patch.
-         ! Searching for PFT 11 LAI:
-         do fp_shrub = 1, num_nourbanp
-            p_shrub = filter_nourbanp(fp_shrub)
-            ! Check if this patch belongs to the same gridcell/column and is a Shrub
-            if (veg_pp%gridcell(p_shrub) == g .and. veg_pp%itype(p_shrub) == 11) then
-               shrub_lai = elai(p_shrub)*0.25_r8
-               exit
+
+      ! Apply shrub shading on moss only if enabled by namelist
+      if (use_shrub_moss_shading) then
+         ! 1. If the current patch is Moss (nonvascular==1), find the Shrub (PFT 11) LAI in this gridcell
+         if (nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+            ! Search for a shrub patch in the same gridcell and use a fraction of its buried elai
+            do fp_shrub = 1, num_nourbanp
+               p_shrub = filter_nourbanp(fp_shrub)
+               if (veg_pp%gridcell(p_shrub) == g .and. veg_pp%itype(p_shrub) == 11) then
+                  shrub_lai = elai(p_shrub) * 0.25_r8
+                  exit
+               end if
+            end do
+            ! extinction_k (k) is typically 0.5 for shrubs
+            if (shrub_lai > 0.0_r8) then
+               transmission = exp(-extinction_k * shrub_lai)
             end if
-         end do
-         ! extinction_k (k) is typically 0.5 for shrubs
-         if (shrub_lai > 0.0_r8) then
-            transmission = exp(-extinction_k * shrub_lai)
          end if
       end if
       ! ---------------------------------------------

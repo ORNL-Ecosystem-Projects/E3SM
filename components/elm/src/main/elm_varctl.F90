@@ -397,6 +397,8 @@ module elm_varctl
   character(len = SHR_KIND_CS), public :: precip_downscaling_method  = 'ERMM' ! Precip downscaling method values can be ERMM or FNM
   logical, public :: use_lake_wat_storage = .false.
   logical, public :: use_top_solar_rad   = .false.  ! TOP : sub-grid topographic effect on surface solar radiation
+  ! New namelist option: enable/disable shrub shading on moss
+  logical, public :: use_shrub_moss_shading = .true. ! true => apply shrub shading to moss (default: enabled)
 
   !----------------------------------------------------------
   ! Fan controls (use_fan)
