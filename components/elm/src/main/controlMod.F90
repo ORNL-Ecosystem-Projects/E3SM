@@ -392,6 +392,8 @@ contains
 
     namelist /elm_inparm/ &
          use_top_solar_rad, use_finetop_rad
+    namelist /elm_inparm/ &
+         use_shrub_moss_shading
 
     namelist /elm_mosart/ &
          lnd_rof_coupling_nstep

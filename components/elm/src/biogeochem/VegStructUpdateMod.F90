@@ -250,7 +250,7 @@ contains
             fb = 1._r8 - (ol / max(1.e-06_r8, bendresist(ivt(p)) * (htop(p)-hbot(p)))) ** vegshape(ivt(p))
          else
 #if (defined HUM_HOL)
-           if (ivt(p) == 12) then
+           if (nint(veg_vp%nonvascular(ivt(p))) == 1) then
              !thiswtht = zwt(c)*(-1.0_r8)+humhol_ht/2.0_r8+h2osfc(c)/1000._r8 !height above hollow bottom
              thiswtht = h2osfc(c)/1000._r8 
              !calculate submerged LAI or buried by snow (10cm is assumed)

@@ -404,7 +404,8 @@ module elm_varctl
   logical, public :: use_lake_wat_storage = .false.
   logical, public :: use_top_solar_rad   = .false.  ! TOP : sub-grid topographic effect on surface solar radiation
   logical, public :: use_finetop_rad     = .false.  ! fineTOP : fine(grid)-scale topographic effect on surface radiation balance (longwave + shortwave)
-  
+  ! New namelist option: enable/disable shrub shading on moss
+  logical, public :: use_shrub_moss_shading = .true. ! true => apply shrub shading to moss (default: enabled)
   !----------------------------------------------------------
   ! Fan controls (use_fan)
   !----------------------------------------------------------

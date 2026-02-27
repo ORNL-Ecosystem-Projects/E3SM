@@ -769,6 +769,13 @@ If TRUE, TOP solar radiation parameterization will be activated, which considers
 If TRUE, fineTOP radiation parameterization will be activated, which considers the effects of fine(grid)-scale topography.
 </entry>
 <!-- End fineTOP radiation parameterization -->
+<!-- Shrub shading on moss: enable/disable ---------------------- -->
+<entry id="use_shrub_moss_shading" type="logical" category="elm_physics"
+       group="elm_inparm" valid_values="" value=".false.">
+If TRUE, apply shrub shading to moss patches. When enabled, light incident on moss
+patches is reduced according to a Beer-Lambert transmission using neighboring shrub LAI.
+</entry>
+<!-- End shrub shading option ---------------------------------- -->
 
 <!-- ========================================================================================  -->
 <!-- Former CPP tokens -->

@@ -885,7 +885,7 @@ contains
             ! content) content
             ! for moss
 #if (defined HUM_HOL)
-            if (veg_pp%itype(p) == 12) then
+            if (nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
                 !DMRicciuto 12/4/2015 - changed to use average of layer 3 and 4 
                 !h2o_moss_inter(p) = 8.05_r8 * (1.0_r8 - min(max((0.15_r8-zwt(c))/(0.15_r8-0.5_r8),0._r8),1._r8))
                 ! Use only liquid water 

@@ -531,7 +531,7 @@ contains
 
          ! Soil water stress applied to Ball-Berry parameters
 #if (defined HUM_HOL)
-         if (veg_pp%itype(p) == 12) then
+         if (nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
             !Surface conductance is a function of moss water content
             bbb(p) = (-0.195 + 0.134*(h2o_moss_wc(p)+1._r8) - &
                      0.0256*(h2o_moss_wc(p) + 1.0_r8)**2  &
@@ -836,7 +836,7 @@ contains
                vcmaxse = 668.39_r8 - 1.07_r8 * min(max((t10(p)-tfrz),11._r8),35._r8)
                jmaxse  = 659.70_r8 - 0.75_r8 * min(max((t10(p)-tfrz),11._r8),35._r8)
 #if (defined HUM_HOL)
-               if (veg_pp%itype(p) == 12) then
+               if (nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
                   ! Moss-specific temperature acclimation (narrower range, lower optimum)
                   vcmaxse = 673.39_r8 - 0.54_r8 * min(max((t10(p)-tfrz),5._r8),15._r8)
                   jmaxse  = 664.70_r8 - 0.65_r8 * min(max((t10(p)-tfrz),5._r8),15._r8)
@@ -862,7 +862,7 @@ contains
 
             ! Adjust for soil water
 #if (defined HUM_HOL)
-            if (veg_pp%itype(p) == 12) then
+            if (nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
                vcmax_z(p,iv) = vcmax_z(p,iv) * wcscaler
                lmr_z(p,iv) = lmr_z(p,iv) * wcscaler
             else
@@ -2439,7 +2439,7 @@ contains
                vcmaxse = 668.39_r8 - 1.07_r8 * min(max((t10(p)-tfrz),11._r8),35._r8)
                jmaxse  = 659.70_r8 - 0.75_r8 * min(max((t10(p)-tfrz),11._r8),35._r8)
 #if (defined HUM_HOL)
-               if (veg_pp%itype(p) == 12) then
+               if (nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
                   ! Moss-specific temperature acclimation (narrower range, lower optimum)
                   vcmaxse = 673.39_r8 - 0.54_r8 * min(max((t10(p)-tfrz),5._r8),15._r8)
                   jmaxse  = 664.70_r8 - 0.65_r8 * min(max((t10(p)-tfrz),5._r8),15._r8)
