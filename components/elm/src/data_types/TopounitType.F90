@@ -55,6 +55,7 @@ module TopounitType
     real(r8), pointer :: lat        (:) => null() ! mean latitude (radians)
     real(r8), pointer :: lon        (:) => null() ! mean longitude (radians)
     real(r8), pointer :: elevation  (:) => null() ! mean soil surface elevation, above mean sea level (m)
+    real(r8), pointer :: lateral_dist (:) => null() ! lateral distance to the next lower topounit in the gridcell (m)
     real(r8), pointer :: slope      (:) => null() ! mean slope angle (radians)
     integer , pointer :: aspect     (:) => null() ! mean aspect angle, measured clockwise from north (radians)
     real(r8), pointer :: emissivity (:) => null() ! mean surface emissivity
@@ -99,6 +100,7 @@ module TopounitType
     allocate(this%lat         (begt:endt)) ; this%lat         (:) = spval
     allocate(this%lon         (begt:endt)) ; this%lon         (:) = spval
     allocate(this%elevation   (begt:endt)) ; this%elevation   (:) = spval
+    allocate(this%lateral_dist(begt:endt)) ; this%lateral_dist(:) = spval
     allocate(this%slope       (begt:endt)) ; this%slope       (:) = spval
     allocate(this%aspect      (begt:endt)) ; this%aspect      (:) = ispval
     allocate(this%emissivity  (begt:endt)) ; this%emissivity  (:) = spval
@@ -131,6 +133,7 @@ module TopounitType
     deallocate(this%lat         )
     deallocate(this%lon         )
     deallocate(this%elevation   )
+    deallocate(this%lateral_dist)
     deallocate(this%slope       )
     deallocate(this%aspect      )
     deallocate(this%emissivity  )

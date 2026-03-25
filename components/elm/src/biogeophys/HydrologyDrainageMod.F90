@@ -59,7 +59,7 @@ contains
     use ocn2lndType      , only : ocn2lnd_type
     use elm_varpar       , only : nlevgrnd, nlevurb, nlevsoi
     use SoilHydrologyMod , only : ELMVICMap, Drainage
-    use elm_varctl       , only : use_vsfm, use_IM2_hillslope_hydrology
+    use elm_varctl       , only : use_vsfm, use_IM2_hillslope_hydrology, use_humhol
     !
     ! !ARGUMENTS:
     type(bounds_type)        , intent(in)    :: bounds
@@ -306,7 +306,7 @@ contains
          ! if using topounit hillslope hydrology, fractions of qflx_surf, qflx_drain_perched, and qflx_h2osfc
          ! are passed to the from_uphill water state on the downhill topounit, via qflx_to_downhill
          ! only shift positive fluxes, and only set fluxes if there is a downhill topounit
-         if (use_IM2_hillslope_hydrology) then
+         if (use_IM2_hillslope_hydrology .or. use_humhol) then
             downhill_t = top_pp%downhill_ti(t)
             if (downhill_t /= -1) then
                ! shift a fixed fraction of qflx_surf

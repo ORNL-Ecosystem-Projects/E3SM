@@ -398,7 +398,7 @@ contains
   end subroutine elm_ptrs_check
 
   !-----------------------------------------------------------------------
-  subroutine add_topounit(ti, gi, wtgcell,elv, slp, asp,topo_ind,is_tpu_active)
+  subroutine add_topounit(ti, gi, wtgcell,elv, dist, slp, asp,topo_ind,is_tpu_active)
     !
     ! !DESCRIPTION:
     ! Add an entry in the topounit-level arrays. ti gives the index of the last topounit
@@ -410,6 +410,7 @@ contains
     integer  , intent(in)    :: gi           ! gridcell index on which this topounit should be placed 
     real(r8) , intent(in)    :: wtgcell      ! weight of the topounit relative to the gridcell
     real(r8) , intent(in)    :: elv          ! topounit elevation
+    real(r8) , intent(in)    :: dist         ! lateral distance to the next lower topounit
     real(r8) , intent(in)    :: slp          ! topounit slope
     integer , intent(in)    :: asp           ! topounit aspect
     integer , intent(in)    :: topo_ind      ! topounit index in the grid
@@ -424,6 +425,7 @@ contains
     top_pp%gridcell(ti) = gi
     top_pp%wtgcell(ti) = wtgcell
     top_pp%elevation(ti) = elv
+    top_pp%lateral_dist(ti) = dist
     top_pp%slope(ti) = slp
     top_pp%aspect(ti) = asp
     top_pp%topo_grc_ind(ti) = topo_ind    

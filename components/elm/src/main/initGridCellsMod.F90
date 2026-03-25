@@ -255,8 +255,8 @@ contains
     ! Initialize each topounit for a gridcell.
     !
     ! !USES
-    use elm_varsur , only : wt_tunit, elv_tunit, slp_tunit, asp_tunit, num_tunit_per_grd 
-    use elm_varctl , only : use_IM2_hillslope_hydrology
+    use elm_varsur , only : wt_tunit, elv_tunit, dist_tunit, slp_tunit, asp_tunit, num_tunit_per_grd
+    use elm_varctl , only : use_IM2_hillslope_hydrology, use_humhol
     use topounit_varcon   , only : max_topounits, has_topounit 
     ! !ARGUMENTS
     integer, intent(in) :: gdc
@@ -264,7 +264,7 @@ contains
     integer, intent(in) :: num_tunits_per_grd
     ! !LOCAL VARIABLES
     integer :: topounit, ntopos,topo_ind, num_topo_tmp,tmp_tpu
-    real(r8) :: wttopounit2gridcell, elv, slp                  ! topounit weight on gridcell, elevation and slope
+    real(r8) :: wttopounit2gridcell, elv, dist, slp            ! topounit weight on gridcell, elevation, lateral distance and slope
     integer :: asp                                             ! aspect
     integer :: t1, t2, begt, endt, dn_index, min_index         ! local topounit indexing
     real(r8):: t1_elev, t2_elev, min_elev, dn_elev             ! for finding downhill neighbor
@@ -294,15 +294,16 @@ contains
            endif                    
        endif
        elv = elv_tunit(gdc,topounit) !grc_pp%televation(gdc,topounit) 
+       dist = dist_tunit(gdc,topounit)
        slp = slp_tunit(gdc,topounit) !grc_pp%tslope(gdc,topounit) 
        asp = asp_tunit(gdc,topounit) !grc_pp%taspect(gdc,topounit) 
        topo_ind = topounit
-       call add_topounit(ti=ti, gi=gdc, wtgcell=wttopounit2gridcell, elv=elv, slp=slp, asp=asp,topo_ind=topo_ind,is_tpu_active = is_tpu_active)
+       call add_topounit(ti=ti, gi=gdc, wtgcell=wttopounit2gridcell, elv=elv, dist=dist, slp=slp, asp=asp,topo_ind=topo_ind,is_tpu_active = is_tpu_active)
     end do
 
     ! Loop through topounits again to find its nearest downhill topounit on this gridcell
     ! part of the IM2 hillslope hydrology implementation
-    if (ntopos > 1 .and. use_IM2_hillslope_hydrology) then
+    if (ntopos > 1 .and. (use_IM2_hillslope_hydrology .or. use_humhol)) then
       ! find the minimum elevation over all topounits on the gridcell
       min_elev = top_pp%elevation(begt)
       min_index = begt
