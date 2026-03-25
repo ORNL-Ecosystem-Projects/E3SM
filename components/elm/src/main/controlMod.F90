@@ -363,7 +363,7 @@ contains
 
     namelist /elm_inparm/ use_var_soil_thick, use_lake_wat_storage
 
-   namelist /elm_inparm/ obs_zwt_forcing
+    namelist /elm_inparm/ use_humhol, obs_zwt_forcing, boardwalk_shade_frac, boardwalk_light_trans
 
     namelist /elm_inparm/ &
          use_vsfm, vsfm_satfunc_type, vsfm_use_dynamic_linesearch, &
@@ -809,7 +809,10 @@ contains
     call mpi_bcast (use_firn_percolation_and_compaction, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_T_rho_dependent_snowthk, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_vichydro, 1, MPI_LOGICAL, 0, mpicom, ier)
+   call mpi_bcast (use_humhol, 1, MPI_LOGICAL, 0, mpicom, ier)
    call mpi_bcast (obs_zwt_forcing, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (boardwalk_shade_frac, 1, MPI_REAL8, 0, mpicom, ier)
+    call mpi_bcast (boardwalk_light_trans, 1, MPI_REAL8, 0, mpicom, ier)
     call mpi_bcast (use_century_decomp, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_cn, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_fates, 1, MPI_LOGICAL, 0, mpicom, ier)
@@ -1161,6 +1164,9 @@ contains
     write(iulog,*) '    use_mexicocity = ', use_mexicocity
     write(iulog,*) '    use_noio = ', use_noio
     write(iulog,*) '    use_betr = ', use_betr
+    write(iulog,*) '    use_humhol = ', use_humhol
+    write(iulog,*) '    boardwalk_shade_frac = ', boardwalk_shade_frac
+    write(iulog,*) '    boardwalk_light_trans = ', boardwalk_light_trans
     write(iulog,*) '    use_IM2_hillslope_hydrology = ', use_IM2_hillslope_hydrology
     write(iulog,*) '    use_atm_downscaling_to_topunit = ', use_atm_downscaling_to_topunit
     write(iulog,*) '    precip_downscaling_method = ', precip_downscaling_method
