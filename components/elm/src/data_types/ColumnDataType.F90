@@ -20,7 +20,7 @@ module ColumnDataType
   use elm_varcon      , only : spval, ispval, zlnd, snw_rds_min, denice, denh2o, tfrz, pondmx
   use elm_varcon      , only : watmin, bdsno, bdfirn, zsoi, zisoi, dzsoi_decomp
   use elm_varcon      , only : c13ratio, c14ratio, secspday
-  use elm_varctl      , only : use_fates, use_fates_planthydro, create_glacier_mec_landunit, use_IM2_hillslope_hydrology
+  use elm_varctl      , only : use_fates, use_fates_planthydro, create_glacier_mec_landunit, use_IM2_hillslope_hydrology, use_humhol
   use elm_varctl      , only : use_hydrstress, use_crop
   use elm_varctl      , only : bound_h2osoi, use_cn, iulog, use_vertsoilc, spinup_state
   use elm_varctl      , only : ero_ccycle
@@ -6058,24 +6058,43 @@ contains
           avgflag='A', long_name='Sub-surface drainage by layer', &
           ptr_col=this%qflx_drain_vr)
 
-#if (defined HUM_HOL || defined MARSH)
-    this%qflx_lat_aqu(begc:endc) = spval
-    call hist_addfld1d (fname='QFLX_LAT_AQU',  units='mm/s',  &
-         avgflag='A', long_name='Lateral flow between hummock and hollow', &
-         ptr_col=this%qflx_lat_aqu, c2l_scale_type='urbanf')
+    if (use_humhol) then
+      this%qflx_lat_aqu(begc:endc) = spval
+      call hist_addfld1d (fname='QFLX_LAT_AQU',  units='mm/s',  &
+           avgflag='A', long_name='Lateral flow between hummock and hollow', &
+           ptr_col=this%qflx_lat_aqu, c2l_scale_type='urbanf')
 
-   !SLL added 7/27/21
-    this%qflx_lat_aqu_layer(begc:endc, :) = spval
-    call hist_addfld2d (fname='QFLX_LAT_AQU_LAYER',  units='mm/s', type2d='levgrnd', &
-         avgflag='A', long_name='Lateral flow between hummock and hollow by layer', &
-         ptr_col=this%qflx_lat_aqu_layer)
+      this%qflx_surf_input(begc:endc) = spval
+      call hist_addfld1d (fname='QFLX_SURF_INPUT',  units='mm/s',  &
+           avgflag='A', long_name='Surface runoff input received from an adjacent topounit', &
+           ptr_col=this%qflx_surf_input, c2l_scale_type='urbanf')
 
-   !SLL added 4/15/21
+      this%qflx_lat_aqu_layer(begc:endc, :) = spval
+      call hist_addfld2d (fname='QFLX_LAT_AQU_LAYER',  units='mm/s', type2d='levgrnd', &
+           avgflag='A', long_name='Lateral flow between hummock and hollow by layer', &
+           ptr_col=this%qflx_lat_aqu_layer)
+    end if
+#if (defined MARSH)
+   this%qflx_lat_aqu(begc:endc) = spval
+   call hist_addfld1d (fname='QFLX_LAT_AQU',  units='mm/s',  &
+        avgflag='A', long_name='Lateral flow between hummock and hollow', &
+        ptr_col=this%qflx_lat_aqu, c2l_scale_type='urbanf')
+
+   this%qflx_surf_input(begc:endc) = spval
+   call hist_addfld1d (fname='QFLX_SURF_INPUT',  units='mm/s',  &
+        avgflag='A', long_name='Surface runoff input received from an adjacent topounit', &
+        ptr_col=this%qflx_surf_input, c2l_scale_type='urbanf')
+
+   this%qflx_lat_aqu_layer(begc:endc, :) = spval
+   call hist_addfld2d (fname='QFLX_LAT_AQU_LAYER',  units='mm/s', type2d='levgrnd', &
+        avgflag='A', long_name='Lateral flow between hummock and hollow by layer', &
+        ptr_col=this%qflx_lat_aqu_layer)
+
    this%qflx_tide(begc:endc) = spval
-    call hist_addfld1d (fname='QFLX_TIDE',  units='mm H2O/s',  &
-         avgflag='A', long_name='Tidal flux between marsh columns', &
-         ptr_col=this%qflx_tide)
-#endif 
+   call hist_addfld1d (fname='QFLX_TIDE',  units='mm H2O/s',  &
+        avgflag='A', long_name='Tidal flux between marsh columns', &
+        ptr_col=this%qflx_tide)
+#endif
 
 
    this%qflx_adv(begc:endc,:) = spval
@@ -6144,7 +6163,7 @@ contains
           avgflag='A', long_name='column-integrated snow freezing rate', &
            ptr_col=this%qflx_snofrz, set_lake=spval, c2l_scale_type='urbanf')
 
-    if (use_IM2_hillslope_hydrology) then
+    if (use_IM2_hillslope_hydrology .or. use_humhol) then
       call hist_addfld1d (fname='QFROM_UPHILL',  units='mm/s',  &
             avgflag='A', long_name='input to top layer soil from uphill topounit(s)', &
             ptr_col=this%qflx_from_uphill, c2l_scale_type='urbanf')
@@ -6154,12 +6173,12 @@ contains
             ptr_col=this%qflx_to_downhill, c2l_scale_type='urbanf')
     endif
 
-#if (defined HUM_HOL)
-    this%qflx_lat_aqu(begc:endc) = spval
-    call hist_addfld1d (fname='QLAT_AQU', units='kg/m2/s', &
-         avgflag='A', long_name='Lateral flux between hummock/hollow', &
-         ptr_col=this%qflx_lat_aqu, set_lake=spval, c2l_scale_type='urbanf', default='inactive')
-#endif
+    if (use_humhol) then
+      this%qflx_lat_aqu(begc:endc) = spval
+      call hist_addfld1d (fname='QLAT_AQU', units='kg/m2/s', &
+           avgflag='A', long_name='Lateral flux between hummock/hollow', &
+           ptr_col=this%qflx_lat_aqu, set_lake=spval, c2l_scale_type='urbanf', default='inactive')
+    end if
 
     if (create_glacier_mec_landunit) then
             this%qflx_glcice(begc:endc) = spval
