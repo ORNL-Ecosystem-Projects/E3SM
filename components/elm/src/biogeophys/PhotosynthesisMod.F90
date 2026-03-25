@@ -11,7 +11,7 @@ module  PhotosynthesisMod
   use shr_kind_mod        , only : r8 => shr_kind_r8
   use shr_log_mod         , only : errMsg => shr_log_errMsg
   use abortutils          , only : endrun
-  use elm_varctl          , only : iulog, use_c13, use_c14, use_cn, use_fates
+  use elm_varctl          , only : iulog, use_c13, use_c14, use_cn, use_fates, use_humhol
   use elm_varpar          , only : nlevcan
   use elm_varctl          , only : use_hydrstress
   use elm_varpar          , only : nvegwcs, mxpft_nc, mxpft
@@ -371,10 +371,8 @@ contains
          flnr          => veg_vp%flnr                          , & ! Input:  [real(r8) (:)   ]  fraction of leaf N in the Rubisco enzyme (gN Rubisco / gN leaf)
          fnitr         => veg_vp%fnitr                         , & ! Input:  [real(r8) (:)   ]  foliage nitrogen limitation factor (-)
          slatop        => veg_vp%slatop                        , & ! Input:  [real(r8) (:)   ]  specific leaf area at top of canopy, projected area basis [m^2/gC]
-#if defined (HUM_HOL)
          br_mr         => veg_vp%br_mr_pft                     , &
          q10_mr        => veg_vp%q10_mr_pft                    , &
-#endif
 
          forc_pbot     => top_as%pbot                              , & ! Input:  [real(r8) (:)   ]  atmospheric pressure (Pa)
 
@@ -530,8 +528,7 @@ contains
          end if
 
          ! Soil water stress applied to Ball-Berry parameters
-#if (defined HUM_HOL)
-         if (nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+         if (use_humhol .and. nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
             !Surface conductance is a function of moss water content
             bbb(p) = (-0.195 + 0.134*(h2o_moss_wc(p)+1._r8) - &
                      0.0256*(h2o_moss_wc(p) + 1.0_r8)**2  &
@@ -575,10 +572,6 @@ contains
          !   bbb(p) = max (bbbopt(p)*btran(p), 1._r8)
          !   mbb(p) = mbbopt(p)
          !end if
-#else
-         bbb(p) = max (bbbopt(p)*btran(p), 1._r8)
-         mbb(p) = mbbopt(p)
-#endif
 
          ! kc, ko, cp, from: Bernacchi et al (2001) Plant, Cell and Environment 24:253-259
          !
@@ -761,11 +754,11 @@ contains
             ! Then scale this value at the top of the canopy for canopy depth
 
             lmr25top = 2.525e-6_r8 * (ParamsShareInst%Q10_mr ** ((25._r8 - 20._r8)/10._r8))
-#if (defined HUM_HOL)
-            lmr25top = br_mr(veg_pp%itype(p)) * q10_mr(veg_pp%itype(p)) **((25._r8 - 20._r8)/10._r8)
-#else
-            lmr25top = 2.525e-6_r8 * (ParamsShareInst%Q10_mr ** ((25._r8 - 20._r8)/10._r8))
-#endif
+            if (use_humhol) then
+               lmr25top = br_mr(veg_pp%itype(p)) * q10_mr(veg_pp%itype(p)) **((25._r8 - 20._r8)/10._r8)
+            else
+               lmr25top = 2.525e-6_r8 * (ParamsShareInst%Q10_mr ** ((25._r8 - 20._r8)/10._r8))
+            end if
             lmr25top = lmr25top * lnc(p) / 12.e-06_r8
          else
             ! Leaf maintenance respiration in proportion to vcmax25top
@@ -803,11 +796,11 @@ contains
 
             lmr25 = lmr25top * nscaler
             if (c3flag(p)) then
-#if (defined HUM_HOL)
-               lmr_z(p,iv) = lmr25 * q10_mr(veg_pp%itype(p))**((t_veg(p)-(tfrz+25._r8))/10._r8)
-#else
-               lmr_z(p,iv) = lmr25 * ft(t_veg(p), lmrha) * fth(t_veg(p), lmrhd, lmrse, lmrc)
-#endif
+               if (use_humhol) then
+                  lmr_z(p,iv) = lmr25 * q10_mr(veg_pp%itype(p))**((t_veg(p)-(tfrz+25._r8))/10._r8)
+               else
+                  lmr_z(p,iv) = lmr25 * ft(t_veg(p), lmrha) * fth(t_veg(p), lmrhd, lmrse, lmrc)
+               end if
             else
                lmr_z(p,iv) = lmr25 * 2._r8**((t_veg(p)-(tfrz+25._r8))/10._r8)
                lmr_z(p,iv) = lmr_z(p,iv) / (1._r8 + exp( 1.3_r8*(t_veg(p)-(tfrz+55._r8)) ))
@@ -835,13 +828,11 @@ contains
 
                vcmaxse = 668.39_r8 - 1.07_r8 * min(max((t10(p)-tfrz),11._r8),35._r8)
                jmaxse  = 659.70_r8 - 0.75_r8 * min(max((t10(p)-tfrz),11._r8),35._r8)
-#if (defined HUM_HOL)
-               if (nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+               if (use_humhol .and. nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
                   ! Moss-specific temperature acclimation (narrower range, lower optimum)
                   vcmaxse = 673.39_r8 - 0.54_r8 * min(max((t10(p)-tfrz),5._r8),15._r8)
                   jmaxse  = 664.70_r8 - 0.65_r8 * min(max((t10(p)-tfrz),5._r8),15._r8)
                end if
-#endif
                tpuse = vcmaxse
                vcmaxc = fth25 (vcmaxhd, vcmaxse)
                jmaxc  = fth25 (jmaxhd, jmaxse)
@@ -861,18 +852,13 @@ contains
             end if
 
             ! Adjust for soil water
-#if (defined HUM_HOL)
-            if (nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+            if (use_humhol .and. nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
                vcmax_z(p,iv) = vcmax_z(p,iv) * wcscaler
                lmr_z(p,iv) = lmr_z(p,iv) * wcscaler
             else
                vcmax_z(p,iv) = vcmax_z(p,iv) * btran(p)
                lmr_z(p,iv) = lmr_z(p,iv) * btran(p) !will this carry over from the earlier if marsh statement? -SLL 4-8-21
             end if
-#else
-            vcmax_z(p,iv) = vcmax_z(p,iv) * btran(p)
-            lmr_z(p,iv) = lmr_z(p,iv) * btran(p) !will this carry over from the earlier if marsh statement? -SLL 4-8-21
-#endif
 
             ! output variable
             vcmax25_top(p) = vcmax25top
@@ -1930,10 +1916,8 @@ contains
          stem_leaf     => veg_vp%stem_leaf                         , & ! allocation parameter: new stem c per new leaf C (gC/gC)
          froot_leaf     => veg_vp%froot_leaf                         , & ! allocation parameter: new fine root C per new leaf C (gC/gC)
          croot_stem     => veg_vp%croot_stem                         , & ! allocation parameter: new coarse root C per new stem C (gC/gC)
-#if defined (HUM_HOL)
          br_mr      => veg_vp%br_mr_pft                          ,&       
          q10_mr     => veg_vp%q10_mr_pft                         ,&
-#endif
          forc_pbot  => top_as%pbot                           , & ! Input:  [real(r8) (:)   ]  atmospheric pressure (Pa)
 
          t_veg         => veg_es%t_veg             , & ! Input:  [real(r8) (:)   ]  vegetation temperature (Kelvin)
@@ -2344,11 +2328,11 @@ contains
             !
             ! Then scale this value at the top of the canopy for canopy depth
 
-#if defined (HUM_HOL)
-            lmr25top = br_mr(veg_pp%itype(p)) * q10_mr(veg_pp%itype(p)) ** ((25._r8 - 20._r8)/10._r8)
-#else
-            lmr25top = 2.525e-6_r8 * (ParamsShareInst%Q10_mr ** ((25._r8 - 20._r8)/10._r8))
-#endif
+            if (use_humhol) then
+               lmr25top = br_mr(veg_pp%itype(p)) * q10_mr(veg_pp%itype(p)) ** ((25._r8 - 20._r8)/10._r8)
+            else
+               lmr25top = 2.525e-6_r8 * (ParamsShareInst%Q10_mr ** ((25._r8 - 20._r8)/10._r8))
+            end if
             lmr25top = lmr25top * lnc(p) / 12.e-06_r8
 
          else
@@ -2438,13 +2422,11 @@ contains
 
                vcmaxse = 668.39_r8 - 1.07_r8 * min(max((t10(p)-tfrz),11._r8),35._r8)
                jmaxse  = 659.70_r8 - 0.75_r8 * min(max((t10(p)-tfrz),11._r8),35._r8)
-#if (defined HUM_HOL)
-               if (nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+               if (use_humhol .and. nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
                   ! Moss-specific temperature acclimation (narrower range, lower optimum)
                   vcmaxse = 673.39_r8 - 0.54_r8 * min(max((t10(p)-tfrz),5._r8),15._r8)
                   jmaxse  = 664.70_r8 - 0.65_r8 * min(max((t10(p)-tfrz),5._r8),15._r8)
                end if
-#endif
                tpuse = vcmaxse
                vcmaxc = fth25 (vcmaxhd, vcmaxse)
                jmaxc  = fth25 (jmaxhd, jmaxse)

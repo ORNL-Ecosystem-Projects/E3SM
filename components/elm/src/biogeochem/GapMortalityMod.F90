@@ -19,7 +19,7 @@ module GapMortalityMod
   use VegetationDataType  , only : veg_ps, veg_pf
   use CropType            , only : crop_type
 
-  use elm_varctl          , only : nu_com
+  use elm_varctl          , only : nu_com, use_humhol
   use elm_varctl             , only : iulog
   use timeinfoMod , only : dayspyr_mod
   !
@@ -122,11 +122,9 @@ contains
       ! set coeff of growth efficiency in mortality equation
       k_mort = CNGapMortParamsInst%k_mort
 
-#ifndef HUM_HOL
-      if (nu_com .eq. 'RD') then
+      if ((.not. use_humhol) .and. nu_com .eq. 'RD') then
           call mortality_rate_soilorder(num_soilp,filter_soilp,cnstate_vars)
       end if
-#endif
 
       ! patch loop
       do fp = 1,num_soilp
@@ -135,11 +133,9 @@ contains
          ! set the mortality rate based on annual rate
          am = CNGapMortParamsInst%am(ivt(p))
 
-#ifndef HUM_HOL
-         if (nu_com .eq. 'RD') then
+         if ((.not. use_humhol) .and. nu_com .eq. 'RD') then
              am = cnstate_vars%r_mort_cal_patch(p)
          end if
-#endif
 
         m  = am/(dayspyr * secspday)
 

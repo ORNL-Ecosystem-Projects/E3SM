@@ -5,7 +5,7 @@ module SoilLittVertTranspMod
   !
   use shr_kind_mod           , only : r8 => shr_kind_r8
   use shr_log_mod            , only : errMsg => shr_log_errMsg
-  use elm_varctl             , only : iulog, use_c13, use_c14, spinup_state, use_vertsoilc
+  use elm_varctl             , only : iulog, use_c13, use_c14, spinup_state, use_vertsoilc, use_humhol
   use elm_varcon             , only : secspday
   use decompMod              , only : bounds_type
   use abortutils             , only : endrun
@@ -34,11 +34,7 @@ module SoilLittVertTranspMod
   !$acc declare create(SoilLittVertTranspParamsInst)
 
   !
-#if (defined HUM_HOL)
-  real(r8), public :: som_adv_flux =  0.0004_r8 / (86400_r8 * 365_r8)    ! was 0.0004 m/s advection - long term peat accumulation rate at SPR
-#else
   real(r8), public :: som_adv_flux =  0._r8    ! m/s advection
-#endif
   !$acc declare copyin(som_adv_flux)
   real(r8), public :: max_depth_cryoturb = 3._r8   ! (m) this is the maximum depth of cryoturbation
   !$acc declare copyin(max_depth_cryoturb)
@@ -77,11 +73,13 @@ contains
     !SoilLittVertTranspParamsInst%som_diffus=tempr
     ! FIX(SPM,032414) - can't be pulled out since division makes things not bfb
     SoilLittVertTranspParamsInst%som_diffus = 1e-4_r8 / (secspday * 365._r8)
-#if (defined HUM_HOL)
-    SoilLittVertTranspParamsInst%som_diffus = 0e-4_r8 / (secspday * 365._r8)
-#elif (defined MARSH)
-    SoilLittVertTranspParamsInst%som_diffus = 5e-4_r8 / (secspday * 365._r8)
+    if (use_humhol) then
+       SoilLittVertTranspParamsInst%som_diffus = 0e-4_r8 / (secspday * 365._r8)
+#if (defined MARSH)
+    else
+       SoilLittVertTranspParamsInst%som_diffus = 5e-4_r8 / (secspday * 365._r8)
 #endif
+    end if
 
     tString='cryoturb_diffusion_k'
     call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
@@ -180,6 +178,7 @@ contains
       som_diffus                 = SoilLittVertTranspParamsInst%som_diffus
       cryoturb_diffusion_k       = SoilLittVertTranspParamsInst%cryoturb_diffusion_k
       max_altdepth_cryoturbation = SoilLittVertTranspParamsInst%max_altdepth_cryoturbation
+      if (use_humhol) som_adv_flux = 0.0004_r8 / (86400_r8 * 365_r8)
 
       dtime = dtime_mod
       year = year_curr
@@ -221,9 +220,7 @@ contains
                ! constant advection, constant diffusion
                do j = 1,nlevdecomp+1
                  som_adv_coef(c,j) = som_adv_flux
-#if (defined HUM_HOL)
-                 if (c == 2) som_adv_coef(c,j) = som_adv_flux*1.5_r8
-#endif
+                 if (use_humhol .and. c == 2) som_adv_coef(c,j) = som_adv_flux*1.5_r8
                  som_diffus_coef(c,j) = som_diffus
                end do
             else

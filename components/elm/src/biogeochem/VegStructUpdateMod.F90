@@ -7,7 +7,7 @@ module VegStructUpdateMod
   use shr_kind_mod         , only: r8 => shr_kind_r8
   use shr_sys_mod          , only : shr_sys_flush
   use shr_const_mod        , only : SHR_CONST_PI
-  use elm_varctl           , only : iulog
+  use elm_varctl           , only : iulog, use_humhol
   use VegetationPropertiesType     , only : veg_vp
   use FrictionVelocityType , only : frictionvel_type
   use CNStateType          , only : cnstate_type
@@ -43,9 +43,6 @@ contains
     use pftvarcon        , only : nmiscanthus, nmiscanthusirrig, nswitchgrass, nswitchgrassirrig
     use pftvarcon        , only : bendresist, vegshape, stocking, taper
     use elm_time_manager , only : get_rad_step_size
-#if (defined HUM_HOL)
-    use pftvarcon        , only : humhol_ht
-#endif
     use elm_varctl       , only : spinup_state, spinup_mortality_factor
     !
     ! !ARGUMENTS:
@@ -249,8 +246,7 @@ contains
             ol = min( max(snow_depth(c)-hbot(p), 0._r8), htop(p)-hbot(p))
             fb = 1._r8 - (ol / max(1.e-06_r8, bendresist(ivt(p)) * (htop(p)-hbot(p)))) ** vegshape(ivt(p))
          else
-#if (defined HUM_HOL)
-           if (nint(veg_vp%nonvascular(ivt(p))) == 1) then
+           if (use_humhol .and. nint(veg_vp%nonvascular(ivt(p))) == 1) then
              !thiswtht = zwt(c)*(-1.0_r8)+humhol_ht/2.0_r8+h2osfc(c)/1000._r8 !height above hollow bottom
              thiswtht = h2osfc(c)/1000._r8 
              !calculate submerged LAI or buried by snow (10cm is assumed)
@@ -260,10 +256,6 @@ contains
            else
              fb = 1._r8 - max(min(snow_depth(c),0.2_r8),0._r8)/0.2_r8 ! 0.2m is assumed
            end if
-#else
-           !depth of snow required for complete burial of grasses
-           fb = 1._r8 - max(min(snow_depth(c),0.2_r8),0._r8)/0.2_r8   !0.2m is assumed
-#endif
          endif
 
          elai(p) = max(tlai(p)*fb, 0.0_r8)

@@ -33,7 +33,7 @@ contains
     use elm_varctl       , only: co2_type, co2_ppmv, iulog, use_c13, create_glacier_mec_landunit, &
                                  metdata_type, metdata_bypass, metdata_biases, co2_file, aero_file, tide_file, use_atm_downscaling_to_topunit
     use elm_varctl       , only: const_climate_hist, add_temperature, add_co2, use_cn, use_fates
-    use elm_varctl       , only: startdate_add_temperature, startdate_add_co2
+    use elm_varctl       , only: startdate_add_temperature, startdate_add_co2, use_humhol
     use elm_varcon       , only: rair, o2_molar_const, c13ratio
     use elm_time_manager , only: get_nstep, get_step_size, get_curr_calday, get_curr_date 
     use controlMod       , only: NLFilename
@@ -233,11 +233,11 @@ contains
         !on first timestep, read all the met data for relevant gridcell(s) and store in array.
         !   Met data are held in short integer format to save memory.
         !   Each node must have enough memory to hold these data.
-#ifdef HUM_HOL
-        met_nvars=8    !8 for ZWT
-#else
-        met_nvars=7
-#endif
+        if (use_humhol) then
+           met_nvars=8    !8 for ZWT
+        else
+           met_nvars=7
+        end if
         if (metdata_type(1:3) == 'cpl') met_nvars=14
 
         if (atm2lnd_vars%loaded_bypassdata == 0) then

@@ -25,12 +25,11 @@ contains
     !
     !DESCRIPTION
     ! initialize methods for root profile calculation
+    use elm_varctl, only : use_humhol
     implicit none
 
     root_prof_method = zeng_2001_root
-#if (defined HUM_HOL)
-    root_prof_method = spruce_root
-#endif
+    if (use_humhol) root_prof_method = spruce_root
 
   end subroutine init_rootprof
 
