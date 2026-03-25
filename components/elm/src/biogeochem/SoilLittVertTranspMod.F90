@@ -23,6 +23,7 @@ module SoilLittVertTranspMod
   !
   public :: SoilLittVertTransp
   public :: readSoilLittVertTranspParams
+  public :: cleanupLitterTransportList
 
   type, private :: SoilLittVertTranspParamsType
      real(r8),pointer  :: som_diffus                => null() ! Soil organic matter diffusion
@@ -47,6 +48,20 @@ module SoilLittVertTranspMod
   !-----------------------------------------------------------------------
 
 contains
+
+  !-----------------------------------------------------------------------
+  subroutine cleanupLitterTransportList()
+  !-----------------------------------------------------------------------
+    if (associated(SoilLittVertTranspParamsInst%som_diffus)) then
+       deallocate(SoilLittVertTranspParamsInst%som_diffus)
+    end if
+    if (associated(SoilLittVertTranspParamsInst%cryoturb_diffusion_k)) then
+       deallocate(SoilLittVertTranspParamsInst%cryoturb_diffusion_k)
+    end if
+    if (associated(SoilLittVertTranspParamsInst%max_altdepth_cryoturbation)) then
+       deallocate(SoilLittVertTranspParamsInst%max_altdepth_cryoturbation)
+    end if
+  end subroutine cleanupLitterTransportList
 
   !-----------------------------------------------------------------------
   subroutine readSoilLittVertTranspParams ( ncid )

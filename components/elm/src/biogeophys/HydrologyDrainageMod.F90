@@ -150,7 +150,7 @@ contains
       if (.not. use_vsfm) then
          call Drainage(bounds, num_hydrologyc, filter_hydrologyc, &
               num_urbanc, filter_urbanc,&
-              soilhydrology_vars, soilstate_vars, ocn2lnd_vars, dtime)
+              soilhydrology_vars, soilstate_vars, dtime)
       endif
 
 #ifndef _OPENACC

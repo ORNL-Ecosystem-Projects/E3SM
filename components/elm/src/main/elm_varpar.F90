@@ -45,9 +45,11 @@ module elm_varpar
   integer, parameter :: ivis        =   1     ! index for visible band
   integer, parameter :: inir        =   2     ! index for near-infrared band
   integer, parameter :: numsolar    =   2     ! number of solar type bands: direct, diffuse
+  integer, parameter :: ndir_horizon_angle = 8 ! number of azimuth bins for fineTOP horizon angles
   integer, parameter :: ndst        =   4     ! number of dust size classes (BGC only)
   integer, parameter :: dst_src_nbr =   3     ! number of size distns in src soil (BGC only)
   integer, parameter :: sz_nbr      = 200     ! number of sub-grid bins in large bin of dust size distribution (BGC only)
+  integer, parameter :: numharvest  =   5     ! number of harvest fields
   !integer, parameter :: mxpft       =  50     ! maximum number of PFT's for any mode;
   integer :: mxpft                  =  50     ! maximum number of PFT's for any mode;
                                               ! can be modified from reading pft-physiology in 'main/pftvarcon.F90:pftconrd'
@@ -69,6 +71,11 @@ module elm_varpar
   integer, parameter :: nsoilorder  =  15     ! number of soil orders
 
   integer, parameter :: nlevslp = 11          ! number of slope percentile levels
+
+  ! Parameters that define the default geometric soil-layer spacing used
+  ! when ZSOI is not provided in the surface dataset.
+  real(r8), parameter :: scalez  = 0.025_r8
+  real(r8), parameter :: zecoeff = 0.50_r8
 
   integer, parameter :: max_tide_coeffs = 37 ! Number in NOAA tide tables
 

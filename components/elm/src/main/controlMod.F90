@@ -64,10 +64,15 @@ module controlMod
                         firrig_data, all_active, mpi_sync_nstep_freq, &
                         use_c13, use_c14, fates_paramfile, use_fates, &
                         use_betr, use_lai_streams, metdata_type, metdata_bypass, &
-                        metdata_biases, co2_file, aero_file, &
+                        metdata_biases, co2_file, aero_file, tide_file, &
                         use_elm_interface, use_elm_bgc, use_pflotran, &
+                        use_alquimia, alquimia_inputfile, alquimia_engine_name, &
+                        alquimia_IC_name, alquimia_CO2_name, alquimia_NH4_name, &
+                        alquimia_NO3_name, alquimia_handsoff, &
                         use_vsfm, vsfm_satfunc_type, vsfm_use_dynamic_linesearch, &
                         vsfm_lateral_model_type, vsfm_include_seepage_bc, &
+                        use_humhol, obs_zwt_forcing, boardwalk_shade_frac, &
+                        boardwalk_light_trans, &
                         use_hydrstress, lateral_connectivity, domain_decomp_type, &
                         use_IM2_hillslope_hydrology, use_petsc_thermal_model, &
                         do_budgets, budget_inst, budget_daily, budget_month, &
@@ -99,7 +104,8 @@ module controlMod
                         use_vichydro, use_century_decomp, use_cn, use_crop, &
                         use_snicar_frc, use_snicar_ad, use_firn_percolation_and_compaction, &
                         use_extrasnowlayers, use_T_rho_dependent_snowthk, &
-                        use_vancouver, use_mexicocity, use_noio, use_finetop_rad
+                        use_vancouver, use_mexicocity, use_noio, use_finetop_rad, &
+                        use_shrub_moss_shading
   !
   ! !PUBLIC TYPES:
   implicit none

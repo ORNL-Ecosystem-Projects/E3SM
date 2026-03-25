@@ -21,7 +21,6 @@ module elm_initializeMod
   use readParamsMod    , only : readSharedParameters, readPrivateParameters
   use ncdio_pio        , only : file_desc_t
   use ELMFatesInterfaceMod  , only : ELMFatesGlobals1,ELMFatesGlobals2
-  use ELMFatesParamInterfaceMod, only: FatesReadPFTs
   use BeTRSimulationELM, only : create_betr_simulation_elm
   !
   !-----------------------------------------
@@ -310,14 +309,6 @@ contains
 
     call soilorder_conrd()
 
-    ! Read in FATES parameter values early in the call sequence as well
-    ! The PFT file, specifically, will dictate how many pfts are used
-    ! in fates, and this will influence the amount of memory we
-    ! request from the model, which is relevant in set_fates_global_elements()
-    if (use_fates) then
-       call FatesReadPFTs()
-    end if
-    
     ! Read surface dataset and set up subgrid weight arrays
     call surfrd_get_data(begg, endg, ldomain, fsurdat)
 
@@ -735,6 +726,8 @@ contains
 
     call canopystate_vars%initAccBuffer(bounds_proc)
 
+    call energyflux_vars%initAccBuffer(bounds_proc)
+
     if (crop_prog) then
        call crop_vars%initAccBuffer(bounds_proc)
     end if
@@ -972,6 +965,7 @@ contains
     call top_af%InitAccVars(bounds_proc)
     call veg_es%InitAccVars(bounds_proc)
     call canopystate_vars%initAccVars(bounds_proc)
+    call energyflux_vars%initAccVars(bounds_proc)
     if (crop_prog) then
        call crop_vars%initAccVars(bounds_proc)
     end if
@@ -1006,7 +1000,8 @@ contains
 
     if (nsrest == nsrStartup) then
        call t_startf('init_map2gc')
-       call lnd2atm_minimal(bounds_proc, surfalb_vars, energyflux_vars, lnd2atm_vars)
+       call lnd2atm_minimal(bounds_proc, surfalb_vars, solarabs_vars, energyflux_vars, &
+            atm2lnd_vars, lnd2atm_vars)
        call t_stopf('init_map2gc')
     end if
 
