@@ -27,7 +27,7 @@ module dynHarvestMod
   use VegetationDataType    , only : veg_cs, veg_cf, veg_ns, veg_nf  
   use topounit_varcon       , only : max_topounits
   use VegetationDataType    , only : veg_ps, veg_pf
-  use elm_varctl            , only : use_cn, use_fates, iulog
+  use elm_varctl            , only : use_cn, use_fates, iulog, use_humhol
   use FatesConstantsMod      , only : hlm_harvest_area_fraction
   use FatesConstantsMod      , only : hlm_harvest_carbon
 
@@ -386,17 +386,17 @@ contains
             do varnum = 1, num_harvest_vars
                am = am + harvest_rates(varnum,g)
             end do
-#if (defined HUM_HOL)
-           call get_curr_date(yr, mon, day, sec)
-           dtime  = get_step_size()
-           if (mon == 1 .and. day == 31 .and. sec == 0) then
-             m = am/dtime   !Do site-level harvest on first day of year
+           if (use_humhol) then
+              call get_curr_date(yr, mon, day, sec)
+              dtime  = get_step_size()
+              if (mon == 1 .and. day == 31 .and. sec == 0) then
+                m = am/dtime   !Do site-level harvest on first day of year
+              else
+                m = 0._r8
+              end if
            else
-             m = 0._r8
+              m  = am/(days_per_year * secspday)
            end if
-#else
-            m  = am/(days_per_year * secspday)
-#endif
          else
             m = 0._r8
          end if   

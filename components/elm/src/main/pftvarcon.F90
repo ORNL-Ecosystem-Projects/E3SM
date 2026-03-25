@@ -11,7 +11,7 @@ module pftvarcon
   use abortutils  , only : endrun
   use elm_varpar  , only : mxpft, numrad, ivis, inir
   use elm_varpar  , only:  mxpft_nc
-  use elm_varctl  , only : iulog, use_vertsoilc
+  use elm_varctl  , only : iulog, use_vertsoilc, use_humhol
   use elm_varpar  , only : nlevdecomp_full, nsoilorder
   use elm_varctl  , only : nu_com
   !-------------------------------------------------------------------------------------------
@@ -333,7 +333,7 @@ module pftvarcon
   real(r8)              :: vpd_min_moss
   real(r8)              :: blower_u0           ! reference blower wind magnitude at surface [m/s]
   real(r8)              :: blower_lambda       ! vertical decay e-folding length [m]
-  
+  real(r8)              :: vwc_moss_offset
 ! Tidal cycle controls
   integer               :: num_tide_comps      ! Number of tidal cycle components
   real(r8)              :: tide_baseline            ! Base tide level (mean of cycle) (mm)
@@ -1145,6 +1145,8 @@ contains
     if ( .not. readv) blower_u0 = 0.0_r8
     call ncd_io('blower_lambda', blower_lambda, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if ( .not. readv) blower_lambda = 2.0_r8
+    call ncd_io('vwc_moss_offset', vwc_moss_offset, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if ( .not. readv) vwc_moss_offset = 0.0_r8
 
 #ifdef MARSH
 ! Tidal cycle parameters
@@ -1269,13 +1271,13 @@ contains
     call ncd_io('br_xr', br_xr, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     !if ( .not. readv) call endrun(msg='ERROR:  error in reading in pft data'//errMsg(__FILE__,__LINE__))
     if (.not. readv) br_xr(:) = 0._r8
-#if (defined HUM_HOL)
-    call ncd_io('br_mr_pft', br_mr_pft(0:npft-1), 'read', ncid, readvar=readv, posNOTonfile=.true.)
-    if ( .not. readv) call endrun(msg='ERROR:  error in reading in pft data'//errMsg(__FILE__,__LINE__))
-    call ncd_io('q10_mr_pft', q10_mr_pft(0:npft-1), 'read', ncid, readvar=readv, posNOTonfile=.true.)
-    if ( .not. readv) call endrun(msg='ERROR:  error in reading in pft data'//errMsg(__FILE__,__LINE__))
-    !q10_mr(:) = q10_mrtmp 
-#endif
+    if (use_humhol) then
+      call ncd_io('br_mr_pft', br_mr_pft(0:npft-1), 'read', ncid, readvar=readv, posNOTonfile=.true.)
+      if ( .not. readv) call endrun(msg='ERROR:  error in reading in pft data'//errMsg(__FILE__,__LINE__))
+      call ncd_io('q10_mr_pft', q10_mr_pft(0:npft-1), 'read', ncid, readvar=readv, posNOTonfile=.true.)
+      if ( .not. readv) call endrun(msg='ERROR:  error in reading in pft data'//errMsg(__FILE__,__LINE__))
+      !q10_mr(:) = q10_mrtmp
+    end if
     call ncd_io('crit_gdd1', crit_gdd1, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if (.not. readv) crit_gdd1(:) = 4.8_r8
     call ncd_io('crit_gdd2', crit_gdd2, 'read', ncid, readvar=readv, posNOTonfile=.true.)
@@ -1826,4 +1828,3 @@ contains
   end subroutine set_num_cfts_known_to_model
 
 end module pftvarcon
-

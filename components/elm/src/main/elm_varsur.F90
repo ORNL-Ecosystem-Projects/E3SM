@@ -52,6 +52,7 @@ module elm_varsur
   real(r8), pointer :: num_tunit_per_grd(:)   ! Topounit area fraction
   real(r8), pointer :: wt_tunit(:,:)   ! Topounit area fraction
   real(r8), pointer :: elv_tunit(:,:)  ! Topounit elevation 
+  real(r8), pointer :: dist_tunit(:,:) ! Topounit lateral distance to the next lower topounit
   real(r8), pointer :: slp_tunit(:,:)  ! Topounit slope 
   integer, pointer :: asp_tunit(:,:)  ! Topounit aspect
   

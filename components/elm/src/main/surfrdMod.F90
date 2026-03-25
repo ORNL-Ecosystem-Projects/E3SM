@@ -1488,7 +1488,7 @@ contains
     use elm_varctl      , only: fsurdat
     use fileutils       , only : getfil   
 	use GridcellType    , only : grc_pp
-    use elm_varsur      , only : wt_tunit, elv_tunit, slp_tunit, asp_tunit,num_tunit_per_grd
+    use elm_varsur      , only : wt_tunit, elv_tunit, dist_tunit, slp_tunit, asp_tunit,num_tunit_per_grd
     use topounit_varcon ,  only : max_topounits, has_topounit
     
     !
@@ -1510,6 +1510,7 @@ contains
     integer ,pointer :: numTopoPerGrid(:)        ! Number of topounits per grid
     real(r8),pointer :: TopounitFracArea(:,:)    ! Topounit fractional area
     real(r8) ,pointer :: TopounitElv(:,:)         ! Topounit elevation
+    real(r8),pointer :: TopounitLateralDist(:,:) ! Topounit lateral distance to the next lower topounit
     real(r8),pointer :: TopounitSlope(:,:)       ! Topounit slope 
     integer ,pointer :: TopounitAspect(:,:)      ! Topounit aspect
     integer ,pointer :: num_topo_per_grid(:)      ! Topounit aspect
@@ -1524,6 +1525,7 @@ contains
     allocate(numTopoPerGrid(begg:endg))
     allocate(TopounitFracArea(begg:endg,max_topounits))
     allocate(TopounitElv(begg:endg,max_topounits))
+    allocate(TopounitLateralDist(begg:endg,max_topounits))
     allocate(TopounitSlope(begg:endg,max_topounits))
     allocate(TopounitAspect(begg:endg,max_topounits))
     allocate(num_topo_per_grid(begg:endg))
@@ -1558,6 +1560,14 @@ contains
          dim1name=grlnd, readvar=readvar)
     endif
 
+    call check_var(ncid=ncid, varname='TopounitLateralDist', vardesc=vardesc, readvar=readvar)
+    if (readvar) then
+       call ncd_io(ncid=ncid, varname='TopounitLateralDist', flag='read', data=TopounitLateralDist, &
+         dim1name=grlnd, readvar=readvar)
+    else
+       TopounitLateralDist(:,:) = 1.0_r8
+    endif
+
     call check_var(ncid=ncid, varname='TopounitSlope', vardesc=vardesc, readvar=readvar)
     if (readvar) then
        call ncd_io(ncid=ncid, varname='TopounitSlope', flag='read', data=TopounitSlope, &
@@ -1590,12 +1600,13 @@ contains
            do t = 1, max_topounits
               wt_tunit(n,t) = TopounitFracArea(n,t)
               elv_tunit(n,t) = TopounitElv(n,t)
+              dist_tunit(n,t) = TopounitLateralDist(n,t)
         !      slp_tunit(n,t) = TopounitSlope(n,t)
         !      asp_tunit(n,t) = TopounitAspect(n,t)              
            end do
         end do		
      endif	
-    deallocate(maxTopoElv,TopounitFracArea,TopounitElv,TopounitSlope,TopounitAspect,GridElevation)
+    deallocate(maxTopoElv,TopounitFracArea,TopounitElv,TopounitLateralDist,TopounitSlope,TopounitAspect,GridElevation)
     
     call ncd_pio_closefile(ncid)
     

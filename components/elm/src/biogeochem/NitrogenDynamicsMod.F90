@@ -11,7 +11,7 @@
   use shr_kind_mod        , only : r8 => shr_kind_r8
   use decompMod           , only : bounds_type
   use elm_varcon          , only : dzsoi_decomp, zisoi
-  use elm_varctl          , only : use_vertsoilc, use_fan
+  use elm_varctl          , only : use_vertsoilc, use_fan, use_humhol
   use subgridAveMod       , only : p2c
   use atm2lndType         , only : atm2lnd_type
   use CNStateType         , only : cnstate_type
@@ -144,12 +144,10 @@ contains
     !
     ! !LOCAL VARIABLES:
     integer :: g,c,p                    ! indices
-#if (defined HUM_HOL)
     real(r8) :: moss_column_lai        ! effective moss LAI for column
     real(r8) :: moss_ndep_fraction      ! fraction of N deposition going to moss
     real(r8) :: total_ndep_flux         ! total N deposition flux
     real(r8), parameter :: k_intercept = 1.2_r8  ! interception coefficient
-#endif
     !-----------------------------------------------------------------------
 
     associate(&
@@ -163,48 +161,41 @@ contains
       ! Loop through columns
       do c = bounds%begc, bounds%endc
          g = col_pp%gridcell(c)
-#if (defined HUM_HOL)
-         ! Calculate moss LAI and fractional cover for this column
-         moss_column_lai = 0._r8
-       
-         do p = col_pp%pfti(c), col_pp%pftf(c)
-            if (veg_pp%active(p) .and. nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then  ! moss PFT
-               moss_column_lai = moss_column_lai + elai(p) * veg_pp%wtcol(p)
-            endif
-         enddo
-         if (moss_column_lai > 0._r8) then
-           ! Exponential canopy interception following Beer's law
-           ! Based on light extinction principles applied to deposition
-           ! Fraction of N deposition intercepted by moss canopy
-           moss_ndep_fraction = 1._r8 - exp(-k_intercept * moss_column_lai)
-         else
-           moss_ndep_fraction = 0._r8
-         end if
+         if (use_humhol) then
+            ! Calculate moss LAI and fractional cover for this column
+            moss_column_lai = 0._r8
+            do p = col_pp%pfti(c), col_pp%pftf(c)
+               if (veg_pp%active(p) .and. nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+                  moss_column_lai = moss_column_lai + elai(p) * veg_pp%wtcol(p)
+               endif
+            enddo
+            if (moss_column_lai > 0._r8) then
+              moss_ndep_fraction = 1._r8 - exp(-k_intercept * moss_column_lai)
+            else
+              moss_ndep_fraction = 0._r8
+            end if
 
-         ! Calculate N deposition partitioning
-         total_ndep_flux = 0.57_r8 / (86400_r8 * 365_r8) !forc_ndep(g)  ! convert from gN/m2/yr to gN/m2/s
-         ndep_to_sminn(c) = total_ndep_flux
+            total_ndep_flux = 0.57_r8 / (86400_r8 * 365_r8)
+            ndep_to_sminn(c) = total_ndep_flux
 
-         ! Partition N deposition to moss patches
-         do p = col_pp%pfti(c), col_pp%pftf(c)
-           if (veg_pp%active(p) .and. nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then  ! moss PFT
-              ! Distribute moss N deposition proportionally by patch weight
-              if (moss_column_lai > 0._r8) then
-                 ndep_to_npool(p) = total_ndep_flux * moss_ndep_fraction / veg_pp%wtcol(p)
-                 ndep_to_sminn(c) = ndep_to_sminn(c) - ndep_to_npool(p) * veg_pp%wtcol(p)
+            do p = col_pp%pfti(c), col_pp%pftf(c)
+              if (veg_pp%active(p) .and. nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+                 if (moss_column_lai > 0._r8) then
+                    ndep_to_npool(p) = total_ndep_flux * moss_ndep_fraction / veg_pp%wtcol(p)
+                    ndep_to_sminn(c) = ndep_to_sminn(c) - ndep_to_npool(p) * veg_pp%wtcol(p)
+                 else
+                    ndep_to_npool(p) = 0._r8
+                 endif
               else
                  ndep_to_npool(p) = 0._r8
               endif
-           else
-                  ndep_to_npool(p) = 0._r8 ! Non-moss PFTs don't receive direct N deposition
-           endif
-         enddo         
-#else
-       ndep_to_sminn(c) = forc_ndep(g)
-       do p = col_pp%pfti(c), col_pp%pftf(c)
-         ndep_to_npool(p) = 0._r8
-       enddo
-#endif
+            enddo
+         else
+            ndep_to_sminn(c) = forc_ndep(g)
+            do p = col_pp%pfti(c), col_pp%pftf(c)
+              ndep_to_npool(p) = 0._r8
+            enddo
+         end if
       end do
 
     end associate
@@ -296,31 +287,28 @@ contains
                c = filter_soilc(fc)         
                ! B. Sulman: Loop through patches. Nfix is weighted average of value for each PFT's parameters
                t = 0.0_r8
-#if (defined HUM_HOL)
                if (col_lag_npp(c) /= spval) then
-                 !need to put npp in units of gC/m2/yr here first
-                 t = (1.8_r8 * (1._r8 - exp(-0.003_r8 * col_lag_npp(c)*(secspday*dayspyr))))/(secspday*dayspyr)
-                 nfix_to_sminn(c) = max(0._r8,t)
-#else
-               if (col_lag_npp(c) /= spval) then
-                  total_weight = 0.0_r8  ! To correct for inactive and unveg cells
-                  do p = col_pp%pfti(c), col_pp%pftf(c)
-                      ! need to put npp in units of gC/m^2/year here first
-                      ! B. Sulman: calculate Nfix value for each patch's parameters, and add to weighted average
-                      if (veg_pp%active(p) .and. (veg_pp%itype(p) .ne. noveg)) then
-                          t = t + max(0._r8,veg_pp%wtcol(p)*(Nfix_NPP_c1(veg_pp%itype(p)) * &
-                                 (1._r8 - exp(-Nfix_NPP_c2(veg_pp%itype(p)) * col_lag_npp(c)*(secspday * dayspyr))))/(secspday * dayspyr))  
-                          total_weight = total_weight + veg_pp%wtcol(p)
+                  if (use_humhol) then
+                    !need to put npp in units of gC/m2/yr here first
+                    t = (1.8_r8 * (1._r8 - exp(-0.003_r8 * col_lag_npp(c)*(secspday*dayspyr))))/(secspday*dayspyr)
+                    nfix_to_sminn(c) = max(0._r8,t)
+                  else
+                     total_weight = 0.0_r8  ! To correct for inactive and unveg cells
+                     do p = col_pp%pfti(c), col_pp%pftf(c)
+                         if (veg_pp%active(p) .and. (veg_pp%itype(p) .ne. noveg)) then
+                             t = t + max(0._r8,veg_pp%wtcol(p)*(Nfix_NPP_c1(veg_pp%itype(p)) * &
+                                    (1._r8 - exp(-Nfix_NPP_c2(veg_pp%itype(p)) * col_lag_npp(c)*(secspday * dayspyr))))/(secspday * dayspyr))
+                             total_weight = total_weight + veg_pp%wtcol(p)
+                         endif
+                      enddo
+                      if(total_weight>0) then
+                          nfix_to_sminn(c) = max(0._r8,t/total_weight)
+                      else
+                          nfix_to_sminn(c) = 0._r8
                       endif
-                   enddo
-                   if(total_weight>0) then
-                       nfix_to_sminn(c) = max(0._r8,t/total_weight)
-                   else
-                       nfix_to_sminn(c) = 0._r8
-                   endif
-#endif
+                  end if
                else
-                   nfix_to_sminn(c) = 0._r8
+                  nfix_to_sminn(c) = 0._r8
                endif
             end do
          else

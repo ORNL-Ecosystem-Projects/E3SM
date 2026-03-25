@@ -16,6 +16,7 @@ module elm_varcon
   use elm_varpar    , only: numrad, nlevgrnd, nlevlak, nlevdecomp_full
   use elm_varpar    , only: ngases
   use elm_varpar    , only: nlayer
+  use elm_varctl    , only: use_humhol
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -232,7 +233,7 @@ module elm_varcon
   ! fraction of surface runoff fluxes that get transferred to downhill topounit
   real(r8), public, parameter :: frac_to_downhill = 1.0_r8  ! (fraction, valid values from 0.0 to 1.0)
   ! fraction of from_uphill water state that get transferred to columns on the topounit in each timestep
-  real(r8), public, parameter :: frac_from_uphill = 0.5_r8  ! (fraction, valid values from 0.0 to 1.0)
+  real(r8), public :: frac_from_uphill = 0.5_r8  ! (fraction, valid values from 0.0 to 1.0)
 
 contains
 
@@ -245,7 +246,7 @@ contains
     !
     ! USES
     use elm_varpar, only: nlevgrnd, nlevlak, nlevdecomp_full, nlevsoifl, nlayer
-    use elm_varctl, only: use_extrasnowlayers
+    use elm_varctl, only: use_extrasnowlayers, use_humhol
     !------------------------------------------------------------------------------
 
     allocate( zlak(1:nlevlak                 ))
@@ -262,6 +263,12 @@ contains
 
     if (use_extrasnowlayers) then
         h2osno_max = 30000._r8
+    end if
+
+    if (use_humhol) then
+       frac_from_uphill = 1.0_r8
+    else
+       frac_from_uphill = 0.5_r8
     end if
 
   end subroutine elm_varcon_init
