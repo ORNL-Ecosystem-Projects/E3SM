@@ -503,6 +503,7 @@ contains
                          om_frac = 0._r8
                       endif
                    end if
+                   om_frac = min(1.0_r8, max(0._r8, om_frac))
 
                    if (lun_pp%urbpoi(l)) om_frac = 0._r8
                    claycol(c,lev)    = clay
@@ -590,8 +591,12 @@ contains
                  micro_sigma(c)/sqrt(2.0*shr_const_pi)*exp(-d**2/(2.0*micro_sigma(c)**2))
             this%h2osfc_thresh_col(c) = 1.e3_r8 * this%h2osfc_thresh_col(c) !convert to mm from meters
          else
-            this%h2osfc_thresh_col(c) = 0._r8
+            this%h2osfc_thresh_col(c) = 0._r8     !changed from 0 to 1 TAO 29/8/2018
          endif
+
+#if (defined MARSH)
+            this%h2osfc_thresh_col(c) = 2.e3_r8    ! set to zero for no h2osfc (w/frac_infclust =large) changed from 0 to 1 TAO 29/8/2018
+#endif
 
          if (this%h2osfcflag == 0) then
             this%h2osfc_thresh_col(c) = 0._r8    ! set to zero for no h2osfc (w/frac_infclust =large)
@@ -600,6 +605,11 @@ contains
          ! set decay factor
          g = col_pp%gridcell(c)
          this%hkdepth_col(c) = 1._r8/fdrain(g)
+
+#if (defined MARSH)
+      ! Is this supposed to be set with fdrain?
+      ! this%hkdepth_col(c) = 4._r8/2.5_r8
+#endif
 
       end do
     end associate
@@ -899,9 +909,12 @@ contains
      namelist / elm_soilhydrology_inparm / h2osfcflag, origflag
 
 
-     ! preset values
+#if (defined HUM_HOL || defined MARSH)
+     origflag = 1    
+#else
      origflag = 0
-     h2osfcflag = 1
+#endif      
+     h2osfcflag = 1        
 
      if ( masterproc )then
 

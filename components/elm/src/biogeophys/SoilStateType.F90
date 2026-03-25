@@ -239,12 +239,12 @@ contains
             ptr_col=this%bsw_col, default='inactive')
     end if
 
-    if (use_cn) then
+    !if (use_cn) then
        this%rootfr_patch(begp:endp,:) = spval
        call hist_addfld2d (fname='ROOTFR', units='proportion', type2d='levgrnd', &
             avgflag='A', long_name='fraction of roots in each soil layer', &
-            ptr_patch=this%rootfr_patch, default='inactive')
-    end if
+            ptr_patch=this%rootfr_patch, default='active')
+    !end if
 
     if (use_cn) then
        this%rootr_patch(begp:endp,:) = spval
@@ -676,7 +676,7 @@ contains
 
           do lev = 1,nlevgrnd
              ! Number of soil layers in hydrologically active columns = NLEV2BED
-	     nlevbed = col_pp%nlevbed(c)
+	         nlevbed = col_pp%nlevbed(c)
              if ( more_vertlayers )then ! duplicate clay and sand values from last soil layer
 
                 if (lev .eq. 1) then
@@ -684,7 +684,7 @@ contains
                    sand = sand3d(g,ti,1)
                    gravel = grvl3d(g,ti,1)
                    om_frac = organic3d(g,ti,1)/organic_max 
-                else if (lev <= nlevsoi) then
+                else if (lev <= min(nlevbed,nlevsoi)) then
                    do j = 1,nlevsoifl-1
                       if (zisoi(lev) >= zisoifl(j) .AND. zisoi(lev) < zisoifl(j+1)) then
                          clay = clay3d(g,ti,j+1)
@@ -700,7 +700,7 @@ contains
                    om_frac = 0._r8
                 endif
              else
-                if (lev <= nlevsoi) then ! duplicate clay and sand values from 10th soil layer
+                if (lev <= min(nlevbed,nlevsoi)) then ! duplicate clay and sand values from 10th soil layer
                    clay = clay3d(g,ti,lev)
                    sand = sand3d(g,ti,lev)
                    gravel = grvl3d(g,ti,lev)
@@ -712,10 +712,11 @@ contains
                    om_frac = 0._r8
                 endif
              end if
+             om_frac = min(1.0_r8, max(0._r8, om_frac))
 
              if (col_pp%is_lake(c)) then
 
-                if (lev <= nlevsoi) then
+                if (lev <= min(nlevbed,nlevsoi)) then
                    this%cellsand_col(c,lev) = sand
                    this%cellclay_col(c,lev) = clay
                    this%cellgrvl_col(c,lev) = gravel
@@ -728,7 +729,7 @@ contains
                    om_frac = 0._r8 ! No organic matter for urban
                 end if
 
-                if (lev <= nlevbed) then
+                if (lev <= min(nlevbed,nlevsoi)) then
                    this%cellsand_col(c,lev) = sand
                    this%cellclay_col(c,lev) = clay
                    this%cellgrvl_col(c,lev) = gravel
@@ -746,10 +747,37 @@ contains
                 call pedotransf(ipedof, sand, clay, &
                      this%watsat_col(c,lev), this%bsw_col(c,lev), this%sucsat_col(c,lev), xksat)
 
+                if (use_var_soil_thick .and. lev > nlevbed) then
+                   this%watsat_col(c,lev) = 0.01_r8  ! very small value for porosity of bedrock
+                   xksat = 1.e-20_r8                 ! cannot be zero (used below as denominator)
+                endif
+
+#if (defined HUM_HOL)
+                zsapric = 0.4_r8
+#endif
+
                 om_watsat         = max(0.93_r8 - 0.1_r8   *(zsoi(lev)/zsapric), 0.83_r8)
                 om_b              = min(2.7_r8  + 9.3_r8   *(zsoi(lev)/zsapric), 12.0_r8)
                 om_sucsat         = min(10.3_r8 - 0.2_r8   *(zsoi(lev)/zsapric), 10.1_r8)
                 om_hksat          = max(0.28_r8 - 0.2799_r8*(zsoi(lev)/zsapric), 0.0001_r8)
+
+#if (defined HUM_HOL)
+                if (c .eq. 1) then
+                  if (zsoi(lev) < 0.15_r8) then 
+                    om_watsat         = 0.93_r8 
+                    om_b              = 2.7_r8  
+                    om_sucsat         = 10.3_r8 
+                    om_hksat          = 0.28_r8 
+                  else
+                    om_watsat         = max(0.93_r8 - 0.1_r8 *((zsoi(lev)-0.15_r8)/zsapric), 0.83_r8)
+                    om_b              = min(2.7_r8  + 9.3_r8 *((zsoi(lev)-0.15_r8)/zsapric), 12.0_r8)
+                    om_sucsat         = max(10.3_r8 - 0.2_r8 *((zsoi(lev)-0.15_r8)/zsapric), 10.1_r8)
+                    om_hksat          = max(0.28_r8 - 0.2799_r8*((zsoi(lev)-0.15_r8)/zsapric), 0.0001_r8)
+                  end if
+                end if
+#endif
+ 
+
 
                 this%bd_col(c,lev)        = (1._r8 - this%watsat_col(c,lev))*2.7e3_r8
                 this%watsat_col(c,lev)    = (1._r8 - om_frac) * this%watsat_col(c,lev) + om_watsat*om_frac

@@ -7,7 +7,7 @@ module EcosystemDynMod
   use dynSubgridControlMod, only : get_do_harvest
   use shr_kind_mod        , only : r8 => shr_kind_r8
   use shr_sys_mod         , only : shr_sys_flush
-  use elm_varctl          , only : use_c13, use_c14, use_fates, use_dynroot, iac_present, use_fan
+  use elm_varctl          , only : use_c13, use_c14, use_fates, use_dynroot, use_fan
   use decompMod           , only : bounds_type
   use perf_mod            , only : t_startf, t_stopf
   use spmdMod             , only : masterproc
@@ -29,6 +29,7 @@ module EcosystemDynMod
   use ColumnDataType      , only : col_cf, c13_col_cf, c14_col_cf
   use ColumnDataType      , only : col_ns, col_nf
   use ColumnDataType      , only : col_ps, col_pf
+  use ColumnDataType      , only : col_es, col_ws, col_wf
   use VegetationDataType  , only : veg_cs, c13_veg_cs, c14_veg_cs
   use VegetationDataType  , only : veg_cf, c13_veg_cf, c14_veg_cf
   use VegetationDataType  , only : veg_ns, veg_nf
@@ -43,7 +44,6 @@ module EcosystemDynMod
   use PhenologyFLuxLimitMod , only : phenology_flux_limiter, InitPhenoFluxLimiter
   ! for FAN
   use SolarAbsorbedType    , only : solarabs_type
-  use FanUpdateMod,  only: fan_eval
 
 
   use timeinfoMod
@@ -122,7 +122,7 @@ contains
   subroutine EcosystemDynLeaching(bounds, num_soilc, filter_soilc, &
        num_soilp, filter_soilp, num_pcropp, filter_pcropp, doalb, &
        cnstate_vars,  &
-       frictionvel_vars, canopystate_vars )
+       soilhydrology_vars, frictionvel_vars, canopystate_vars )
     !
     ! !DESCRIPTION:
     ! The core CN code is executed here. Calculates fluxes for maintenance
@@ -141,6 +141,7 @@ contains
     use perf_mod             , only: t_startf, t_stopf
     use shr_sys_mod          , only: shr_sys_flush
     use PhosphorusDynamicsMod         , only: PhosphorusBiochemMin_balance
+    use elm_varctl                , only: use_alquimia
 
     !
     ! !ARGUMENTS:
@@ -155,6 +156,7 @@ contains
     type(cnstate_type)       , intent(inout) :: cnstate_vars
     type(frictionvel_type)   , intent(in)    :: frictionvel_vars
     type(canopystate_type)   , intent(inout) :: canopystate_vars
+    type(soilhydrology_type) , intent(in)    :: soilhydrology_vars
 
     character(len=64) :: event
     real(r8) :: dt
@@ -189,7 +191,7 @@ contains
     if (.not. nu_com_phosphatase) then
       event = 'PhosphorusBiochemMin'
        call t_start_lnd(event)
-       call PhosphorusBiochemMin(num_soilc, filter_soilc, &
+       call PhosphorusBiochemMin(bounds,num_soilc, filter_soilc, &
             cnstate_vars, dt)
        call t_stop_lnd(event)
     else
@@ -202,10 +204,10 @@ contains
 
     !-----------------------------------------------------------------------
     ! pflotran: when both 'pf-bgc' and 'pf-h' on, no need to call CLM-CN's N leaching module
-    if (.not. (pf_cmode .and. pf_hmode)) then
-     call NitrogenLeaching(num_soilc, filter_soilc, dt)
+    if (.not. (pf_cmode .and. pf_hmode) .and. .not. use_alquimia) then
+     call NitrogenLeaching(bounds, soilhydrology_vars, num_soilc, filter_soilc, dt)
 
-     call PhosphorusLeaching(num_soilc, filter_soilc, dt)
+     call PhosphorusLeaching(bounds, num_soilc, filter_soilc, dt)
     end if !(.not. (pf_cmode .and. pf_hmode))
        !-----------------------------------------------------------------------
 
@@ -274,11 +276,6 @@ contains
 
     call t_stop_lnd(event)
 
-    if (use_fates) then
-       call alm_fates%wrap_FatesAtmosphericCarbonFluxes(bounds, num_soilc, filter_soilc)
-       call alm_fates%wrap_FatesCarbonStocks(bounds, num_soilc, filter_soilc)
-    endif
-
   end subroutine EcosystemDynLeaching
 
 
@@ -287,7 +284,6 @@ contains
        num_soilc, filter_soilc,                                         &
        num_soilp, filter_soilp,                                         &
        num_pcropp, filter_pcropp,                                       &
-       num_ppercropp, filter_ppercropp,                                 &
        cnstate_vars,  atm2lnd_vars,           &
        canopystate_vars, soilstate_vars, crop_vars,   &
        ch4_vars, photosyns_vars,   &
@@ -329,8 +325,6 @@ contains
     integer                  , intent(in)    :: filter_soilp(:)   ! filter for soil patches
     integer                  , intent(in)    :: num_pcropp        ! number of prog. crop patches in filter
     integer                  , intent(in)    :: filter_pcropp(:)  ! filter for prognostic crop patches
-    integer                  , intent(in)    :: num_ppercropp     ! number of prog perennial crop patches in filter
-    integer                  , intent(in)    :: filter_ppercropp(:) ! filter for prognostic perennial crop patches
     type(cnstate_type)       , intent(inout) :: cnstate_vars
     type(atm2lnd_type)       , intent(in)    :: atm2lnd_vars
     type(canopystate_type)   , intent(in)    :: canopystate_vars
@@ -384,11 +378,9 @@ contains
 
     event = 'CNDeposition'
     call t_start_lnd(event)
-    call NitrogenDeposition(bounds, atm2lnd_vars)
-    if (use_fan) then
-      call fan_eval(bounds, num_soilc, filter_soilc, &
-           atm2lnd_vars, soilstate_vars, frictionvel_vars)
-    end if
+    call NitrogenDeposition(bounds, &
+         atm2lnd_vars, frictionvel_vars,  &
+         soilstate_vars, filter_soilc, num_soilc, dt )
     call t_stop_lnd(event)
 
     event = 'CNFixation'
@@ -408,8 +400,7 @@ contains
        event = 'MaintenanceResp'
        call t_start_lnd(event)
        if (crop_prog) then
-          call NitrogenFert(bounds, num_soilc,filter_soilc, num_pcropp, filter_pcropp, &
-                            num_ppercropp, filter_ppercropp)
+          call NitrogenFert(bounds, num_soilc,filter_soilc, num_pcropp, filter_pcropp )
           call PhosphorusFert(bounds, num_soilc, filter_soilc )
 
           call CNSoyfix(bounds, num_soilc, filter_soilc, num_soilp, filter_soilp, &
@@ -434,7 +425,7 @@ contains
        event = 'PhosphorusBiochemMin'
        if (.not. nu_com_phosphatase) then
            call t_start_lnd(event)
-           call PhosphorusBiochemMin(num_soilc, filter_soilc, &
+           call PhosphorusBiochemMin(bounds,num_soilc, filter_soilc, &
                 cnstate_vars, dt)
            call t_stop_lnd(event)
        else
@@ -542,6 +533,12 @@ contains
     use SoilLittDecompMod            , only: SoilLittDecompAlloc
     use SoilLittDecompMod            , only: SoilLittDecompAlloc2 !after SoilLittDecompAlloc
 
+    use ExternalModelInterfaceMod , only: EMI_Driver
+    use ExternalModelConstants    , only: EM_ID_ALQUIMIA,EM_ALQUIMIA_SOLVE_STAGE
+    use elm_time_manager          , only: get_step_size_real
+    use elm_varctl                , only: use_alquimia
+    use ColumnDataType            , only: col_chem
+    use elm_instMod               , only: waterstate_vars
     !
     ! !ARGUMENTS:
     type(bounds_type)        , intent(in)    :: bounds
@@ -561,7 +558,7 @@ contains
     type(crop_type)          , intent(inout) :: crop_vars
     type(ch4_type)           , intent(in)    :: ch4_vars
     type(photosyns_type)     , intent(in)    :: photosyns_vars
-    type(soilhydrology_type) , intent(in)    :: soilhydrology_vars
+    type(soilhydrology_type) , intent(inout)    :: soilhydrology_vars
     type(energyflux_type)    , intent(in)    :: energyflux_vars
     type(solarabs_type)      , intent(in)    :: solarabs_vars
 !
@@ -578,9 +575,34 @@ contains
     event = 'SoilLittDecompAlloc'
     call t_start_lnd(event)
     !----------------------------------------------------------------
-    if(.not.use_elm_interface) then
-       ! directly run elm-bgc
-       ! if (use_elm_interface & use_elm_bgc), then CNDecomAlloc is called in elm_driver
+
+       !----------------------------------------------------------------
+
+    if (use_alquimia) then
+     call t_startf('bgc via alquimia interface')
+   
+     call EMI_Driver(                                    &
+          em_id             = EM_ID_ALQUIMIA            , &
+          em_stage          = EM_ALQUIMIA_SOLVE_STAGE   , &
+          clump_rank        = bounds%clump_index        , &
+          dt                = get_step_size_real()      , &
+          soilstate_vars    = soilstate_vars            , &
+          carbonstate_vars  = col_cs                    , &
+          carbonflux_vars   = col_cf                    , &
+          nitrogenstate_vars= col_ns                    , &
+          nitrogenflux_vars = col_nf                    , &
+          waterstate_vars   = waterstate_vars           , &
+          soilhydrology_vars= soilhydrology_vars        , &
+          col_chem          = col_chem                  , &
+          num_soilc         = num_soilc                 , &
+          filter_soilc      = filter_soilc              , &
+          col_es            = col_es                    , &
+          col_ws            = col_ws                    , &
+          col_wf            = col_wf                      )
+     
+     call t_stopf('bgc via alquimia interface')
+
+    elseif( .not.use_elm_interface) then
        call SoilLittDecompAlloc (bounds, num_soilc, filter_soilc,    &
                   num_soilp, filter_soilp,                     &
                   canopystate_vars, soilstate_vars,            &
@@ -744,7 +766,8 @@ contains
 
    event = 'SoilLittVertTransp'
    call t_start_lnd(event)
-   call SoilLittVertTransp( num_soilc, filter_soilc, &
+   call SoilLittVertTransp(bounds, &
+            num_soilc, filter_soilc, &
             canopystate_vars, cnstate_vars )
        call t_stop_lnd(event)
    if(.not.use_fates)then
@@ -791,7 +814,7 @@ contains
        call PhosphorusStateUpdate2(num_soilc, filter_soilc, num_soilp, filter_soilp, &
             dt)
 
-       if (get_do_harvest() .or. iac_present) then
+       if (get_do_harvest()) then
           call CNHarvest(num_soilc, filter_soilc, num_soilp, filter_soilp, &
                cnstate_vars )
        end if

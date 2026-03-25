@@ -66,6 +66,11 @@ module atm2lndType
       real(r8), pointer ::  ndep1                      (:,:,:) => null()
       real(r8), pointer ::  ndep2                      (:,:,:) => null()
       real(r8), pointer ::  aerodata                 (:,:,:,:) => null()
+
+      ! BSulman: To support coastal system points. Leaving in coupler bypass until we work on what actual coupling will need
+      real(r8), pointer :: tide_height               (:,:) => null()  ! Height in meters (need to figure what it's relative to though - long-term mean or something?) 
+      real(r8), pointer :: tide_salinity             (:,:) => null()  ! Salinity in ppt
+      integer,  pointer :: tide_forcing_len                => null()
 #endif
      ! atm->lnd not downscaled
      real(r8), pointer :: forc_u_grc                    (:)   => null() ! atm wind speed, east direction (m/s)
@@ -101,6 +106,7 @@ module atm2lndType
      real(r8), pointer :: forc_rain_not_downscaled_grc  (:)   => null() ! not downscaled atm rain rate [mm/s]                       
      real(r8), pointer :: forc_snow_not_downscaled_grc  (:)   => null() ! not downscaled atm snow rate [mm/s]                       
      real(r8), pointer :: forc_lwrad_not_downscaled_grc (:)   => null() ! not downscaled atm downwrd IR longwave radiation (W/m**2) 
+     real(r8), pointer :: forc_zwt_not_downscaled_grc   (:)   => null() ! not downscaled water table height (m)
 
      ! atm->lnd downscaled
      real(r8), pointer :: forc_t_downscaled_col         (:)   => null() ! downscaled atm temperature (Kelvin)
@@ -244,6 +250,9 @@ contains
     allocate(this%ndep1                          (144,96,1))        ; this%ndep1                     (:,:,:)   = ival
     allocate(this%ndep2                          (144,96,1))        ; this%ndep2                     (:,:,:)   = ival
     allocate(this%aerodata                   (14,144,96,14))        ; this%aerodata                (:,:,:,:)   = ival
+    allocate(this%tide_height                      (1,876000))        ; this%tide_height               (:,:)   = ival
+    allocate(this%tide_salinity                    (1,876000))        ; this%tide_salinity             (:,:)   = ival
+    allocate(this%tide_forcing_len                           )       ; this%tide_forcing_len                  = ival_int
     !END DMR
 #endif
     allocate(this%forc_u_grc                    (begg:endg))        ; this%forc_u_grc                    (:)   = ival
@@ -273,6 +282,7 @@ contains
     allocate(this%forc_th_not_downscaled_grc    (begg:endg))        ; this%forc_th_not_downscaled_grc    (:)   = ival
     allocate(this%forc_rho_not_downscaled_grc   (begg:endg))        ; this%forc_rho_not_downscaled_grc   (:)   = ival
     allocate(this%forc_lwrad_not_downscaled_grc (begg:endg))        ; this%forc_lwrad_not_downscaled_grc (:)   = ival
+    allocate(this%forc_zwt_not_downscaled_grc   (begg:endg))        ; this%forc_zwt_not_downscaled_grc   (:)   = ival
     allocate(this%forc_rain_not_downscaled_grc  (begg:endg))        ; this%forc_rain_not_downscaled_grc  (:)   = ival
     allocate(this%forc_snow_not_downscaled_grc  (begg:endg))        ; this%forc_snow_not_downscaled_grc  (:)   = ival
     

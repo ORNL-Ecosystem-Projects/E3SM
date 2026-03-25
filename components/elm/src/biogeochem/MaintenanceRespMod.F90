@@ -7,7 +7,7 @@ module MaintenanceRespMod
   !
   ! !USES:
   use shr_kind_mod        , only : r8 => shr_kind_r8
-  use elm_varpar          , only : nlevgrnd
+  use elm_varpar          , only : nlevgrnd, nlevdecomp
   use shr_const_mod       , only : SHR_CONST_TKFRZ
   use decompMod           , only : bounds_type
   use abortutils          , only : endrun
@@ -34,13 +34,19 @@ module MaintenanceRespMod
   public :: MaintenanceResp
   public :: readMaintenanceRespParams
 
-   type, private :: MaintenanceRespParamsType
-      real(r8):: br_mr        !base rate for maintenance respiration(gC/gN/s)
-   end type MaintenanceRespParamsType
+  type, private :: MaintenanceRespParamsType
+     real(r8):: br_mr        !base rate for maintenance respiration(gC/gN/s)
+     real(r8):: dormant_mr_temp ! Temperature for dormancy (K)
+     real(r8):: dormant_mr_factor ! Dormancy multiplier for maint resp (unitless)
+  end type MaintenanceRespParamsType
 
   !type(MaintenanceRespParamsType),private ::  MaintenanceRespParamsInst
   real(r8), public :: br_mr_Inst
+  real(r8), public :: dormant_mr_temp_Inst
+  real(r8), public :: dormant_mr_factor_Inst
   !$acc declare create(br_mr_Inst)
+  !$acc declare create(dormant_mr_temp_Inst)
+  !$acc declare create(dormant_mr_factor_Inst)
   !-----------------------------------------------------------------------
 
 contains
@@ -71,6 +77,29 @@ contains
      if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
      br_mr_Inst = tempr
 
+     ! Add parameters for dormant maintenance resp
+     tString='dormant_mr_temp'
+     call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+     ! Default value: 0, so if it's missing the whole process is turned off
+     if ( .not. readv ) then
+        dormant_mr_temp_Inst=0.0_r8
+     else
+        dormant_mr_temp_Inst=tempr
+     end if
+
+
+     tString='dormant_mr_factor'
+     call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+     if ( .not. readv .and. dormant_mr_temp_Inst == 0.0_r8) then
+        ! Neither dormancy param is defined, so we can ignore both
+        dormant_mr_temp_Inst=0.0_r8
+     elseif ( .not. readv ) then
+        ! Doesn't work if dormancy temp is defined and factor is not
+        call endrun(msg=trim('-Error: dormant_mr_temp defined but dormant_mr_factor is not')//trim(tString)//errMsg(__FILE__,__LINE__))
+     else
+        dormant_mr_factor_Inst=tempr
+     end if
+
    end subroutine readMaintenanceRespParams
 
   !-----------------------------------------------------------------------
@@ -100,6 +129,8 @@ contains
     integer :: fp    ! soil filter patch index
     integer :: fc    ! soil filter column index
     real(r8):: br_mr ! base rate (gC/gN/s)
+    real(r8):: dormant_mr_temp ! Temperature for dormancy
+    real(r8):: dormant_mr_factor ! Multiplication factor that replaces Q10
     real(r8):: q10   ! temperature dependence
     real(r8):: tc    ! temperature correction, 2m air temp (unitless)
     real(r8):: tcsoi(bounds%begc:bounds%endc,nlevgrnd) ! temperature correction by soil layer (unitless)
@@ -109,6 +140,10 @@ contains
          ivt            =>    veg_pp%itype                             , & ! Input:  [integer  (:)   ]  patch vegetation type
          woody          =>    veg_vp%woody                      , & ! Input:  [real(r8) (:)   ]  woody lifeform flag (0 = non-woody, 1 = tree, 2 = shrub)
          br_xr          =>    veg_vp%br_xr                      , & ! Input:  [real(r8) (:)   ]  base rate for excess respiration
+#if (defined HUM_HOL)
+         br_mr_pft       =>    veg_vp%br_mr_pft                   , & ! Input: [real(r8) (:)   ]  base rate for maintenance respiration (pft-specific)
+         q10_mr_pft      =>    veg_vp%q10_mr_pft                  , & ! Input: [real(r8) (:)   ] temperature sensitivity for maint respiration (pft-specific)
+#endif
          frac_veg_nosno =>    canopystate_vars%frac_veg_nosno_patch , & ! Input:  [integer  (:)   ]  fraction of vegetation not covered by snow (0 OR 1) [-]
          laisun         =>    canopystate_vars%laisun_patch         , & ! Input:  [real(r8) (:)   ]  sunlit projected leaf area index
          laisha         =>    canopystate_vars%laisha_patch         , & ! Input:  [real(r8) (:)   ]  shaded projected leaf area index
@@ -129,6 +164,7 @@ contains
          livecroot_mr   =>    veg_cf%livecroot_mr    , & ! Output: [real(r8) (:)   ]
          grain_mr       =>    veg_cf%grain_mr        , & ! Output: [real(r8) (:)   ]
          xr             =>    veg_cf%xr              , & ! Output: [real(r8) (:)   ]  (gC/m2) respiration of excess C
+         totvegc        =>    veg_cs%totvegc         , &
 
          frootn         =>    veg_ns%frootn       , & ! Input:  [real(r8) (:)   ]  (gN/m2) fine root N
          livestemn      =>    veg_ns%livestemn    , & ! Input:  [real(r8) (:)   ]  (gN/m2) live stem N
@@ -144,7 +180,11 @@ contains
       ! set constants
       br_mr = br_mr_Inst
 
-      ! Peter Thornton: 3/13/09
+      ! Ben Sulman: Adding dormant maintenance resp
+      dormant_mr_temp = dormant_mr_temp_Inst
+      dormant_mr_factor = dormant_mr_factor_Inst
+
+      ! Peter Thornton: 3/13/09 
       ! Q10 was originally set to 2.0, an arbitrary choice, but reduced to 1.5 as part of the tuning
       ! to improve seasonal cycle of atmospheric CO2 concentration in global
       ! simulatoins
@@ -159,8 +199,13 @@ contains
 
             ! calculate temperature corrections for each soil layer, for use in
             ! estimating fine root maintenance respiration with depth
-            tcsoi(c,j) = Q10**((t_soisno(c,j)-SHR_CONST_TKFRZ - 20.0_r8)/10.0_r8)
-
+            ! Ben Sulman: Adding lower dormant maintenance resp below a certain
+            ! temperature
+            if (t_soisno(c,j) > dormant_mr_temp) then
+                tcsoi(c,j) = Q10**((t_soisno(c,j)-SHR_CONST_TKFRZ - 20.0_r8)/10.0_r8)
+            else
+                tcsoi(c,j) = dormant_mr_factor
+            end if
          end do
       end do
 
@@ -172,7 +217,18 @@ contains
          ! gC/m2/s for each of the live plant tissues.
          ! Leaf and live wood MR
 
-         tc = Q10**((t_ref2m(p)-SHR_CONST_TKFRZ - 20.0_r8)/10.0_r8)
+         ! Ben Sulman: Add dormant MR level below a certain temperature
+         if(t_ref2m(p) > dormant_mr_temp) then
+#if (defined HUM_HOL)
+             tc = q10_mr_pft(ivt(p))**((t_ref2m(p)-SHR_CONST_TKFRZ - 20.0_r8)/10.0_r8)
+             br_mr = br_mr_pft(ivt(p))
+#else
+             tc = Q10**((t_ref2m(p)-SHR_CONST_TKFRZ - 20.0_r8)/10.0_r8)
+#endif
+         else
+             tc = dormant_mr_factor
+         end if
+
          if (frac_veg_nosno(p) == 1) then
             leaf_mr(p) = lmrsun(p) * laisun(p) * 12.011e-6_r8 + &
                          lmrsha(p) * laisha(p) * 12.011e-6_r8
@@ -188,22 +244,21 @@ contains
          else if (iscft(ivt(p)) .and. livestemn(p) .gt. 0._r8) then
             livestem_mr(p) = livestemn(p)*br_mr*tc
             grain_mr(p) = grainn(p)*br_mr*tc
+         else ! Graminoid rhizomes
+            livecroot_mr(p) = livecrootn(p)*br_mr*tc
          end if
-         if (br_xr(ivt(p)) .gt. 1e-9_r8) then
-            xr(p) = cpool(p) * br_xr(ivt(p)) * tc
-            !xr_above(p) = xr(p) * (leafn(p) + livestemn(p)) / &
-            !          (leafn(p) + livestemn(p) + frootn(p))
-            !xr_below(p) = xr(p) - xr_above(p)
+         if (br_xr(ivt(p)) .gt. 1e-9_r8 .and. totvegc(p) .gt. 1e-10_r8) then
+            !xr(p) = cpool(p) * br_xr(ivt(p)) * tc
+            ! this is to limit the size of cpool
+            xr(p) = cpool(p) * br_xr(ivt(p)) * exp((min(cpool(p) / totvegc(p),0.3335_r8) - 0.2_r8)/0.02_r8) * tc 
          else
             xr(p) = 0._r8
-            !xr_above(p) = 0._r8
-            !xr_below(p) = 0._r8
          end if
       end do
 
       ! soil and patch loop for fine root
 
-      do j = 1,nlevgrnd
+      do j = 1,nlevdecomp
          do fp = 1,num_soilp
             p = filter_soilp(fp)
             c = veg_pp%column(p)
@@ -214,10 +269,19 @@ contains
             ! layer.  This is used with the layer temperature correction
             ! to estimate the total fine root maintenance respiration as a
             ! function of temperature and N content.
+#if (defined HUM_HOL)
+            !recalculate pft-specific rates
+            if (t_soisno(c,j) > dormant_mr_temp) then
+                tcsoi(c,j) = q10_mr_pft(ivt(p))**((t_soisno(c,j)-SHR_CONST_TKFRZ - 20.0_r8)/10.0_r8)
+            else
+                tcsoi(c,j) = dormant_mr_factor
+            end if
+            br_mr = br_mr_pft(ivt(p))
+#endif
             froot_mr(p) = froot_mr(p) + frootn(p)*br_mr*tcsoi(c,j)*rootfr(p,j)
          end do
       end do
-
+      
     end associate
 
   end subroutine MaintenanceResp

@@ -1,5 +1,5 @@
 module elm_initializeMod
-#define MOABDEBUG
+
   !-----------------------------------------------------------------------
   ! Performs land model initialization
   !
@@ -10,9 +10,9 @@ module elm_initializeMod
   use decompMod        , only : bounds_type, get_proc_bounds, get_proc_clumps, get_clump_bounds
   use abortutils       , only : endrun
   use elm_varctl       , only : nsrest, nsrStartup, nsrContinue, nsrBranch
-  use elm_varctl       , only : create_glacier_mec_landunit, iulog, iac_present
+  use elm_varctl       , only : create_glacier_mec_landunit, iulog
   use elm_varctl       , only : use_lch4, use_cn, use_voc, use_c13, use_c14
-  use elm_varctl       , only : use_fates, use_betr, use_fates_sp, use_fan, use_fates_luh, use_finetop_rad
+  use elm_varctl       , only : use_fates, use_betr, use_fates_sp, use_fan, use_alquimia, use_fates_luh
   use elm_varsur       , only : wt_lunit, urban_valid, wt_nat_patch, wt_cft, wt_glc_mec, topo_glc_mec,firrig,f_surf,f_grd
   use elm_varsur       , only : fert_cft, fert_p_cft, wt_polygon
   use elm_varsur       , only : wt_tunit, elv_tunit, slp_tunit,asp_tunit,num_tunit_per_grd
@@ -21,9 +21,8 @@ module elm_initializeMod
   use readParamsMod    , only : readSharedParameters, readPrivateParameters
   use ncdio_pio        , only : file_desc_t
   use ELMFatesInterfaceMod  , only : ELMFatesGlobals1,ELMFatesGlobals2
+  use ELMFatesParamInterfaceMod, only: FatesReadPFTs
   use BeTRSimulationELM, only : create_betr_simulation_elm
-  use SoilLittVertTranspMod, only : CreateLitterTransportList
-  use iso_c_binding
   !
   !-----------------------------------------
   ! Definition of component types
@@ -33,9 +32,10 @@ module elm_initializeMod
   use TopounitDataType       , only : top_as, top_af, top_es, top_ws
   use LandunitType           , only : lun_pp
   use ColumnType             , only : col_pp
-  use ColumnDataType         , only : col_es
+  use ColumnDataType         , only : col_es , col_ws 
   use VegetationType         , only : veg_pp
   use VegetationDataType     , only : veg_es
+  use ColumnDataType         , only : col_chem
 
   use elm_instMod
   use WaterBudgetMod         , only : WaterBudget_Reset
@@ -47,13 +47,6 @@ module elm_initializeMod
   !
   public :: initialize1  ! Phase one initialization
   public :: initialize2  ! Phase two initialization
-  !-----------------------------------------------------------------------
-#ifdef HAVE_MOAB
-  private :: elm_moab_interface_init   ! create the full MOAB mesh representation of ELM domain
-
-  real (r8) , allocatable, private :: l2x_lm(:,:) ! for tags to be set in MOAB
-  real (r8) , allocatable, private :: x2l_lm(:,:) ! for tags from MOAB
-#endif
   !-----------------------------------------------------------------------
 
 contains
@@ -77,11 +70,8 @@ contains
     use pftvarcon                 , only: pftconrd
     use soilorder_varcon          , only: soilorder_conrd
     use decompInitMod             , only: decompInit_lnd, decompInit_clumps, decompInit_gtlcp
-#ifdef HAVE_MOAB
-    use decompInitMod             , only: decompInit_moab
-#endif
     use domainMod                 , only: domain_check, ldomain, domain_init
-    use surfrdMod                 , only: surfrd_get_globmask, surfrd_get_grid, surfrd_get_topo, surfrd_get_data, surfrd_get_topo_for_solar_rad, surfrd_finetop_data
+    use surfrdMod                 , only: surfrd_get_globmask, surfrd_get_grid, surfrd_get_topo, surfrd_get_data,surfrd_get_topo_for_solar_rad
     use controlMod                , only: control_init, control_print, NLFilename
     use ncdio_pio                 , only: ncd_pio_init
     use initGridCellsMod          , only: initGridCells, initGhostGridCells
@@ -99,7 +89,6 @@ contains
     use reweightMod               , only: reweight_wrapup
     use topounit_varcon           , only: max_topounits, has_topounit, topounit_varcon_init
     use elm_varctl                , only: use_top_solar_rad, use_polygonal_tundra
-    use shr_log_mod               , only: errMsg => shr_log_errMsg
     !
     ! !LOCAL VARIABLES:
     integer           :: ier                     ! error status
@@ -123,7 +112,6 @@ contains
     integer           :: nclumps                 ! number of clumps on this processor
     integer           :: nc                      ! clump index
     character(len=32) :: subname = 'initialize1' ! subroutine name
-    character(len=100) :: error_msg              ! String to store error message
     !-----------------------------------------------------------------------
 
     call t_startf('elm_init1')
@@ -153,8 +141,8 @@ contains
        ! in the following call) for FATES runs
        call ELMFatesGlobals1()
        call update_pft_array_bounds()
-    end if
-
+    end if    
+    
     call elm_petsc_init()
     call init_soil_temperature()
 
@@ -197,24 +185,10 @@ contains
     endif
 
     ! ------------------------------------------------------------------------
-    ! Copy ELM mesh data to MOAB so that we can compute optimal partitions
-    ! and enable ghost halo-layers for each task to describe shared entities.
-    ! Now let us create that MOAB app that represents the full ELM mesh
-    ! ------------------------------------------------------------------------
-#ifdef HAVE_MOAB
-    call elm_moab_interface_init()
-#endif
-
-    ! ------------------------------------------------------------------------
     ! Determine clm gridcell decomposition and processor bounds for gridcells
     ! ------------------------------------------------------------------------
 
     select case (trim(domain_decomp_type))
-#ifdef HAVE_MOAB
-    case ("moab")
-      call decompInit_moab(ni, nj, amask)
-      deallocate(amask)
-#endif
     case ("round_robin")
        call decompInit_lnd(ni, nj, amask)
        deallocate(amask)
@@ -267,33 +241,24 @@ contains
           call shr_sys_flush(iulog)
        endif
 
-       call surfrd_get_topo(ldomain, flndtopo)
-    endif
-
+       call surfrd_get_topo(ldomain, flndtopo)  
+    endif    
+    
     if (fsurdat /= " " .and. use_top_solar_rad) then
        if (masterproc) then
           write(iulog,*) 'Attempting to read topo parameters for TOP solar radiation parameterization from ',trim(fsurdat)
           call shr_sys_flush(iulog)
        endif
+       call surfrd_get_topo_for_solar_rad(ldomain, fsurdat)  
 
-       call surfrd_get_topo_for_solar_rad(ldomain, fsurdat)
     endif
     
     !-------------------------------------------------------------------------
     ! Topounit
     !-------------------------------------------------------------------------
     call topounit_varcon_init(begg, endg,fsurdat,ldomain)  ! Topounits
-
-    if (iac_present) then
-      !When using EHC, max_topounits must be 1
-      if (max_topounits .ne. 1) then
-         write(error_msg,*)'ERROR: elm_initializeMod: When using EHC, max_topounits must be 1, but it is ',max_topounits,'. '
-         call endrun(trim(error_msg)//trim(errMsg(__FILE__, __LINE__)))
-      end if
-    endif
-
     !-------------------------------------------------------------------------
-
+    
     !-------------------------------------------------------------------------
     ! Initialize urban model input (initialize urbinp data structure)
     ! This needs to be called BEFORE the call to surfrd_get_data since
@@ -344,6 +309,14 @@ contains
 
     call soilorder_conrd()
 
+    ! Read in FATES parameter values early in the call sequence as well
+    ! The PFT file, specifically, will dictate how many pfts are used
+    ! in fates, and this will influence the amount of memory we
+    ! request from the model, which is relevant in set_fates_global_elements()
+    if (use_fates) then
+       call FatesReadPFTs()
+    end if
+    
     ! Read surface dataset and set up subgrid weight arrays
     call surfrd_get_data(begg, endg, ldomain, fsurdat)
 
@@ -357,7 +330,7 @@ contains
 
     end if
 
-
+    
     ! ------------------------------------------------------------------------
     ! Determine decomposition of subgrid scale topounits, landunits, topounits, columns, patches
     ! ------------------------------------------------------------------------
@@ -381,12 +354,12 @@ contains
 
     ! Initialize the gridcell data types
     call grc_pp%Init (bounds_proc%begg_all, bounds_proc%endg_all)
-
+    
     ! Read topounit information from fsurdat
     if (has_topounit) then
-         call surfrd_topounit_data(begg, endg, fsurdat)
+         call surfrd_topounit_data(begg, endg, fsurdat)         
     end if
-
+    
     ! Initialize the topographic unit data types
     call top_pp%Init (bounds_proc%begt_all, bounds_proc%endt_all) ! topology and physical properties
     call top_as%Init (bounds_proc%begt_all, bounds_proc%endt_all) ! atmospheric state variables (forcings)
@@ -414,16 +387,8 @@ contains
 
     call initGridCells()
 
-    if (fsurdat /= " " .and. use_finetop_rad) then
-       if (masterproc) then
-           write(iulog,*) 'Attempting to read topo parameters for fineTOP parameterization from ',trim(fsurdat)
-           call shr_sys_flush(iulog)
-       endif
-       call surfrd_finetop_data(ldomain, fsurdat)
-    endif
-
     ! Set global seg maps for gridcells, topounits, landlunits, columns and patches
-    !if(max_topounits > 1) then
+    !if(max_topounits > 1) then 
     !   if (create_glacier_mec_landunit) then
     !      call decompInit_gtlcp(ns, ni, nj, ldomain%glcmask,ldomain%num_tunits_per_grd)
     !   else
@@ -442,7 +407,7 @@ contains
     call t_startf('init_filters')
     call allocFilters()
     call t_stopf('init_filters')
-
+    
     nclumps = get_proc_clumps()
     !$OMP PARALLEL DO PRIVATE (nc, bounds_clump)
     do nc = 1, nclumps
@@ -560,7 +525,12 @@ contains
     use ELMFatesInterfaceMod  , only: ELMFatesTimesteps
     use FATESFireFactoryMod   , only : scalar_lightning
     use FanStreamMod          , only : fanstream_init, fanstream_interp
+<<<<<<< HEAD
     use dynFATESLandUseChangeMod, only : dynFatesLandUseInit
+=======
+    use ExternalModelConstants   , only : EM_ID_ALQUIMIA, EM_ALQUIMIA_COLDSTART_STAGE
+    use ExternalModelInterfaceMod, only : EMI_Driver, EMI_Init_EM
+>>>>>>> 6f26ff2160 (Set up initial Alquimia external model interface and demo simulation including C and N pools)
     !
     ! !ARGUMENTS
     implicit none
@@ -624,7 +594,7 @@ contains
     ! ------------------------------------------------------------------------
     ! Initialize time manager
     ! ------------------------------------------------------------------------
-    if (nsrest == nsrStartup) then
+    if (nsrest == nsrStartup) then  
        call timemgr_init()
     else
        call restFile_getfile(file=fnamer, path=pnamer)
@@ -633,14 +603,14 @@ contains
        call restFile_close( ncid=ncid )
        call timemgr_restart()
     end if
-
+    
     ! ------------------------------------------------------------------------
     ! Pass model timestep info to FATES
     ! ------------------------------------------------------------------------
     if(use_fates) then
        call ELMFatesTimesteps()
     end if
-
+    
     ! ------------------------------------------------------------------------
     ! Initialize daylength from the previous time step (needed so prev_dayl can be set correctly)
     ! ------------------------------------------------------------------------
@@ -701,6 +671,11 @@ contains
          avgflag='A', long_name='convective boundary height', &
          ptr_col=col_pp%zii, default='inactive')
 
+    ! Alquimia initialization reads sizes for chemical arrays so it must be done before clm_inst_biogeophys (which initializes ChemStateType)
+    if (use_alquimia) then
+      call EMI_Init_EM(EM_ID_ALQUIMIA)
+    endif
+
     call elm_inst_biogeophys(bounds_proc)
 
     if(use_betr)then
@@ -760,8 +735,6 @@ contains
 
     call veg_es%InitAccBuffer(bounds_proc)
 
-    call energyflux_vars%InitAccBuffer(bounds_proc)
-
     call canopystate_vars%initAccBuffer(bounds_proc)
 
     if (crop_prog) then
@@ -769,7 +742,7 @@ contains
     end if
 
     call cnstate_vars%initAccBuffer(bounds_proc)
-
+    
     if (use_fates) then
       call alm_fates%InitAccBuffer(bounds_proc)
    end if
@@ -820,11 +793,6 @@ contains
        ! differences in LAI can be computed
        call SatellitePhenologyInit(bounds_proc)
     end if
-
-    if (use_cn .or. use_fates) then 
-       ! Create pointers to decomp pools for SoilLittVertTransp
-       call CreateLitterTransportList()
-    end if 
 
 
     ! ------------------------------------------------------------------------
@@ -887,6 +855,12 @@ contains
 
     end if
 
+    ! Prevent situation on restart where states get reset at nstep=1 but cumulative fluxes never get reset
+    if (get_nstep() <= 1 .and. do_budgets) then
+      call WaterBudget_Reset('all')
+      call CNPBudget_Reset('all')
+    endif
+       
     ! ------------------------------------------------------------------------
     ! If appropriate, create interpolated initial conditions
     ! ------------------------------------------------------------------------
@@ -999,7 +973,6 @@ contains
     call top_as%InitAccVars(bounds_proc)
     call top_af%InitAccVars(bounds_proc)
     call veg_es%InitAccVars(bounds_proc)
-    call energyflux_vars%initAccVars(bounds_proc)
     call canopystate_vars%initAccVars(bounds_proc)
     if (crop_prog) then
        call crop_vars%initAccVars(bounds_proc)
@@ -1016,7 +989,7 @@ contains
     ! Even if CN is on, and dry-deposition is active, read CLMSP annual vegetation
     ! to get estimates of monthly LAI
 
-    if ( n_drydep > 0 .and. drydep_method == DD_XLND )then
+    if ( .not. use_cn .or. ( n_drydep > 0 .and. drydep_method == DD_XLND) )then
        call readAnnualVegetation(bounds_proc, canopystate_vars)
        if (nsrest == nsrStartup .and. finidat /= ' ') then
           ! Call interpMonthlyVeg for dry-deposition so that mlaidiff will be calculated
@@ -1035,15 +1008,9 @@ contains
 
     if (nsrest == nsrStartup) then
        call t_startf('init_map2gc')
-       call lnd2atm_minimal(bounds_proc, surfalb_vars, solarabs_vars, energyflux_vars, atm2lnd_vars, lnd2atm_vars)
-       call t_stopf('init_map2gc')
-    else if ( use_finetop_rad .and. ((nsrest == nsrContinue) .or. (nsrest == nsrBranch))) then
-       call t_startf('init_map2gc')
-       call lnd2atm_minimal(bounds_proc, surfalb_vars, solarabs_vars, energyflux_vars, atm2lnd_vars, lnd2atm_vars)
+       call lnd2atm_minimal(bounds_proc, surfalb_vars, energyflux_vars, lnd2atm_vars)
        call t_stopf('init_map2gc')
     end if
-
-
 
     !------------------------------------------------------------
     ! Initialize sno export state to send to glc
@@ -1085,12 +1052,34 @@ contains
              call get_clump_bounds(nc, bounds_clump)
              call SatellitePhenology(bounds_clump, &
                   filter_inactive_and_active(nc)%num_soilp, filter_inactive_and_active(nc)%soilp, &
-                  waterstate_vars, canopystate_vars)
+                  waterstate_vars, canopystate_vars, temperature_vars, soilstate_vars)
           end do
           !$OMP END PARALLEL DO
        end if
        call alm_fates%init_coldstart(canopystate_vars, soilstate_vars, frictionvel_vars)
     end if
+
+    ! Through alquimia, equilibrate initial conditions and initialize data structure
+    if (use_alquimia .and. finidat == ' ') then
+      !$OMP PARALLEL DO PRIVATE (nc, bounds_clump)
+      do nc = 1,nclumps
+         call get_clump_bounds(nc, bounds_clump)
+         call EMI_Driver(                                    &
+            em_id             = EM_ID_ALQUIMIA            , &
+            em_stage          = EM_ALQUIMIA_COLDSTART_STAGE   , &
+            clump_rank        = bounds_clump%clump_index        , &
+            dt                = dtime      , &
+            soilstate_vars    = soilstate_vars            , &
+            waterstate_vars   = waterstate_vars           , &
+            col_chem          = col_chem            , &
+            num_soilc         = filter(nc)%num_soilc                 , &
+            filter_soilc      = filter(nc)%soilc              , &
+            col_es            = col_es               , &
+            col_ws            = col_ws        )
+         end do
+         !$OMP END PARALLEL DO
+    endif
+
 
     ! topo_glc_mec was allocated in initialize1, but needed to be kept around through
     ! initialize2 because it is used to initialize other variables; now it can be
@@ -1268,19 +1257,5 @@ contains
 
   end subroutine elm_petsc_init
 
-#ifdef HAVE_MOAB
-  subroutine elm_moab_interface_init()!(bounds)
-    use elm_varctl  ,  only : fatmlndfrc  ! for messages and domain file name
-    use MOABGridType, only : elm_moab_initialize, elm_moab_load_grid_file
 
-    ! initialize the MOAB structures as needed for ELM
-    call elm_moab_initialize()
-
-    ! load the mesh file for ELM
-    call elm_moab_load_grid_file(fatmlndfrc)
-
-  end subroutine elm_moab_interface_init
-#endif
-
-#undef MOABDEBUG
 end module elm_initializeMod
