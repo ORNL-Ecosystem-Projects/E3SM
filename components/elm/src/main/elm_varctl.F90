@@ -20,6 +20,7 @@ module elm_varctl
   public :: cnallocate_carbonphosphorus_only
   public :: get_carbontag ! get the tag for carbon simulations
   public :: elm_varctl_set_iac_flag
+  public :: elm_varctl_set_offline_driver_mode
   !
   private
   save
@@ -57,6 +58,9 @@ module elm_varctl
 
   !true => no valid land points -- do NOT run
   logical, public :: noland = .false.
+
+  ! true => running via standalone offline driver
+  logical, public :: offline_driver_mode = .false.
 
   ! Hostname of machine running on
   character(len=256), public :: hostname = ' '
@@ -709,6 +713,11 @@ contains
     logical, intent(in) :: iac_flag_in
     iac_present = iac_flag_in
   end subroutine elm_varctl_set_iac_flag
+
+  subroutine elm_varctl_set_offline_driver_mode(offline_driver_mode_in)
+    logical, intent(in) :: offline_driver_mode_in
+    offline_driver_mode = offline_driver_mode_in
+  end subroutine elm_varctl_set_offline_driver_mode
 
   function get_carbontag(carbon_type)result(ctag)
     !$acc routine seq

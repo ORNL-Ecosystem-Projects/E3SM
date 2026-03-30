@@ -471,6 +471,7 @@ contains
     use landunit_varcon       , only : istice, istice_mec, istsoil
     use elm_varctl            , only : finidat, finidat_interp_source, finidat_interp_dest, fsurdat
     use elm_varctl            , only : use_century_decomp, single_column, scmlat, scmlon, use_cn
+    use elm_varctl            , only : offline_driver_mode
     use elm_varorb            , only : eccen, mvelpp, lambm0, obliqr
     use elm_time_manager      , only : get_step_size, get_curr_calday
     use elm_time_manager      , only : get_curr_date, get_nstep, advance_timestep
@@ -504,7 +505,7 @@ contains
     use SatellitePhenologyMod , only : interpMonthlyVeg, SatellitePhenology
     use SnowSnicarMod         , only : SnowAge_init, SnowOptics_init
     use initVerticalMod       , only : initVertical
-    use lnd2atmMod            , only : lnd2atm_minimal
+    use lnd2atmMod            , only : lnd2atm, lnd2atm_minimal
     use glc2lndMod            , only : glc2lnd_type
     use lnd2glcMod            , only : lnd2glc_type
     use SoilWaterRetentionCurveFactoryMod   , only : create_soil_water_retention_curve
@@ -606,11 +607,21 @@ contains
 
     call t_startf('init_orbd')
 
-    calday = get_curr_calday()
+    if (offline_driver_mode) then
+       call get_curr_date(yr, mon, day, ncsec)
+       calday = local_calday_from_ymdtod(yr, mon, day, ncsec)
+    else
+       calday = get_curr_calday()
+    end if
     call shr_orb_decl( calday, eccen, mvelpp, lambm0, obliqr, declin, eccf )
 
     dtime = get_step_size()
-    caldaym1 = get_curr_calday(offset=-int(dtime))
+    if (offline_driver_mode) then
+       caldaym1 = calday - dtime / 86400._r8
+       if (caldaym1 < 1._r8) caldaym1 = 1._r8
+    else
+       caldaym1 = get_curr_calday(offset=-int(dtime))
+    end if
     call shr_orb_decl( caldaym1, eccen, mvelpp, lambm0, obliqr, declinm1, eccf )
 
     call t_stopf('init_orbd')
@@ -629,15 +640,13 @@ contains
 
     ! History file variables
 
-    if (use_cn) then
-       call hist_addfld1d (fname='DAYL',  units='s', &
-            avgflag='A', long_name='daylength', &
-            ptr_gcell=grc_pp%dayl, default='inactive')
+    call hist_addfld1d (fname='DAYL',  units='s', &
+         avgflag='A', long_name='daylength', &
+         ptr_gcell=grc_pp%dayl, default='inactive')
 
-       call hist_addfld1d (fname='PREV_DAYL', units='s', &
-            avgflag='A', long_name='daylength from previous timestep', &
-            ptr_gcell=grc_pp%prev_dayl, default='inactive')
-    end if
+    call hist_addfld1d (fname='PREV_DAYL', units='s', &
+         avgflag='A', long_name='daylength from previous timestep', &
+         ptr_gcell=grc_pp%prev_dayl, default='inactive')
 
     ! ------------------------------------------------------------------------
     ! Initialize component data structures
@@ -915,7 +924,7 @@ contains
     ! Initialize nitrogen deposition
     ! ------------------------------------------------------------------------
 
-    if (use_cn .or. use_fates) then
+    if ((use_cn .or. use_fates) .and. .not. offline_driver_mode) then
        call t_startf('init_ndep')
        call ndep_init(bounds_proc, NLFilename)
        call ndep_interp(bounds_proc, atm2lnd_vars)
@@ -932,11 +941,13 @@ contains
     ! Initialize phosphorus deposition
     ! ------------------------------------------------------------------------
 
-    if (use_cn .or. use_fates) then
+    if ((use_cn .or. use_fates) .and. .not. offline_driver_mode) then
        call t_startf('init_pdep')
        call pdep_init(bounds_proc)
        call pdep_interp(bounds_proc, atm2lnd_vars)
        call t_stopf('init_pdep')
+    else if (use_cn .or. use_fates) then
+       atm2lnd_vars%forc_pdep_grc(bounds_proc%begg:bounds_proc%endg) = 0._r8
     end if
 
 
@@ -1000,8 +1011,15 @@ contains
 
     if (nsrest == nsrStartup) then
        call t_startf('init_map2gc')
-       call lnd2atm_minimal(bounds_proc, surfalb_vars, solarabs_vars, energyflux_vars, &
-            atm2lnd_vars, lnd2atm_vars)
+       if (offline_driver_mode .and. .not. do_budgets .and. .not. use_cn .and. &
+            .not. use_fates .and. .not. use_lch4 .and. .not. use_betr) then
+          call lnd2atm_minimal(bounds_proc, surfalb_vars, solarabs_vars, energyflux_vars, &
+               atm2lnd_vars, lnd2atm_vars)
+       else
+          call lnd2atm(bounds_proc, atm2lnd_vars, surfalb_vars, frictionvel_vars, &
+               energyflux_vars, solarabs_vars, drydepvel_vars, vocemis_vars, dust_vars, &
+               ch4_vars, soilhydrology_vars, sedflux_vars, lnd2atm_vars)
+       end if
        call t_stopf('init_map2gc')
     end if
 
@@ -1123,6 +1141,37 @@ contains
     call t_stopf('elm_init2')
 
   end subroutine initialize2
+
+  real(r8) function local_calday_from_ymdtod(year, month, day, tod)
+
+    use elm_time_manager, only : get_calendar, GREGORIAN_C
+
+    integer, intent(in) :: year
+    integer, intent(in) :: month
+    integer, intent(in) :: day
+    integer, intent(in) :: tod
+
+    integer :: m
+    integer :: days_before
+    integer, dimension(12) :: month_days
+    character(len=32) :: calendar_name
+
+    month_days = (/31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31/)
+    calendar_name = trim(get_calendar())
+    if (trim(calendar_name) == trim(GREGORIAN_C)) then
+       if (mod(year,4) == 0 .and. (mod(year,100) /= 0 .or. mod(year,400) == 0)) then
+          month_days(2) = 29
+       end if
+    end if
+
+    days_before = 0
+    do m = 1, month - 1
+       days_before = days_before + month_days(m)
+    end do
+
+    local_calday_from_ymdtod = real(days_before + day, r8) + real(tod, r8) / 86400._r8
+
+  end function local_calday_from_ymdtod
 
   !-----------------------------------------------------------------------
   subroutine initialize3( )

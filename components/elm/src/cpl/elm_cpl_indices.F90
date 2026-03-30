@@ -15,6 +15,7 @@ module elm_cpl_indices
   !
   ! !PUBLIC MEMBER FUNCTIONS:
   public :: elm_cpl_indices_set        ! Set the coupler indices
+  public :: elm_cpl_indices_set_offline ! Set minimal indices for offline CPL_BYPASS runs
   !
   ! !PUBLIC DATA MEMBERS:
   !
@@ -397,6 +398,126 @@ contains
     call mct_aVect_clean(l2x)
 
   end subroutine elm_cpl_indices_set
+
+  subroutine elm_cpl_indices_set_offline()
+    ! Minimal fixed index layout for offline CPL_BYPASS runs.
+    !
+    ! The standalone offline driver does not initialize the driver-side
+    ! seq_flds lists, so the normal MCT-based index discovery cannot be used.
+    ! For offline runs we only need the small subset of x2l fields touched
+    ! unconditionally by lnd_import before the CPL_BYPASS forcing path takes
+    ! over.
+
+    implicit none
+
+    glc_nec = 0
+
+    nflds_l2x = 1
+    nflds_x2l = 10
+
+    index_l2x_Flrl_rofsur = 0
+    index_l2x_Flrl_rofgwl = 0
+    index_l2x_Flrl_rofsub = 0
+    index_l2x_Flrl_rofi = 0
+    index_l2x_Flrl_demand = 0
+    index_l2x_Flrl_Tqsur = 0
+    index_l2x_Flrl_Tqsub = 0
+    index_l2x_coszen_str = 0
+    index_l2x_Flrl_rofmud = 0
+    index_l2x_Flrl_inundinf = 0
+    index_l2x_Sl_t = 0
+    index_l2x_Sl_tref = 0
+    index_l2x_Sl_qref = 0
+    index_l2x_Sl_avsdr = 0
+    index_l2x_Sl_anidr = 0
+    index_l2x_Sl_avsdf = 0
+    index_l2x_Sl_anidf = 0
+    index_l2x_Sl_snowh = 0
+    index_l2x_Sl_u10 = 0
+    index_l2x_Sl_u10withgusts = 0
+    index_l2x_Sl_ddvel = 0
+    index_l2x_Sl_fv = 0
+    index_l2x_Sl_ram1 = 0
+    index_l2x_Sl_soilw = 0
+    index_l2x_Flrl_wslake = 0
+    index_l2x_Fall_taux = 0
+    index_l2x_Fall_tauy = 0
+    index_l2x_Fall_lat = 0
+    index_l2x_Fall_sen = 0
+    index_l2x_Fall_lwup = 0
+    index_l2x_Fall_evap = 0
+    index_l2x_Fall_swnet = 0
+    index_l2x_Fall_fco2_lnd = 0
+    index_l2x_Fall_flxdst1 = 0
+    index_l2x_Fall_flxdst2 = 0
+    index_l2x_Fall_flxdst3 = 0
+    index_l2x_Fall_flxdst4 = 0
+    index_l2x_Fall_flxvoc = 0
+    index_l2x_Fall_flxnh3 = 0
+    index_l2x_Fall_methane = 0
+    index_l2x_Sl_tsrf = 0
+    index_l2x_Sl_topo = 0
+    index_l2x_Flgl_qice = 0
+    index_l2x_Sl_hr = 0
+    index_l2x_Sl_npp = 0
+    index_l2x_Sl_pftwgt = 0
+
+    index_x2l_Sa_z = 0
+    index_x2l_Sa_u = 0
+    index_x2l_Sa_v = 0
+    index_x2l_Sa_wsresp = 0
+    index_x2l_Sa_tau_est = 0
+    index_x2l_Sa_ugust = 0
+    index_x2l_Sa_ptem = 0
+    index_x2l_Sa_shum = 0
+    index_x2l_Sa_pbot = 0
+    index_x2l_Sa_tbot = 0
+    index_x2l_Sa_uovern = 10
+    index_x2l_Faxa_lwdn = 0
+    index_x2l_Faxa_rainc = 0
+    index_x2l_Faxa_rainl = 0
+    index_x2l_Faxa_snowc = 0
+    index_x2l_Faxa_snowl = 0
+    index_x2l_Faxa_swndr = 0
+    index_x2l_Faxa_swvdr = 0
+    index_x2l_Faxa_swndf = 0
+    index_x2l_Faxa_swvdf = 0
+    index_x2l_Sa_co2prog = 9
+    index_x2l_Sa_co2diag = 9
+    index_x2l_Faxa_bcphidry = 0
+    index_x2l_Faxa_bcphodry = 0
+    index_x2l_Faxa_bcphiwet = 0
+    index_x2l_Faxa_ocphidry = 0
+    index_x2l_Faxa_ocphodry = 0
+    index_x2l_Faxa_ocphiwet = 0
+    index_x2l_Faxa_dstwet1 = 0
+    index_x2l_Faxa_dstwet2 = 0
+    index_x2l_Faxa_dstwet3 = 0
+    index_x2l_Faxa_dstwet4 = 0
+    index_x2l_Faxa_dstdry1 = 0
+    index_x2l_Faxa_dstdry2 = 0
+    index_x2l_Faxa_dstdry3 = 0
+    index_x2l_Faxa_dstdry4 = 0
+
+    index_x2l_Flrr_flood = 1
+    index_x2l_Flrr_volr = 2
+    index_x2l_Flrr_volrmch = 3
+    index_x2l_Flrr_supply = 4
+    index_x2l_Flrr_deficit = 5
+    index_x2l_Sr_h2orof = 6
+    index_x2l_Sr_frac_h2orof = 7
+    index_x2l_So_ssh = 8
+    index_x2l_So_frac_h2oocn = 0
+    index_x2l_Sg_frac = 0
+    index_x2l_Sg_topo = 0
+    index_x2l_Flgg_hflx = 0
+    index_x2l_Sg_icemask = 0
+    index_x2l_Sg_icemask_coupled_fluxes = 0
+    index_x2l_Sa_methane = 0
+    index_x2l_Sz_pct_pft = 0
+    index_x2l_Sz_pct_pft_prev = 0
+    index_x2l_Sz_harvest_frac = 0
+  end subroutine elm_cpl_indices_set_offline
 
 !=======================================================================
 

@@ -1,0 +1,22 @@
+&offline_elm_nml
+  nl_filename = 'lnd_in'
+  pio_nl_filename = 'drv_in'
+  caseid = 'offline_elm'
+  ctitle = 'Offline ELM run'
+  version = 'offline'
+  hostname = 'offline'
+  username = 'offline'
+  calendar = 'NO_LEAP'
+  start_ymd = 20000101
+  start_tod = 0
+  ref_ymd = 20000101
+  ref_tod = 0
+  stop_ymd = 20000102
+  stop_tod = 0
+  nsrest = 0
+  atm_present = .false.
+  iac_present = .false.
+  use_lnd_rof_two_way = .false.
+  use_ocn_lnd_one_way = .false.
+  nextsw_cday = 1.0
+/

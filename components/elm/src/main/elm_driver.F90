@@ -20,6 +20,7 @@ module elm_driver
   use elm_varctl             , only : nsrest, nsrStartup
   use elm_varctl             , only : fates_radiation_model
   use elm_varctl             , only : finidat
+  use elm_varctl             , only : offline_driver_mode
   use elm_time_manager       , only : get_step_size, get_curr_date, get_ref_date, get_nstep, is_beg_curr_day, get_curr_time_string
   use elm_time_manager       , only : get_curr_calday, get_days_per_year
   use elm_varpar             , only : nlevsno, nlevgrnd, crop_prog
@@ -87,7 +88,7 @@ module elm_driver
   use filterMod              , only : setFilters
   !
   use atm2lndMod             , only : downscale_forcings, topographic_effects_on_radiation
-  use lnd2atmMod             , only : lnd2atm
+  use lnd2atmMod             , only : lnd2atm, lnd2atm_minimal
   use lnd2glcMod             , only : lnd2glc_type
   use lnd2iacMod             , only : lnd2iac_type
   use iac2lndMod             , only : iac2lnd_type
@@ -1442,11 +1443,18 @@ contains
     endif
 
     call t_startf('lnd2atm')
-    call lnd2atm(bounds_proc,                                   &
-         atm2lnd_vars, surfalb_vars, frictionvel_vars,          &
-         energyflux_vars, solarabs_vars, drydepvel_vars,        &
-         vocemis_vars, dust_vars, ch4_vars, soilhydrology_vars, &
-         sedflux_vars, lnd2atm_vars)
+    if (offline_driver_mode .and. .not. do_budgets .and. .not. use_cn .and. &
+         .not. use_fates .and. .not. use_lch4 .and. .not. use_betr) then
+       call lnd2atm_minimal(bounds_proc,                        &
+            surfalb_vars, solarabs_vars, energyflux_vars,       &
+            atm2lnd_vars, lnd2atm_vars)
+    else
+       call lnd2atm(bounds_proc,                                   &
+            atm2lnd_vars, surfalb_vars, frictionvel_vars,          &
+            energyflux_vars, solarabs_vars, drydepvel_vars,        &
+            vocemis_vars, dust_vars, ch4_vars, soilhydrology_vars, &
+            sedflux_vars, lnd2atm_vars)
+    end if
     call t_stopf('lnd2atm')
 
     ! ============================================================================

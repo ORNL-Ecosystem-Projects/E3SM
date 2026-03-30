@@ -15,6 +15,7 @@ module elm_time_manager
    public ::&
         get_timemgr_defaults,     &! get startup default values
         set_timemgr_init,         &! setup startup values
+        set_timemgr_quiet,        &! suppress time-manager startup summary
         timemgr_init,             &! time manager initialization
         timemgr_restart_io,       &! read/write time manager restart info and restart time manager
         timemgr_restart,          &! restart the time manager using info from timemgr_restart
@@ -104,6 +105,7 @@ module elm_time_manager
    logical, save :: tm_first_restart_step = .false.    ! true for first step of a restart or branch run
    logical, save :: tm_perp_calendar      = .false.    ! true when using perpetual calendar
    logical, save :: timemgr_set           = .false.    ! true when timemgr initialized
+   logical, save :: timemgr_quiet         = .false.    ! true when startup summary should be suppressed
    integer, save :: nestep                = uninit_int ! ending time-step
    integer, save :: nsstep                = 0          ! (re-)start time-step
    !
@@ -314,7 +316,7 @@ contains
 
     ! Print configuration summary to log file (stdout).
 
-    if (masterproc) call timemgr_print()
+    if (masterproc .and. .not. timemgr_quiet) call timemgr_print()
 
     timemgr_set = .true.
 
@@ -648,7 +650,7 @@ contains
 
     ! Print configuration summary to log file (stdout).
 
-    if (masterproc) call timemgr_print()
+    if (masterproc .and. .not. timemgr_quiet) call timemgr_print()
 
     timemgr_set = .true.
 
@@ -743,6 +745,8 @@ contains
     type(ESMF_Time) :: ref_date  ! reference date
     type(ESMF_TimeInterval) :: step ! Time-step
     !---------------------------------------------------------------------------------
+
+    if (timemgr_quiet) return
 
     call ESMF_ClockGet( tm_clock, startTime=start_date, currTime=curr_date, &
          refTime=ref_date, stopTime=stop_date, timeStep=step, &
@@ -1734,6 +1738,16 @@ contains
     call mpi_bcast (dtime    , 1, MPI_INTEGER  , 0, mpicom, ier)
 
   end subroutine timemgr_spmdbcast
+
+  !=========================================================================================
+
+  subroutine set_timemgr_quiet(quiet_in)
+
+    logical, intent(in) :: quiet_in
+
+    timemgr_quiet = quiet_in
+
+  end subroutine set_timemgr_quiet
 
   !=========================================================================================
   

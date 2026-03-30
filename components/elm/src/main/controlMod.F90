@@ -180,6 +180,7 @@ contains
     integer :: ierr                 ! error code
     integer :: unitn                ! unit for namelist file
     integer :: dtime                ! Integer time-step
+    integer :: dtime_default        ! Default time-step from time manager
     integer :: override_nsrest      ! If want to override the startup type sent from driver
     character(len=32) :: subname = 'control_init'  ! subroutine name
     !------------------------------------------------------------------------
@@ -448,6 +449,11 @@ contains
        if ( len_trim(NLFilename) == 0  )then
           call endrun(msg=' error: nlfilename not set'//errMsg(__FILE__, __LINE__))
        end if
+       call get_timemgr_defaults(dtime_out=dtime_default)
+       if (dtime <= 0) then
+          dtime = dtime_default
+       end if
+
        unitn = getavu()
        write(iulog,*) 'Read in elm_inparm namelist from: ', trim(NLFilename)
        open( unitn, file=trim(NLFilename), status='old' )
@@ -479,7 +485,9 @@ contains
        ! Consistency checks on input namelist.
        ! ----------------------------------------------------------------------
 
-       call set_timemgr_init( dtime_in=dtime )
+       if (dtime > 0) then
+          call set_timemgr_init( dtime_in=dtime )
+       end if
 
        if (urban_traffic) then
           write(iulog,*)'Urban traffic fluxes are not implemented currently'

@@ -91,6 +91,8 @@ contains
       apparent_albi_grc   => lnd2atm_vars%apparent_albi_grc   , &
       eflx_lwrad_out => veg_ef%eflx_lwrad_out , &
       eflx_lwrad_out_grc => lnd2atm_vars%eflx_lwrad_out_grc   , &
+      eflx_sh_tot => veg_ef%eflx_sh_tot , &
+      eflx_sh_tot_grc => lnd2atm_vars%eflx_sh_tot_grc      , &
       forc_solad_pp_grc  => atm2lnd_vars%forc_solad_pp_grc    , &
       forc_solai_pp_grc  => atm2lnd_vars%forc_solai_pp_grc    , &
       fsr_vis_d_patch    => solarabs_vars%fsr_vis_d_patch     , &
@@ -132,6 +134,15 @@ contains
          eflx_lwrad_out     (bounds%begp:bounds%endp), &
          eflx_lwrad_out_grc (bounds%begg:bounds%endg), &
          p2c_scale_type=unity, c2l_scale_type= urbanf, l2g_scale_type=unity)
+
+    call p2g( bounds, &
+         eflx_sh_tot     (bounds%begp:bounds%endp) , &
+         eflx_sh_tot_grc (bounds%begg:bounds%endg)     , &
+         p2c_scale_type=unity,c2l_scale_type=urbanf,l2g_scale_type=unity)
+
+    do g = bounds%begg, bounds%endg
+       eflx_sh_tot_grc(g) =  eflx_sh_tot_grc(g) - grc_ef%eflx_dynbal(g)
+    enddo
 
     if (use_finetop_rad) then
          do g = bounds%begg,bounds%endg
