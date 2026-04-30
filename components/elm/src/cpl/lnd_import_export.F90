@@ -242,21 +242,15 @@ contains
 
         if (atm2lnd_vars%loaded_bypassdata == 0) then
           !meteorological forcing
-          if (index(metdata_type, 'qian') .gt. 0) then 
-            atm2lnd_vars%metsource = 0   
-          else if (index(metdata_type,'cru') .gt. 0) then
-            atm2lnd_vars%metsource = 1  
-          else if (index(metdata_type,'site') .gt. 0) then 
-            atm2lnd_vars%metsource = 2
-          else if (index(metdata_type,'princeton') .gt. 0) then 
-            atm2lnd_vars%metsource = 3
-          else if (index(metdata_type,'gswp3') .gt. 0) then
-            atm2lnd_vars%metsource = 4
-          else if (index(metdata_type,'cpl') .gt. 0) then 
-            atm2lnd_vars%metsource = 5
-          else if (index(metdata_type,'era5') .gt. 0) then
-            atm2lnd_vars%metsource = 6
-          else
+            atm2lnd_vars%metsource = -1   
+          if (index(metdata_type,'qian') .gt. 0) atm2lnd_vars%metsource = 0   
+          if (index(metdata_type,'cru') .gt. 0) atm2lnd_vars%metsource = 1  
+          if (index(metdata_type,'site') .gt. 0) atm2lnd_vars%metsource = 2
+          if (index(metdata_type,'princeton') .gt. 0) atm2lnd_vars%metsource = 3
+          if (index(metdata_type,'gswp3') .gt. 0) atm2lnd_vars%metsource = 4
+          if (index(metdata_type,'cpl') .gt. 0) atm2lnd_vars%metsource = 5
+          if (index(metdata_type,'crujra') .gt. 0) atm2lnd_vars%metsource = 6
+          if (atm2lnd_vars%metsource == -1) then
             call endrun( sub//' ERROR: Invalid met data source for cpl_bypass' )
           end if
 
@@ -350,9 +344,9 @@ contains
             atm2lnd_vars%endyear_met_spinup = 590 !100
             atm2lnd_vars%endyear_met_trans  = 590 !100
           else if (atm2lnd_vars%metsource == 6) then
-            atm2lnd_vars%startyear_met      = 1950
+            atm2lnd_vars%startyear_met      = 1901
             atm2lnd_vars%endyear_met_spinup = 1970
-            atm2lnd_vars%endyear_met_trans  = 2025
+            atm2lnd_vars%endyear_met_trans  = 2024
           end if
 
           if (use_livneh) then 
@@ -468,7 +462,7 @@ contains
                     !metdata_fname = 'WCYCL1850S.ne30_' // trim(atm2lnd_vars%metvars(v)) // '_0076-0100_z' // zst(2:3) // '.nc'
                     metdata_fname = 'CBGC1850S.ne30_' // trim(atm2lnd_vars%metvars(v)) // '_0566-0590_z' // zst(2:3) // '.nc'
             else if (atm2lnd_vars%metsource == 6) then
-                metdata_fname = 'ERA5_' // trim(atm2lnd_vars%metvars(v)) // '_1950-2025_z' // zst(2:3) // '.nc'
+                metdata_fname = 'elmforc.TRENDY.c2025_0.5x0.5_' // trim(atm2lnd_vars%metvars(v)) // '_1901-2024_z' // zst(2:3) // '.nc'
             end if
   
             ierr = nf90_open(trim(metdata_bypass) // '/' // trim(metdata_fname), NF90_NOWRITE, met_ncids(v))
@@ -688,11 +682,12 @@ contains
         end if 
 
         !Water table
-        atm2lnd_vars%forc_zwt_not_downscaled_grc(g) = -1.0_R8*((atm2lnd_vars%atm_input(8,g,1,tindex(8,1))*atm2lnd_vars%scale_factors(8)+ &
+        if (use_humhol) then 
+          atm2lnd_vars%forc_zwt_not_downscaled_grc(g) = -1.0_R8*((atm2lnd_vars%atm_input(8,g,1,tindex(8,1))*atm2lnd_vars%scale_factors(8)+ &
                                                       atm2lnd_vars%add_offsets(8))*wt1(8) + (atm2lnd_vars%atm_input(8,g,1,tindex(8,2)) &
                                                       *atm2lnd_vars%scale_factors(8)+atm2lnd_vars%add_offsets(8))*wt2(8)) * &
                                                       atm2lnd_vars%var_mult(8,g,mon) + atm2lnd_vars%var_offset(8,g,mon) 
-
+        end if
 
         !Shortwave radiation (cosine zenith angle interpolation)
         thishr = (tod-get_step_size()/2)/3600
