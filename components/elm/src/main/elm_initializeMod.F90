@@ -1011,15 +1011,8 @@ contains
 
     if (nsrest == nsrStartup) then
        call t_startf('init_map2gc')
-       if (offline_driver_mode .and. .not. do_budgets .and. .not. use_cn .and. &
-            .not. use_fates .and. .not. use_lch4 .and. .not. use_betr) then
-          call lnd2atm_minimal(bounds_proc, surfalb_vars, solarabs_vars, energyflux_vars, &
-               atm2lnd_vars, lnd2atm_vars)
-       else
-          call lnd2atm(bounds_proc, atm2lnd_vars, surfalb_vars, frictionvel_vars, &
-               energyflux_vars, solarabs_vars, drydepvel_vars, vocemis_vars, dust_vars, &
-               ch4_vars, soilhydrology_vars, sedflux_vars, lnd2atm_vars)
-       end if
+       call lnd2atm_minimal(bounds_proc, surfalb_vars, solarabs_vars, energyflux_vars, &
+            atm2lnd_vars, lnd2atm_vars)
        call t_stopf('init_map2gc')
     end if
 

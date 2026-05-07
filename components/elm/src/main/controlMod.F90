@@ -105,7 +105,7 @@ module controlMod
                         use_snicar_frc, use_snicar_ad, use_firn_percolation_and_compaction, &
                         use_extrasnowlayers, use_T_rho_dependent_snowthk, &
                         use_vancouver, use_mexicocity, use_noio, use_finetop_rad, &
-                        use_shrub_moss_shading
+                        use_shrub_moss_shading, use_canopyflux_emulator
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -401,6 +401,8 @@ contains
          use_top_solar_rad, use_finetop_rad
     namelist /elm_inparm/ &
          use_shrub_moss_shading
+    namelist /elm_inparm/ &
+         use_canopyflux_emulator
 
     namelist /elm_mosart/ &
          lnd_rof_coupling_nstep
@@ -1096,6 +1098,7 @@ contains
     ! soil erosion
     call mpi_bcast (use_erosion, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (ero_ccycle , 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_canopyflux_emulator, 1, MPI_LOGICAL, 0, mpicom, ier)
 
     ! Budget
     call mpi_bcast (do_budgets   , 1, MPI_LOGICAL, 0, mpicom, ier)

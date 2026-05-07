@@ -412,6 +412,7 @@ module elm_varctl
   logical, public :: use_finetop_rad     = .false.  ! fineTOP : fine(grid)-scale topographic effect on surface radiation balance (longwave + shortwave)
   ! New namelist option: enable/disable shrub shading on moss
   logical, public :: use_shrub_moss_shading = .true. ! true => apply shrub shading to moss (default: enabled)
+  logical, public :: use_canopyflux_emulator = .false.
   real(r8), public :: boardwalk_shade_frac = 0._r8    ! fraction of ground area shaded by boardwalks [-]
   real(r8), public :: boardwalk_light_trans = 1._r8   ! shortwave transmissivity through boardwalk-shaded area [-]
   !----------------------------------------------------------
