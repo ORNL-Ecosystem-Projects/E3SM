@@ -1035,11 +1035,13 @@ contains
 
     if (nsrest == nsrStartup) then
        call t_startf('init_map2gc')
-       call lnd2atm_minimal(bounds_proc, surfalb_vars, solarabs_vars, energyflux_vars, atm2lnd_vars, lnd2atm_vars)
+       call lnd2atm_minimal(bounds_proc, surfalb_vars, solarabs_vars, energyflux_vars, &
+            atm2lnd_vars, lnd2atm_vars)
        call t_stopf('init_map2gc')
     else if ( use_finetop_rad .and. ((nsrest == nsrContinue) .or. (nsrest == nsrBranch))) then
        call t_startf('init_map2gc')
-       call lnd2atm_minimal(bounds_proc, surfalb_vars, solarabs_vars, energyflux_vars, atm2lnd_vars, lnd2atm_vars)
+       call lnd2atm_minimal(bounds_proc, surfalb_vars, solarabs_vars, energyflux_vars, &
+            atm2lnd_vars, lnd2atm_vars)
        call t_stopf('init_map2gc')
     end if
 

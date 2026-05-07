@@ -39,7 +39,9 @@ module elm_driver
   use LakeTemperatureMod     , only : LakeTemperature
   !
   use BareGroundFluxesMod    , only : BareGroundFluxes
-  use CanopyFluxesMod        , only : CanopyFluxes
+  use CanopyFluxesEmulatorMod, only : CanopyFluxesEmulator
+  use CanopyFluxesEmulatorMod, only : begin_canopyflux_training_capture, capture_canopyflux_training_debug
+  use CanopyFluxesEmulatorMod, only : finalize_canopyflux_training_capture, flush_canopyflux_training_capture
   use SedYieldMod            , only : SoilErosion
   use SoilFluxesMod          , only : SoilFluxes ! (formerly Biogeophysics2Mod)
   use UrbanFluxesMod         , only : UrbanFluxes
@@ -252,7 +254,7 @@ contains
 
     call get_curr_time_string(dateTimeString)
     if (masterproc) then
-       write(iulog,*)'Beginning timestep   : ',trim(dateTimeString)
+       ! write(iulog,*)'Beginning timestep   : ',trim(dateTimeString)
        call shr_sys_flush(iulog)
     endif
     ! Determine processor bounds and clumps for this processor
@@ -264,7 +266,6 @@ contains
     call get_curr_date(year_curr,mon_curr, day_curr,secs_curr)
     dayspyr_mod = get_days_per_year()
     jday_mod = get_curr_calday()
-
     if (mpi_sync_nstep_freq > 0) then
        if (mod(nstep_mod,mpi_sync_nstep_freq) == 0) then
           call MPI_Barrier(mpicom, ier)
@@ -677,13 +678,15 @@ contains
     ! snow accumulation exceeds 10 mm.
     ! ============================================================================
 
+    call begin_canopyflux_training_capture(bounds_proc)
+
     !$OMP PARALLEL DO PRIVATE (nc,l,c, bounds_clump)
     do nc = 1,nclumps
        call get_clump_bounds(nc, bounds_clump)
 
-       call t_startf('drvinit')
+      call t_startf('drvinit')
 
-       call UpdateDaylength(bounds_clump, declin)
+      call UpdateDaylength(bounds_clump, declin)
 
        ! Initialze variables needed for new driver time step
        call elm_drv_init(bounds_clump, &
@@ -795,7 +798,7 @@ contains
        ! and leaf water change by evapotranspiration
 
        call t_startf('canflux')
-       call CanopyFluxes(bounds_clump,                                                   &
+       call CanopyFluxesEmulator(bounds_clump,                                           &
             filter(nc)%num_nolakeurbanp, filter(nc)%nolakeurbanp,                        &
             atm2lnd_vars, canopystate_vars, cnstate_vars, energyflux_vars,               &
             frictionvel_vars, soilstate_vars, solarabs_vars, surfalb_vars,               &
@@ -892,6 +895,12 @@ contains
             atm2lnd_vars, solarabs_vars, canopystate_vars, &
             energyflux_vars )
        call t_stopf('bgp2')
+
+       call finalize_canopyflux_training_capture(bounds_clump,                    &
+            filter(nc)%num_nolakep, filter(nc)%nolakep,                           &
+            atm2lnd_vars, canopystate_vars, energyflux_vars, frictionvel_vars,    &
+            soilstate_vars, solarabs_vars, surfalb_vars, ch4_vars,                &
+            photosyns_vars, soilhydrology_vars)
 
        ! ============================================================================
        ! Perform averaging from patch level to column level
@@ -1256,6 +1265,11 @@ contains
 
        call t_stopf('hydro2 drainage')
 
+       ! Capture drainage diagnostics after the drainage step has populated
+       ! qflx_drain and qflx_rsub_sat. The earlier no-drainage capture point
+       ! leaves these fields at zero.
+       call capture_canopyflux_training_debug(filter(nc)%num_nolakep, filter(nc)%nolakep)
+
        if (use_betr) then
           call t_startf('betr drainage')
           call ep_betr%StepWithDrainage(bounds_clump, col_pp)
@@ -1421,6 +1435,8 @@ contains
 
     end do
     !$OMP END PARALLEL DO
+
+    call flush_canopyflux_training_capture()
 
     ! Pass fates seed dispersal information to all nodes
     if (use_fates) then
