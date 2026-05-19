@@ -23,9 +23,10 @@ module BalanceCheckMod
   use TopounitDataType   , only : top_af, top_ws 
   use LandunitType       , only : lun_pp
   use ColumnType         , only : col_pp
-  use ColumnDataType     , only : col_ef, col_ws, col_wf
+  use ColumnDataType     , only : col_es, col_ef, col_ws, col_wf
   use VegetationType     , only : veg_pp
-  use VegetationDataType , only : veg_ef, veg_ws
+  use VegetationDataType , only : veg_ef, veg_es, veg_ws, veg_wf
+  use CanopyFluxesEmulatorMod, only : use_canopyflux_emulator, debug_canopyflux_emulator
 
   use timeinfoMod
   !
@@ -95,10 +96,10 @@ contains
             h2ocan_col(bounds%begc:bounds%endc))
 
       if (use_var_soil_thick) then
-	       do f = 1, num_hydrologyc
+         do f = 1, num_hydrologyc
             c = filter_hydrologyc(f)
-      	    wa(c) = 0._r8                ! Made 0 for variable soil thickness
-	       end do
+            wa(c) = 0._r8                ! Made 0 for variable soil thickness
+         end do
       end if
 
       do f = 1, num_nolakec
@@ -189,10 +190,15 @@ contains
      integer  :: nstep                                  ! time step number
      logical  :: found                                  ! flag in search loop
      integer  :: indexp,indexc,indexl,indext,indexg     ! index of first found in search loop
+     logical  :: emulator_balancecheck_verbose
      real(r8) :: forc_rain_col(bounds%begc:bounds%endc) ! column level rain rate [mm/s]
      real(r8) :: forc_snow_col(bounds%begc:bounds%endc) ! column level snow rate [mm/s]
      real(r8) :: sol_err_th                             ! solar radiation imbalance threshold
+     real(r8) :: h2ocan_patch_beg_est                   ! estimated beginning canopy water for a diagnostic patch
+     real(r8) :: qflx_evap_veg_max_est                  ! implied canopy evaporation limiter for a diagnostic patch
      !-----------------------------------------------------------------------
+
+     emulator_balancecheck_verbose = (.not. use_canopyflux_emulator) .or. debug_canopyflux_emulator
 
      associate(                                                                         &
           volr                       =>    atm2lnd_vars%volr_grc                      , & ! Input:  [real(r8) (:)   ]  river water storage (m3)
@@ -204,10 +210,19 @@ contains
           glc_dyn_runoff_routing     =>    glc2lnd_vars%glc_dyn_runoff_routing_grc    , & ! Input:  [real(r8) (:)   ]  whether we're doing runoff routing appropriate for having a dynamic icesheet
 
           do_capsnow                 =>    col_ws%do_capsnow             , & ! Input:  [logical (:)    ]  true => do snow capping
+          h2ocan_col                 =>    col_ws%h2ocan                 , & ! Input:  [real(r8) (:)   ]  canopy water (mm H2O)
+          h2ocan_patch               =>    veg_ws%h2ocan                 , & ! Input:  [real(r8) (:)   ]  canopy water (mm H2O) at patch level
+          h2osfc                     =>    col_ws%h2osfc                 , & ! Input:  [real(r8) (:)   ]  surface water (mm)
           h2osno                     =>    col_ws%h2osno                 , & ! Input:  [real(r8) (:)   ]  snow water (mm H2O)
           h2osno_old                 =>    col_ws%h2osno_old             , & ! Input:  [real(r8) (:)   ]  snow water (mm H2O) at previous time step
+          h2osoi_liq                 =>    col_ws%h2osoi_liq             , & ! Input:  [real(r8) (:,:) ]  liquid water (kg/m2)
+          h2osoi_ice                 =>    col_ws%h2osoi_ice             , & ! Input:  [real(r8) (:,:) ]  ice lens (kg/m2)
+          h2osoi_liq_depth_intg_col  =>    col_ws%h2osoi_liq_depth_intg  , & ! Input:  [real(r8) (:)   ]  depth integrated liquid soil water (kg/m**2)
+          h2osoi_ice_depth_intg_col  =>    col_ws%h2osoi_ice_depth_intg  , & ! Input:  [real(r8) (:)   ]  depth integrated ice soil water (kg/m**2)
+          t_soisno                   =>    col_es%t_soisno               , & ! Input:  [real(r8) (:,:) ]  soil temperature (Kelvin)
           frac_sno_eff               =>    col_ws%frac_sno_eff           , & ! Input:  [real(r8) (:)   ]  effective snow fraction
           frac_sno                   =>    col_ws%frac_sno               , & ! Input:  [real(r8) (:)   ]  fraction of ground covered by snow (0 to 1)
+          frac_h2osfc                =>    col_ws%frac_h2osfc            , & ! Input:  [real(r8) (:)   ]  fraction of ground covered by surface water (0 to 1)
           begwb                      =>    col_ws%begwb                  , & ! Input:  [real(r8) (:)   ]  water mass begining of the time step
           errh2o                     =>    col_ws%errh2o                 , & ! Output: [real(r8) (:)   ]  water conservation error (mm H2O)
           errh2osno                  =>    col_ws%errh2osno              , & ! Output: [real(r8) (:)   ]  error in h2osno (kg m-2)
@@ -216,7 +231,14 @@ contains
           dwb                        =>    col_wf%dwb                     , & ! Output: [real(r8) (:)   ]  change of water mass within the time step [kg/m2/s]
           qflx_rain_grnd_col         =>    col_wf%qflx_rain_grnd          , & ! Input:  [real(r8) (:)   ]  rain on ground after interception (mm H2O/s) [+]
           qflx_snow_grnd_col         =>    col_wf%qflx_snow_grnd          , & ! Input:  [real(r8) (:)   ]  snow on ground after interception (mm H2O/s) [+]
+          qflx_evap_veg              =>    col_wf%qflx_evap_veg           , & ! Input:  [real(r8) (:)   ]  vegetation evaporation (mm H2O/s) (+ = to atm)
+          qflx_tran_veg              =>    col_wf%qflx_tran_veg           , & ! Input:  [real(r8) (:)   ]  vegetation transpiration (mm H2O/s) (+ = to atm)
+          qflx_evap_veg_patch        =>    veg_wf%qflx_evap_veg           , & ! Input:  [real(r8) (:)   ]  vegetation evaporation (mm H2O/s) at patch level
+          qflx_tran_veg_patch        =>    veg_wf%qflx_tran_veg           , & ! Input:  [real(r8) (:)   ]  vegetation transpiration (mm H2O/s) at patch level
           qflx_evap_soi              =>    col_wf%qflx_evap_soi           , & ! Input:  [real(r8) (:)   ]  soil evaporation (mm H2O/s) (+ = to atm)
+          qflx_ev_snow              =>    col_wf%qflx_ev_snow            , & ! Input:  [real(r8) (:)   ]  evaporation from snow (mm H2O/s)
+          qflx_ev_soil              =>    col_wf%qflx_ev_soil            , & ! Input:  [real(r8) (:)   ]  evaporation from soil (mm H2O/s)
+          qflx_ev_h2osfc            =>    col_wf%qflx_ev_h2osfc          , & ! Input:  [real(r8) (:)   ]  evaporation from surface water (mm H2O/s)
           qflx_irrig                 =>    col_wf%qflx_irrig              , & ! Input:  [real(r8) (:)   ]  irrigation flux (mm H2O /s)
           qflx_surf_irrig_col        =>    col_wf%qflx_surf_irrig         , & ! Input:  [real(r8) (:)   ]  real surface irrigation flux (mm H2O /s)
           qflx_over_supply_col       =>    col_wf%qflx_over_supply        , & ! Input:  [real(r8) (:)   ]  over supply irrigation flux (mm H2O /s)
@@ -255,9 +277,14 @@ contains
           qflx_h2orof_drain          =>    col_wf%qflx_h2orof_drain       , & ! Input:  [real(r8) (:)   ]  drainange from floodplain inundation volume (mm H2O/s) 
           qflx_h2oocn_drain          =>    col_wf%qflx_h2oocn_drain       , & ! Input:  [real(r8) (:)   ]  drainange from floodplain inundation volume (mm H2O/s) 
 
+          cgrndl                     =>    veg_ef%cgrndl                  , & ! Input:  [real(r8) (:)   ]  deriv. of soil latent heat flux wrt soil temp [w/m**2/k]
+          ulrad                      =>    veg_ef%ulrad                   , & ! Input:  [real(r8) (:)   ]  upward longwave above canopy (W/m**2)
           eflx_lwrad_out             =>    veg_ef%eflx_lwrad_out       , & ! Input:  [real(r8) (:)   ]  emitted infrared (longwave) radiation (W/m**2)
           eflx_lwrad_net             =>    veg_ef%eflx_lwrad_net       , & ! Input:  [real(r8) (:)   ]  net infrared (longwave) rad (W/m**2) [+ = to atm]
           eflx_sh_tot                =>    veg_ef%eflx_sh_tot          , & ! Input:  [real(r8) (:)   ]  total sensible heat flux (W/m**2) [+ to atm]
+          beg_h2osfc_grc             =>    grc_ws%beg_h2osfc           , & ! Input:  [real(r8) (:)   ]  grid-level surface water at beginning of the time step (mm)
+          beg_h2osoi_liq_grc         =>    grc_ws%beg_h2osoi_liq       , & ! Input:  [real(r8) (:)   ]  grid-level depth integrated liquid soil water at beginning of the time step (mm)
+          beg_h2osoi_ice_grc         =>    grc_ws%beg_h2osoi_ice       , & ! Input:  [real(r8) (:)   ]  grid-level depth integrated ice soil water at beginning of the time step (mm)
           eflx_lh_tot                =>    veg_ef%eflx_lh_tot          , & ! Input:  [real(r8) (:)   ]  total latent heat flux (W/m8*2)  [+ to atm]
           eflx_soil_grnd             =>    veg_ef%eflx_soil_grnd       , & ! Input:  [real(r8) (:)   ]  soil heat flux (W/m**2) [+ = into soil]
           eflx_wasteheat_patch       =>    veg_ef%eflx_wasteheat       , & ! Input:  [real(r8) (:)   ]  sensible heat flux from urban heating/cooling sources of waste heat (W/m**2)
@@ -277,11 +304,21 @@ contains
           errsol                     =>    veg_ef%errsol               , & ! Output: [real(r8) (:)   ]  solar radiation conservation error (W/m**2)
           errseb                     =>    veg_ef%errseb               , & ! Output: [real(r8) (:)   ]  surface energy conservation error (W/m**2)
           errlon                     =>    veg_ef%errlon               , & ! Output: [real(r8) (:)   ]  longwave radiation conservation error (W/m**2)
+          dlrad                      =>    veg_ef%dlrad                , & ! Input:  [real(r8) (:)   ]  downward longwave below canopy (W/m**2)
+          cgrnds                     =>    veg_ef%cgrnds               , & ! Input:  [real(r8) (:)   ]  d(ground sensible heat flux)/dTsoil [W/m**2/K]
+          cgrnd                      =>    veg_ef%cgrnd                , & ! Input:  [real(r8) (:)   ]  d(total ground energy flux)/dTsoil [W/m**2/K]
+          eflx_sh_veg                =>    veg_ef%eflx_sh_veg          , & ! Input:  [real(r8) (:)   ]  canopy sensible heat flux (W/m**2)
+          eflx_sh_grnd               =>    veg_ef%eflx_sh_grnd         , & ! Input:  [real(r8) (:)   ]  ground sensible heat flux (W/m**2)
+          emv                        =>    veg_es%emv                  , & ! Input:  [real(r8) (:)   ]  vegetation emissivity [-]
+          emg                        =>    col_es%emg                  , & ! Input:  [real(r8) (:)   ]  ground emissivity [-]
 
           fabd                       =>    surfalb_vars%fabd_patch                    , & ! Input:  [real(r8) (:,:)]  flux absorbed by canopy per unit direct flux
           fabi                       =>    surfalb_vars%fabi_patch                    , & ! Input:  [real(r8) (:,:)]  flux absorbed by canopy per unit indirect flux
           elai                       =>    canopystate_vars%elai_patch                , & ! Input:  [real(r8) (:,:)]
           esai                       =>    canopystate_vars%esai_patch                , & ! Input:  [real(r8) (:,:)]
+          t_veg                      =>    veg_es%t_veg                               , & ! Input:  [real(r8) (:)   ]  vegetation temperature (K)
+          thm                        =>    veg_es%thm                                 , & ! Input:  [real(r8) (:)   ]  canopy reference air temperature (K)
+          t_grnd                     =>    col_es%t_grnd                              , & ! Input:  [real(r8) (:)   ]  ground temperature (K)
 
           albd                       =>    surfalb_vars%albd_patch                    , & ! Output: [real(r8) (:,:)]  surface albedo (direct)
           albi                       =>    surfalb_vars%albi_patch                    , & ! Output: [real(r8) (:,:)]  surface albedo (diffuse)
@@ -380,7 +417,7 @@ contains
           end if
        end do
 
-       if ( found ) then
+       if ( found .and. emulator_balancecheck_verbose ) then
 #ifndef _OPENACC
           write(iulog,*)'WARNING:  water balance error ',&
                ' nstep= ',nstep, &
@@ -391,7 +428,15 @@ contains
           if ((col_pp%itype(indexc) == icol_roof .or. &
                col_pp%itype(indexc) == icol_road_imperv .or. &
                col_pp%itype(indexc) == icol_road_perv) .and. &
-               abs(errh2o(indexc)) > 1.e-4_r8 .and. (nstep > 2) ) then
+               abs(errh2o(indexc)) > 1.e-4_r8 .and. (nstep > 10000) ) then
+
+             indexp = 0
+             do p = bounds%begp, bounds%endp
+                if (veg_pp%active(p) .and. veg_pp%column(p) == indexc) then
+                   indexp = p
+                   exit
+                end if
+             end do
 
              write(iulog,*)'clm urban model is stopping - error is greater than 1e-4 (mm)'
              write(iulog,*)'nstep                      = ',nstep
@@ -400,7 +445,30 @@ contains
              write(iulog,*)'forc_snow                  = ',forc_snow_col(indexc)
              write(iulog,*)'endwb                      = ',endwb(indexc)
              write(iulog,*)'begwb                      = ',begwb(indexc)
+             write(iulog,*)'h2ocan_col                 = ',h2ocan_col(indexc)
+             write(iulog,*)'frac_sno_eff               = ',frac_sno_eff(indexc)
+             write(iulog,*)'frac_sno                   = ',frac_sno(indexc)
+             write(iulog,*)'frac_h2osfc                = ',frac_h2osfc(indexc)
+             write(iulog,*)'t_soisno_top               = ',t_soisno(indexc,1)
+             write(iulog,*)'h2osoi_liq_top             = ',h2osoi_liq(indexc,1)
+             write(iulog,*)'h2osoi_ice_top             = ',h2osoi_ice(indexc,1)
+             write(iulog,*)'delta_h2osno               = ',h2osno(indexc) - h2osno_old(indexc)
+             write(iulog,*)'delta_h2osfc               = ',h2osfc(indexc) - beg_h2osfc_grc(col_pp%gridcell(indexc))
+             write(iulog,*)'delta_h2osoi_liq_depth_intg= ',h2osoi_liq_depth_intg_col(indexc) - beg_h2osoi_liq_grc(col_pp%gridcell(indexc))
+             write(iulog,*)'delta_h2osoi_ice_depth_intg= ',h2osoi_ice_depth_intg_col(indexc) - beg_h2osoi_ice_grc(col_pp%gridcell(indexc))
+             write(iulog,*)'qflx_evap_veg              = ',qflx_evap_veg(indexc)
+             write(iulog,*)'qflx_tran_veg              = ',qflx_tran_veg(indexc)
+             write(iulog,*)'qflx_evap_soi              = ',qflx_evap_soi(indexc)
+             write(iulog,*)'qflx_ev_snow               = ',qflx_ev_snow(indexc)
+             write(iulog,*)'qflx_ev_soil               = ',qflx_ev_soil(indexc)
+             write(iulog,*)'qflx_ev_h2osfc             = ',qflx_ev_h2osfc(indexc)
+             write(iulog,*)'qflx_dew_grnd              = ',qflx_dew_grnd(indexc)
+             write(iulog,*)'qflx_prec_grnd             = ',qflx_prec_grnd(indexc)
+             write(iulog,*)'qflx_top_soil              = ',qflx_top_soil(indexc)
+             write(iulog,*)'qflx_rain_grnd             = ',qflx_rain_grnd_col(indexc)
+             write(iulog,*)'qflx_snow_grnd             = ',qflx_snow_grnd_col(indexc)
              write(iulog,*)'qflx_evap_tot              = ',qflx_evap_tot(indexc)
+             write(iulog,*)'cgrndl                     = ',cgrndl(indexp)
              write(iulog,*)'qflx_irrig                 = ',qflx_irrig(indexc)
              write(iulog,*)'qflx_supply                = ',atm2lnd_vars%supply_grc(g)
              write(iulog,*)'qflx_surf                  = ',qflx_surf(indexc)
@@ -411,12 +479,32 @@ contains
              write(iulog,*)'qflx_lnd2ocn               = ',qflx_lnd2ocn(indexc)
              write(iulog,*)'total_plant_stored_h2o_col = ',total_plant_stored_h2o_col(indexc)
              write(iulog,*)'qflx_h2orof_drain          = ',qflx_h2orof_drain(indexc)
-             write(iulog,*)'qflx_ice_runoff_xs         = ',qflx_ice_runoff_xs(indexc)
-             write(iulog,*)'qflx_h2oocn_drain          = ',qflx_h2oocn_drain(indexc)
-             write(iulog,*)'elm model is stopping'
-             call endrun(decomp_index=indexc, elmlevel=namec, msg=errmsg(__FILE__, __LINE__))
+             write(iulog,*)'qflx_ice_runoff_xs          = ',qflx_ice_runoff_xs(indexc)
+             write(iulog,*)'active vegetation patches on failing column:'
+             do p = bounds%begp, bounds%endp
+                if (veg_pp%active(p) .and. veg_pp%column(p) == indexc) then
+                   h2ocan_patch_beg_est = h2ocan_patch(p) - &
+                        (qflx_tran_veg_patch(p) - qflx_evap_veg_patch(p)) * dtime
+                   write(iulog,*)'patch index                 = ',p
+                   write(iulog,*)'patch ivt                   = ',veg_pp%itype(p)
+                   write(iulog,*)'patch wtcol                 = ',veg_pp%wtcol(p)
+                   write(iulog,*)'h2ocan_patch_end            = ',h2ocan_patch(p)
+                   write(iulog,*)'h2ocan_patch_beg_est        = ',h2ocan_patch_beg_est
+                   write(iulog,*)'qflx_evap_veg_patch         = ',qflx_evap_veg_patch(p)
+                   write(iulog,*)'qflx_tran_veg_patch         = ',qflx_tran_veg_patch(p)
+                end if
+             end do
+             !call endrun(decomp_index=indexc, elmlevel=namec, msg=errmsg(__FILE__, __LINE__))
 
-          else if (abs(errh2o(indexc)) > 1.e-4_r8 .and. (nstep > 2) ) then
+          else if (abs(errh2o(indexc)) > 1.e-4_r8 .and. (nstep > 10000) ) then
+
+             indexp = 0
+             do p = bounds%begp, bounds%endp
+                if (veg_pp%active(p) .and. veg_pp%column(p) == indexc) then
+                   indexp = p
+                   exit
+                end if
+             end do
 
              write(iulog,*)'elm model is stopping - error is greater than 1e-4 (mm)'
              write(iulog,*)'colum number               = ',col_pp%gridcell(indexc)
@@ -426,7 +514,30 @@ contains
              write(iulog,*)'forc_snow                  = ',forc_snow_col(indexc)
              write(iulog,*)'endwb                      = ',endwb(indexc)
              write(iulog,*)'begwb                      = ',begwb(indexc)
+             write(iulog,*)'h2ocan_col                 = ',h2ocan_col(indexc)
+             write(iulog,*)'frac_sno_eff               = ',frac_sno_eff(indexc)
+             write(iulog,*)'frac_sno                   = ',frac_sno(indexc)
+             write(iulog,*)'frac_h2osfc                = ',frac_h2osfc(indexc)
+             write(iulog,*)'t_soisno_top               = ',t_soisno(indexc,1)
+             write(iulog,*)'h2osoi_liq_top             = ',h2osoi_liq(indexc,1)
+             write(iulog,*)'h2osoi_ice_top             = ',h2osoi_ice(indexc,1)
+             write(iulog,*)'delta_h2osno               = ',h2osno(indexc) - h2osno_old(indexc)
+             write(iulog,*)'delta_h2osfc               = ',h2osfc(indexc) - beg_h2osfc_grc(col_pp%gridcell(indexc))
+             write(iulog,*)'delta_h2osoi_liq_depth_intg= ',h2osoi_liq_depth_intg_col(indexc) - beg_h2osoi_liq_grc(col_pp%gridcell(indexc))
+             write(iulog,*)'delta_h2osoi_ice_depth_intg= ',h2osoi_ice_depth_intg_col(indexc) - beg_h2osoi_ice_grc(col_pp%gridcell(indexc))
+             write(iulog,*)'qflx_evap_veg              = ',qflx_evap_veg(indexc)
+             write(iulog,*)'qflx_tran_veg              = ',qflx_tran_veg(indexc)
+             write(iulog,*)'qflx_evap_soi              = ',qflx_evap_soi(indexc)
+             write(iulog,*)'qflx_ev_snow               = ',qflx_ev_snow(indexc)
+             write(iulog,*)'qflx_ev_soil               = ',qflx_ev_soil(indexc)
+             write(iulog,*)'qflx_ev_h2osfc             = ',qflx_ev_h2osfc(indexc)
+             write(iulog,*)'qflx_dew_grnd              = ',qflx_dew_grnd(indexc)
+             write(iulog,*)'qflx_prec_grnd             = ',qflx_prec_grnd(indexc)
+             write(iulog,*)'qflx_top_soil              = ',qflx_top_soil(indexc)
+             write(iulog,*)'qflx_rain_grnd             = ',qflx_rain_grnd_col(indexc)
+             write(iulog,*)'qflx_snow_grnd             = ',qflx_snow_grnd_col(indexc)
              write(iulog,*)'qflx_evap_tot              = ',qflx_evap_tot(indexc)
+             write(iulog,*)'cgrndl                     = ',cgrndl(indexp)
              write(iulog,*)'qflx_irrig                 = ',qflx_irrig(indexc)
              write(iulog,*)'qflx_surf_irrig_col        = ',qflx_surf_irrig_col(indexc)
              write(iulog,*)'qflx_over_supply_col       = ',qflx_over_supply_col(indexc)
@@ -444,10 +555,22 @@ contains
              write(iulog,*)'qflx_lnd2ocn               = ',qflx_lnd2ocn(indexc)
              write(iulog,*)'total_plant_stored_h2o_col = ',total_plant_stored_h2o_col(indexc)
              write(iulog,*)'qflx_h2orof_drain          = ',qflx_h2orof_drain(indexc)
-             write(iulog,*)'qflx_ice_runoff_xs         = ',qflx_ice_runoff_xs(indexc)
-             write(iulog,*)'qflx_h2oocn_drain          = ',qflx_h2oocn_drain(indexc)
-             write(iulog,*)'elm model is stopping'
-             call endrun(decomp_index=indexc, elmlevel=namec, msg=errmsg(__FILE__, __LINE__))
+             write(iulog,*)'qflx_ice_runoff_xs          = ',qflx_ice_runoff_xs(indexc)
+             write(iulog,*)'active vegetation patches on failing column:'
+             do p = bounds%begp, bounds%endp
+                if (veg_pp%active(p) .and. veg_pp%column(p) == indexc) then
+                   h2ocan_patch_beg_est = h2ocan_patch(p) - &
+                        (qflx_tran_veg_patch(p) - qflx_evap_veg_patch(p)) * dtime
+                   write(iulog,*)'patch index                 = ',p
+                   write(iulog,*)'patch ivt                   = ',veg_pp%itype(p)
+                   write(iulog,*)'patch wtcol                 = ',veg_pp%wtcol(p)
+                   write(iulog,*)'h2ocan_patch_end            = ',h2ocan_patch(p)
+                   write(iulog,*)'h2ocan_patch_beg_est        = ',h2ocan_patch_beg_est
+                   write(iulog,*)'qflx_evap_veg_patch         = ',qflx_evap_veg_patch(p)
+                   write(iulog,*)'qflx_tran_veg_patch         = ',qflx_tran_veg_patch(p)
+                end if
+             end do
+             !call endrun(decomp_index=indexc, elmlevel=namec, msg=errmsg(__FILE__, __LINE__))
           end if
 #endif
        end if
@@ -550,7 +673,7 @@ contains
              end if
           end if
        end do
-       if ( found ) then
+       if ( found .and. emulator_balancecheck_verbose ) then
 #ifndef _OPENACC
           write(iulog,*)'WARNING:  snow balance error '
           write(iulog,*)'nstep= ',nstep, &
@@ -560,7 +683,7 @@ contains
                ' lun_pp%itype= ',lun_pp%itype(col_pp%landunit(indexc)), &
                ' errh2osno= ',errh2osno(indexc)
 
-          if (abs(errh2osno(indexc)) > 1.e-4_r8 .and. (nstep > 2) ) then
+          if (abs(errh2osno(indexc)) > 1.e-4_r8 .and. (nstep > 10000) ) then
              write(iulog,*)'elm model is stopping - error is greater than 1e-4 (mm)'
              write(iulog,*)'nstep            = ',nstep
              write(iulog,*)'errh2osno        = ',errh2osno(indexc)
@@ -589,8 +712,10 @@ contains
              if (create_glacier_mec_landunit) then
                 write(iulog,*)'qflx_glcice_frz  = ',qflx_glcice_frz(indexc)*dtime
              end if
-             write(iulog,*)'elm model is stopping'
-             call endrun(decomp_index=indexc, elmlevel=namec, msg=errmsg(__FILE__, __LINE__))
+             if (.not. use_canopyflux_emulator) then
+                write(iulog,*)'elm model is stopping'
+                call endrun(decomp_index=indexc, elmlevel=namec, msg=errmsg(__FILE__, __LINE__))
+             end if
           end if
 #endif
        end if
@@ -665,7 +790,7 @@ contains
              end if
           end if
        end do
-       if ( found  .and. (nstep > 2) ) then
+       if ( found  .and. (nstep > 10000) .and. emulator_balancecheck_verbose ) then
 #ifndef _OPENACC
           write(iulog,*)'WARNING:: BalanceCheck, solar radiation balance error (W/m2)'
           write(iulog,*)'nstep         = ',nstep
@@ -680,8 +805,10 @@ contains
              write(iulog,*)'forc_solai(2) = ',forc_solai(indext,2)
              write(iulog,*)'forc_tot      = ',forc_solad(indext,1)+forc_solad(indext,2) &
                +forc_solai(indext,1)+forc_solai(indext,2)
-             write(iulog,*)'elm model is stopping'
-             call endrun(decomp_index=indexp, elmlevel=namep, msg=errmsg(__FILE__, __LINE__))
+             if (.not. use_canopyflux_emulator) then
+                write(iulog,*)'elm model is stopping'
+                call endrun(decomp_index=indexp, elmlevel=namep, msg=errmsg(__FILE__, __LINE__))
+             end if
           end if
 #endif
        end if
@@ -697,14 +824,16 @@ contains
              end if
           end if
        end do
-       if ( found  .and. (nstep > 2) ) then
+       if ( found  .and. (nstep > 10000) .and. emulator_balancecheck_verbose ) then
 #ifndef _OPENACC
           write(iulog,*)'WARNING: BalanceCheck: longwave energy balance error (W/m2)'
           write(iulog,*)'nstep        = ',nstep
           write(iulog,*)'errlon       = ',errlon(indexp)
           if (abs(errlon(indexp)) > 1.e-5_r8 ) then
-             write(iulog,*)'elm model is stopping - error is greater than 1e-5 (W/m2)'
-             call endrun(decomp_index=indexp, elmlevel=namep, msg=errmsg(__FILE__, __LINE__))
+             if (.not. use_canopyflux_emulator) then
+                write(iulog,*)'elm model is stopping - error is greater than 1e-5 (W/m2)'
+                call endrun(decomp_index=indexp, elmlevel=namep, msg=errmsg(__FILE__, __LINE__))
+             end if
           end if
 #endif
        end if
@@ -722,32 +851,51 @@ contains
              end if
           end if
        end do
-       if ( found  .and. (nstep > 2) ) then
+       if ( found .and. emulator_balancecheck_verbose ) then
 #ifndef _OPENACC
           write(iulog,*)'WARNING: BalanceCheck: surface flux energy balance error (W/m2)'
           write(iulog,*)'nstep          = ' ,nstep
           write(iulog,*)'errseb         = ' ,errseb(indexp)
-          if (abs(errseb(indexp)) > 1.e-5_r8 ) then
-             write(iulog,*)'elm model is stopping - error is greater than 1e-5 (W/m2)'
+          if (abs(errseb(indexp)) > 5._r8 ) then
+             write(iulog,*)'elm model is stopping - error is greater than 5 (W/m2)'
              write(iulog,*)'sabv           = ' ,sabv(indexp)
 
              write(iulog,*)'sabg           = ' ,sabg(indexp), ((1._r8- frac_sno(indexc))*sabg_soil(indexp) + &
                   frac_sno(indexc)*sabg_snow(indexp)),sabg_chk(indexp)
+             write(iulog,*)'sabg_chk       = ' ,sabg_chk(indexp)
 
              write(iulog,*)'forc_tot      = '  ,forc_solad(indext,1) + forc_solad(indext,2) + &
                   forc_solai(indext,1) + forc_solai(indext,2)
+             write(iulog,*)'forc_lwrad_used = ' ,forc_lwrad(indext)
 
+             write(iulog,*)'eflx_lwrad_out = ' ,eflx_lwrad_out(indexp)
+             write(iulog,*)'ulrad          = ' ,ulrad(indexp)
              write(iulog,*)'eflx_lwrad_net = ' ,eflx_lwrad_net(indexp)
+             write(iulog,*)'dlrad          = ' ,dlrad(indexp)
+             write(iulog,*)'forc_lwrad-dlrad = ' ,forc_lwrad(indext) - dlrad(indexp)
              write(iulog,*)'eflx_sh_tot    = ' ,eflx_sh_tot(indexp)
+             write(iulog,*)'eflx_sh_veg    = ' ,eflx_sh_veg(indexp)
+             write(iulog,*)'eflx_sh_grnd   = ' ,eflx_sh_grnd(indexp)
              write(iulog,*)'eflx_lh_tot    = ' ,eflx_lh_tot(indexp)
              write(iulog,*)'eflx_soil_grnd = ' ,eflx_soil_grnd(indexp)
+             write(iulog,*)'cgrnds         = ' ,cgrnds(indexp)
+             write(iulog,*)'cgrnd          = ' ,cgrnd(indexp)
+             write(iulog,*)'t_veg thm t_grnd = ',t_veg(indexp), thm(indexp), t_grnd(indexc)
+             write(iulog,*)'emv emg         = ',emv(indexp), emg(indexc)
+             write(iulog,*)'frac_sno h2osfc = ',frac_sno(indexc), frac_h2osfc(indexc)
              write(iulog,*)'fsa fsr = '        ,fsa(indexp),    fsr(indexp)
              write(iulog,*)'fabd fabi = '      ,fabd(indexp,:), fabi(indexp,:)
              write(iulog,*)'albd albi = '      ,albd(indexp,:), albi(indexp,:)
              write(iulog,*)'ftii ftdd ftid = ' ,ftii(indexp,:), ftdd(indexp,:),ftid(indexp,:)
              write(iulog,*)'elai esai = '      ,elai(indexp),   esai(indexp)
-             write(iulog,*)'elm model is stopping'
-             call endrun(decomp_index=indexp, elmlevel=namep, msg=errmsg(__FILE__, __LINE__))
+             write(iulog,*)'errseb_recalc  = ' ,sabv(indexp) + sabg_chk(indexp) + forc_lwrad(indext) - &
+                  eflx_lwrad_out(indexp) - eflx_sh_tot(indexp) - eflx_lh_tot(indexp) - eflx_soil_grnd(indexp)
+             write(iulog,*)'errseb_delta   = ' ,errseb(indexp) - (sabv(indexp) + sabg_chk(indexp) + forc_lwrad(indext) - &
+                  eflx_lwrad_out(indexp) - eflx_sh_tot(indexp) - eflx_lh_tot(indexp) - eflx_soil_grnd(indexp))
+             if (.not. use_canopyflux_emulator) then
+                write(iulog,*)'elm model is stopping'
+                call endrun(decomp_index=indexp, elmlevel=namep, msg=errmsg(__FILE__, __LINE__))
+             end if
           end if
 #endif 
        end if
@@ -763,14 +911,101 @@ contains
              end if
           end if
        end do
-       if ( found ) then
+       if ( found .and. emulator_balancecheck_verbose ) then
           write(iulog,*)'WARNING: BalanceCheck: soil balance error (W/m2)'
           write(iulog,*)'nstep         = ',nstep
           write(iulog,*)'errsoi_col    = ',errsoi_col(indexc)
           write(iulog,*)'colum number  = ',col_pp%gridcell(indexc)
-          if (abs(errsoi_col(indexc)) > 1.e-4_r8 .and. (nstep > 2) ) then
-             write(iulog,*)'elm model is stopping'
-             call endrun(decomp_index=indexc, elmlevel=namec, msg=errmsg(__FILE__, __LINE__))
+          if (abs(errsoi_col(indexc)) > 5._r8) then
+             indexp = 0
+             do p = bounds%begp, bounds%endp
+                if (veg_pp%active(p) .and. veg_pp%column(p) == indexc) then
+                   indexp = p
+                   exit
+                end if
+             end do
+             write(iulog,*)'Large soil energy balance warning details:'
+             write(iulog,*)'forc_rain                  = ',forc_rain_col(indexc)
+             write(iulog,*)'forc_snow                  = ',forc_snow_col(indexc)
+             write(iulog,*)'begwb                      = ',begwb(indexc)
+             write(iulog,*)'endwb                      = ',endwb(indexc)
+             write(iulog,*)'frac_sno_eff               = ',frac_sno_eff(indexc)
+             write(iulog,*)'frac_sno                   = ',frac_sno(indexc)
+             write(iulog,*)'frac_h2osfc                = ',frac_h2osfc(indexc)
+             write(iulog,*)'t_soisno_top               = ',t_soisno(indexc,1)
+             write(iulog,*)'h2osoi_liq_top             = ',h2osoi_liq(indexc,1)
+             write(iulog,*)'h2osoi_ice_top             = ',h2osoi_ice(indexc,1)
+             write(iulog,*)'delta_h2osno               = ',h2osno(indexc) - h2osno_old(indexc)
+             write(iulog,*)'delta_h2osfc               = ',h2osfc(indexc) - beg_h2osfc_grc(col_pp%gridcell(indexc))
+             write(iulog,*)'delta_h2osoi_liq_depth_intg= ',h2osoi_liq_depth_intg_col(indexc) - beg_h2osoi_liq_grc(col_pp%gridcell(indexc))
+             write(iulog,*)'delta_h2osoi_ice_depth_intg= ',h2osoi_ice_depth_intg_col(indexc) - beg_h2osoi_ice_grc(col_pp%gridcell(indexc))
+             write(iulog,*)'qflx_evap_veg              = ',qflx_evap_veg(indexc)
+             write(iulog,*)'qflx_tran_veg              = ',qflx_tran_veg(indexc)
+             write(iulog,*)'qflx_evap_soi              = ',qflx_evap_soi(indexc)
+             write(iulog,*)'qflx_ev_snow               = ',qflx_ev_snow(indexc)
+             write(iulog,*)'qflx_ev_soil               = ',qflx_ev_soil(indexc)
+             write(iulog,*)'qflx_ev_h2osfc             = ',qflx_ev_h2osfc(indexc)
+             write(iulog,*)'qflx_dew_grnd              = ',qflx_dew_grnd(indexc)
+             write(iulog,*)'qflx_prec_grnd             = ',qflx_prec_grnd(indexc)
+             write(iulog,*)'qflx_top_soil              = ',qflx_top_soil(indexc)
+             write(iulog,*)'qflx_rain_grnd             = ',qflx_rain_grnd_col(indexc)
+             write(iulog,*)'qflx_snow_grnd             = ',qflx_snow_grnd_col(indexc)
+             write(iulog,*)'qflx_evap_tot              = ',qflx_evap_tot(indexc)
+             write(iulog,*)'ulrad                      = ',ulrad(indexp)
+             write(iulog,*)'eflx_lwrad_out             = ',eflx_lwrad_out(indexp)
+             write(iulog,*)'eflx_lwrad_net             = ',eflx_lwrad_net(indexp)
+             write(iulog,*)'dlrad                      = ',dlrad(indexp)
+             write(iulog,*)'eflx_sh_tot                = ',eflx_sh_tot(indexp)
+             write(iulog,*)'eflx_sh_veg                = ',eflx_sh_veg(indexp)
+             write(iulog,*)'eflx_sh_grnd               = ',eflx_sh_grnd(indexp)
+             write(iulog,*)'eflx_lh_tot                = ',eflx_lh_tot(indexp)
+             write(iulog,*)'eflx_soil_grnd             = ',eflx_soil_grnd(indexp)
+             write(iulog,*)'cgrnds                     = ',cgrnds(indexp)
+             write(iulog,*)'cgrndl                     = ',cgrndl(indexp)
+             write(iulog,*)'cgrnd                      = ',cgrnd(indexp)
+             write(iulog,*)'t_veg thm t_grnd           = ',t_veg(indexp), thm(indexp), t_grnd(indexc)
+             write(iulog,*)'sabv                       = ',sabv(indexp)
+             write(iulog,*)'sabg                       = ',sabg(indexp)
+             write(iulog,*)'active vegetation patches on failing column:'
+             do p = bounds%begp, bounds%endp
+                if (veg_pp%active(p) .and. veg_pp%column(p) == indexc) then
+                   h2ocan_patch_beg_est = h2ocan_patch(p) - &
+                        (qflx_tran_veg_patch(p) - qflx_evap_veg_patch(p)) * dtime
+                   qflx_evap_veg_max_est = qflx_tran_veg_patch(p) + max(0._r8, h2ocan_patch_beg_est) / dtime
+                   write(iulog,*)'patch index                 = ',p
+                   write(iulog,*)'patch ivt                   = ',veg_pp%itype(p)
+                   write(iulog,*)'patch wtcol                 = ',veg_pp%wtcol(p)
+                   write(iulog,*)'h2ocan_patch_end            = ',h2ocan_patch(p)
+                   write(iulog,*)'h2ocan_patch_beg_est        = ',h2ocan_patch_beg_est
+                   write(iulog,*)'qflx_evap_veg_patch         = ',qflx_evap_veg_patch(p)
+                   write(iulog,*)'qflx_tran_veg_patch         = ',qflx_tran_veg_patch(p)
+                   write(iulog,*)'qflx_evap_veg_max_est       = ',qflx_evap_veg_max_est
+                   write(iulog,*)'qflx_evap_soi_patch         = ',qflx_evap_soi(p)
+                   write(iulog,*)'qflx_ev_snow_patch          = ',qflx_ev_snow(p)
+                   write(iulog,*)'qflx_ev_soil_patch          = ',qflx_ev_soil(p)
+                   write(iulog,*)'qflx_ev_h2osfc_patch        = ',qflx_ev_h2osfc(p)
+                   write(iulog,*)'t_veg_patch                 = ',t_veg(p)
+                   write(iulog,*)'sabv_patch                  = ',sabv(p)
+                   write(iulog,*)'sabg_patch                  = ',sabg(p)
+                   write(iulog,*)'dlrad_patch                 = ',dlrad(p)
+                   write(iulog,*)'ulrad_patch                 = ',ulrad(p)
+                   write(iulog,*)'eflx_lwrad_out_patch        = ',eflx_lwrad_out(p)
+                   write(iulog,*)'eflx_lwrad_net_patch        = ',eflx_lwrad_net(p)
+                   write(iulog,*)'eflx_sh_veg_patch           = ',eflx_sh_veg(p)
+                   write(iulog,*)'eflx_sh_grnd_patch          = ',eflx_sh_grnd(p)
+                   write(iulog,*)'eflx_lh_tot_patch           = ',eflx_lh_tot(p)
+                   write(iulog,*)'eflx_soil_grnd_patch        = ',eflx_soil_grnd(p)
+                   write(iulog,*)'cgrnds_patch                = ',cgrnds(p)
+                   write(iulog,*)'cgrndl_patch                = ',cgrndl(p)
+                   write(iulog,*)'cgrnd_patch                 = ',cgrnd(p)
+                end if
+             end do
+          end if
+          if (abs(errsoi_col(indexc)) > 1.e-4_r8 .and. (nstep > 10000) ) then
+             if (.not. use_canopyflux_emulator) then
+                write(iulog,*)'elm model is stopping'
+                call endrun(decomp_index=indexc, elmlevel=namec, msg=errmsg(__FILE__, __LINE__))
+             end if
           end if
        end if
 

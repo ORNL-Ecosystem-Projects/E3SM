@@ -8,6 +8,7 @@ module surfrdMod
 #include "shr_assert.h"
   use shr_kind_mod    , only : r8 => shr_kind_r8
   use shr_log_mod     , only : errMsg => shr_log_errMsg
+  use shr_sys_mod     , only : shr_sys_flush
   use abortutils      , only : endrun
   use elm_varpar      , only : numpft, numcft
   use landunit_varcon , only : numurbl
@@ -132,6 +133,14 @@ contains
        end if
     end if
     if (.not. readvar) call endrun( msg=' ERROR: landmask not on fatmlndfrc file'//errMsg(__FILE__, __LINE__))
+
+    if (masterproc) then
+       write(*,*) trim(subname), ' debug locfn=', trim(locfn), ' isgrid2d=', isgrid2d, &
+            ' ni=', ni, ' nj=', nj, ' ns=', ns, ' readvar=', readvar
+       write(*,*) trim(subname), ' debug mask min/max=', minval(mask), maxval(mask)
+       write(*,*) trim(subname), ' debug mask first=', mask(1:min(ns,10))
+       call shr_sys_flush(6)
+    end if
 
     call ncd_pio_closefile(ncid)
 

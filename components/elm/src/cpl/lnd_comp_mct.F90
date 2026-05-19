@@ -574,6 +574,14 @@ contains
 #endif
     call t_stopf ('lc_lnd_import')
 
+    nstep = get_nstep()
+    if (nstep <= 5) then
+       write(iulog,*) 'online import debug nstep=', nstep, ' tbot=', &
+            atm2lnd_vars%forc_t_not_downscaled_grc(bounds%begg), ' fsds=', &
+            atm2lnd_vars%forc_solar_grc(bounds%begg), ' pco2=', &
+            atm2lnd_vars%forc_pco2_grc(bounds%begg)
+    end if
+
     ! Use infodata to set orbital values if updated mid-run
 
     call seq_infodata_GetData( infodata, orb_eccen=eccen, orb_mvelpp=mvelpp, &

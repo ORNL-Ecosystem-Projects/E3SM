@@ -29,6 +29,7 @@ module SatellitePhenologyMod
   use perf_mod        , only : t_startf, t_stopf
   use spmdMod         , only : masterproc
   use spmdMod         , only : mpicom, comp_id
+  use CanopyFluxesEmulatorMod, only : write_canopyflux_training_data
   use mct_mod
   use ncdio_pio   
   use topounit_varcon , only : max_topounits
@@ -59,6 +60,11 @@ module SatellitePhenologyMod
   real(r8), private, allocatable :: msai2t(:,:) ! sai for interpolation (2 months)
   real(r8), private, allocatable :: mhvt2t(:,:) ! top vegetation height for interpolation (2 months)
   real(r8), private, allocatable :: mhvb2t(:,:) ! bottom vegetation height for interpolation(2 months)
+  logical, save :: lai_sai_training_cycle_initialized = .false.
+  integer, save :: lai_sai_training_start_year = -huge(1)
+  real(r8), save :: lai_sai_training_start_calday = 0._r8
+  integer, save :: lai_sai_training_start_sec = 0
+  real(r8), parameter :: lai_sai_training_cycle_years = 10._r8
   !-----------------------------------------------------------------------
 
 contains
@@ -318,6 +324,7 @@ contains
     integer  :: fp,p,c                            ! indices
     real(r8) :: ol                                ! thickness of canopy layer covered by snow (m)
     real(r8) :: fb                                ! fraction of canopy layer covered by snow
+    real(r8) :: lai_sai_training_multiplier
     !-----------------------------------------------------------------------
 
     associate(                                                           &
@@ -335,6 +342,8 @@ contains
       if (use_lai_streams) then
          call lai_interp(bounds, canopystate_vars)
       endif
+
+      lai_sai_training_multiplier = 1._r8
 
       do fp = 1, num_filter
          p = filter(fp)
@@ -363,6 +372,11 @@ contains
          tsai(p) = timwt(1)*msai2t(p,1) + timwt(2)*msai2t(p,2)
          htop(p) = timwt(1)*mhvt2t(p,1) + timwt(2)*mhvt2t(p,2)
          hbot(p) = timwt(1)*mhvb2t(p,1) + timwt(2)*mhvb2t(p,2)
+
+         if (write_canopyflux_training_data) then
+            tlai(p) = tlai(p) * lai_sai_training_multiplier
+            tsai(p) = tsai(p) * lai_sai_training_multiplier
+         end if
 
          ! adjust lai and sai for burying by snow. if exposed lai and sai
          ! are less than 0.05, set equal to zero to prevent numerical
@@ -404,6 +418,33 @@ contains
     end associate
 
   end subroutine SatellitePhenology
+
+  real(r8) function training_lai_sai_multiplier() result(mult)
+    use elm_time_manager, only : get_curr_date, get_curr_calday, get_days_per_year
+    use elm_varcon      , only : secspday
+
+    integer :: year, mon, day, sec
+    real(r8) :: days_per_year, elapsed_years
+
+    mult = 1._r8
+    if (.not. write_canopyflux_training_data) return
+
+    call get_curr_date(year, mon, day, sec)
+    if (.not. lai_sai_training_cycle_initialized) then
+       lai_sai_training_start_year = year
+       lai_sai_training_start_calday = get_curr_calday()
+       lai_sai_training_start_sec = sec
+       lai_sai_training_cycle_initialized = .true.
+    end if
+
+    days_per_year = real(get_days_per_year(), r8)
+    elapsed_years = real(year - lai_sai_training_start_year, r8) + &
+         (((get_curr_calday() - lai_sai_training_start_calday) * secspday) + &
+         real(sec - lai_sai_training_start_sec, r8)) / (days_per_year * secspday)
+    if (elapsed_years < 0._r8) elapsed_years = 0._r8
+    mult = 2._r8 * modulo(elapsed_years, lai_sai_training_cycle_years) / lai_sai_training_cycle_years
+    mult = max(1.0e-6_r8, mult)
+  end function training_lai_sai_multiplier
 
   !-----------------------------------------------------------------------
   subroutine interpMonthlyVeg (bounds, canopystate_vars)

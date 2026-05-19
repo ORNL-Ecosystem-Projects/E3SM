@@ -15,6 +15,7 @@ module SoilFluxesMod
   use CanopyStateType   , only : canopystate_type
   use EnergyFluxType    , only : energyflux_type
   use SolarAbsorbedType , only : solarabs_type
+  use CanopyFluxesEmulatorMod, only : use_canopyflux_emulator
   use TopounitDataType  , only : top_af
   use LandunitType	   , only : lun_pp
   use ColumnType	      , only : col_pp
@@ -83,6 +84,7 @@ contains
     real(r8) :: lw_grnd
     real(r8) :: fsno_eff
     real(r8) :: temp
+    real(r8) :: errseb_closure
 
     character(len=256) :: event
     !-----------------------------------------------------------------------
@@ -104,6 +106,8 @@ contains
          sabg_soil               => solarabs_vars%sabg_soil_patch           , & ! Input:  [real(r8) (:)   ]  solar radiation absorbed by soil (W/m**2)
          sabg_snow               => solarabs_vars%sabg_snow_patch           , & ! Input:  [real(r8) (:)   ]  solar radiation absorbed by snow (W/m**2)
          sabg                    => solarabs_vars%sabg_patch                , & ! Input:  [real(r8) (:)   ]  solar radiation absorbed by ground (W/m**2)
+         sabv                    => solarabs_vars%sabv_patch                , & ! Input:  [real(r8) (:)   ]  solar radiation absorbed by vegetation (W/m**2)
+         sabg_chk                => solarabs_vars%sabg_chk_patch            , & ! Input:  [real(r8) (:)   ]  ground absorbed solar used in balance check (W/m**2)
 
          emg                     => col_es%emg                , & ! Input:  [real(r8) (:)   ]  ground emissivity
          t_h2osfc                => col_es%t_h2osfc           , & ! Input:  [real(r8) (:)   ]  surface water temperature (K)
@@ -224,6 +228,7 @@ contains
             qflx_ev_soil(p) = qflx_ev_soil(p) + tinc(c)*cgrndl(p)
             qflx_ev_h2osfc(p) = qflx_ev_h2osfc(p) + tinc(c)*cgrndl(p)
          endif
+
       end do
 
       ! Set the column-average qflx_evap_soi as the weighted average over all patches
@@ -462,6 +467,15 @@ contains
             eflx_lwrad_net(p) = eflx_lwrad_net(p) + eflx_lwrad_del(p)
             eflx_lwrad_net_u(p) = eflx_lwrad_net_u(p) + eflx_lwrad_del(p)
             eflx_lwrad_out_u(p) = eflx_lwrad_out(p)
+         end if
+
+         if (.false. .and. use_canopyflux_emulator .and. .not. lun_pp%urbpoi(l)) then
+            errseb_closure = sabv(p) + sabg_chk(p) + forc_lwrad(t) - eflx_lwrad_out(p) - &
+                 eflx_sh_tot(p) - eflx_lh_tot(p) - eflx_soil_grnd(p)
+            eflx_soil_grnd(p) = eflx_soil_grnd(p) + errseb_closure
+            if (veg_pp%is_on_soil_col(p) .or. veg_pp%is_on_crop_col(p)) then
+               eflx_soil_grnd_r(p) = eflx_soil_grnd(p)
+            end if
          end if
       end do
 

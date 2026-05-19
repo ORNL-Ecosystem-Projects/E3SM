@@ -101,6 +101,7 @@ contains
     use pftvarcon          , only : irrigated
     use elm_varcon         , only : c14ratio
     use shr_const_mod      , only : SHR_CONST_PI
+    use elm_time_manager   , only : get_curr_date, get_nstep
 
     !NEW
     use elm_varsur         , only : firrig
@@ -1300,6 +1301,17 @@ contains
          cgrnds(p) = cgrnds(p) + cpair*forc_rho(t)*wtg(p)*wtal(p)
          cgrndl(p) = cgrndl(p) + forc_rho(t)*wtgq(p)*wtalq(p)*dqgdT(c)
          cgrnd(p)  = cgrnds(p) + cgrndl(p)*htvp(c)
+
+         if (masterproc .and. get_nstep() == 8 .and. p == 2) then
+            write(*,*) 'CanopyFluxes native longwave: nstep=', get_nstep(), &
+                 ' patch=', p, ' ivt=', veg_pp%itype(p), ' t_veg=', t_veg(p), &
+                 ' dlrad=', dlrad(p), ' ulrad=', ulrad(p), ' forc_lwrad=', forc_lwrad(t), &
+                 ' emv=', emv(p), ' emg=', emg(c), ' frac_sno=', frac_sno(c), &
+                 ' frac_h2osfc=', frac_h2osfc(c), &
+                 ' eflx_sh_tot=', eflx_sh_veg(p) + eflx_sh_grnd(p), &
+                 ' eflx_sh_veg=', eflx_sh_veg(p), ' eflx_sh_grnd=', eflx_sh_grnd(p), &
+                 ' cgrnds=', cgrnds(p), ' cgrnd=', cgrnd(p)
+         end if
 
          ! Update dew accumulation (kg/m2)
 

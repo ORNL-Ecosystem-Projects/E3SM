@@ -401,6 +401,20 @@ contains
            atm2lnd_vars, urbanparams_vars, canopystate_vars, &
            solarabs_vars, energyflux_vars)
 
+      ! Persist the implicit upper-boundary thermal terms in energyflux_vars
+      ! for downstream diagnostics and training-data capture, regardless of
+      ! which thermal solver branch is used.
+      call Prepare_Data_for_EM_PTM_Driver(bounds, &
+           num_nolakec,                           &
+           filter_nolakec,                        &
+           sabg_lyr_col(begc:endc, -nlevsno+1:),  &
+           dhsdT( begc:endc ),                    &
+           hs_soil( begc:endc ),                  &
+           hs_top_snow( begc:endc ),              &
+           hs_h2osfc( begc:endc ),                &
+           energyflux_vars                        &
+           )
+
       ! Determine heat diffusion through the layer interface and factor used in computing
       ! banded diagonal matrix and set up vector r and vectors a, b, c that define banded
       ! diagonal matrix and solve system
@@ -479,17 +493,6 @@ contains
       case (petsc_thermal_model)
 #ifdef USE_PETSC_LIB
          update_temperature = .false.
-        call Prepare_Data_for_EM_PTM_Driver(bounds, &
-             num_nolakec_and_nourbanc,              &
-             filter_nolakec_and_nourbanc,           &
-             sabg_lyr_col(begc:endc, -nlevsno+1:),  &
-             dhsdT( begc:endc ),                    &
-             hs_soil( begc:endc ),                  &
-             hs_top_snow( begc:endc ),              &
-             hs_h2osfc( begc:endc ),                &
-             energyflux_vars                        &
-             )
-
         call EMI_Driver(EM_ID_PTM,                                      &
              EM_PTM_TBASED_SOLVE_STAGE,                                 &
               dt = dtime,                               &

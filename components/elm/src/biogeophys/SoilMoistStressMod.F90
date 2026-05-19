@@ -360,6 +360,13 @@ contains
          h2osoi_vol    => col_ws%h2osoi_vol    , & ! Input:  [real(r8) (:,:) ]  volumetric soil water (0<=h2osoi_vol<=watsat) [m3/m3]
          h2osoi_liqvol => col_ws%h2osoi_liqvol   & ! Output: [real(r8) (:,:) ]  liquid volumetric moisture, will be used for BeTR
          )
+
+      do f = 1, fn
+         p = filterp(f)
+         btran(p)  = 0._r8
+         btran2(p) = 0._r8
+      end do
+
       do j = 1,nlevgrnd
          do f = 1, fn
             p = filterp(f)

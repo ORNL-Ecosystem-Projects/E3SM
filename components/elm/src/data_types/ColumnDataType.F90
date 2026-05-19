@@ -1336,6 +1336,7 @@ contains
     !
     ! !LOCAL VARIABLES:
     logical :: readvar   ! determine if variable is on initial file
+    integer :: c
     !-----------------------------------------------------------------------
 
     call restartvar(ncid=ncid, flag=flag, varname='T_SOISNO', xtype=ncd_double,   &

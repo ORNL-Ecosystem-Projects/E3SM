@@ -42,6 +42,7 @@ module dynSubgridDriverMod
   use ColumnType          , only : col_pp
   use VegetationType      , only : veg_pp
   use elm_varctl          , only : iulog
+  use perf_mod
   !
   ! !PUBLIC MEMBER FUNCTIONS:
   implicit none
@@ -245,11 +246,13 @@ contains
     do nc = 1, nclumps
        call get_clump_bounds(nc, bounds_clump)
 
+       call t_startf('dynsub_hwcontent_init')
        call dyn_hwcontent_init(bounds_clump, &
             filter(nc)%num_nolakec, filter(nc)%nolakec, &
             filter(nc)%num_lakec, filter(nc)%lakec, &
             urbanparams_vars, soilstate_vars, soilhydrology_vars, lakestate_vars, &
             energyflux_vars)
+       call t_stopf('dynsub_hwcontent_init')
 
        call set_prior_weights(prior_weights, bounds_clump)
        call set_old_patch_weights  (patch_state_updater,bounds_clump)
@@ -262,19 +265,27 @@ contains
     ! ==========================================================================
 
     if (get_do_transient_pfts()) then
+       call t_startf('dynsub_interp_pft')
        call dynpft_interp(bounds_proc)
+       call t_stopf('dynsub_interp_pft')
     end if
 
     if (get_do_transient_crops()) then
+       call t_startf('dynsub_interp_crop')
        call dyncrop_interp(bounds_proc,crop_vars)
+       call t_stopf('dynsub_interp_crop')
     end if
 
     if (get_do_harvest() .or. fates_harvest_mode == fates_harvest_hlmlanduse) then
+       call t_startf('dynsub_interp_harvest')
        call dynHarvest_interp_harvest_types(bounds_proc)
+       call t_stopf('dynsub_interp_harvest')
     end if
 
     if (use_fates_luh .and. .not. use_fates_potentialveg) then
+       call t_startf('dynsub_interp_fates_luh')
        call dynFatesLandUseInterp(bounds_proc)
+       call t_stopf('dynsub_interp_fates_luh')
     end if
 
     ! pft and harvest come from iac when active
@@ -282,7 +293,9 @@ contains
     !       may want to ensure this with namelist checks
 
     if (iac_present) then
+       call t_startf('dynsub_iac_update')
        call iac2lnd_vars%update_iac2lnd(bounds_proc)
+       call t_stopf('dynsub_iac_update')
     end if
 
     ! ==========================================================================
@@ -291,14 +304,18 @@ contains
 
     !$OMP PARALLEL DO PRIVATE (nc, bounds_clump)
     do nc = 1, nclumps
-       call get_clump_bounds(nc, bounds_clump)
+      call get_clump_bounds(nc, bounds_clump)
 
-       if (use_fates) then
+      if (use_fates) then
+          call t_startf('dynsub_dyn_ed')
           call dyn_ED(bounds_clump)
+          call t_stopf('dynsub_dyn_ed')
        end if
 
-       if (create_glacier_mec_landunit) then
+      if (create_glacier_mec_landunit) then
+          call t_startf('dynsub_glc_update')
           call glc2lnd_vars%update_glc2lnd(bounds_clump)
+          call t_stopf('dynsub_glc_update')
        end if
        !if (create_glacier_mec_landunit) then
       !    call glc2lnd_vars_update_glc2lnd_acc(glc2lnd_vars ,bounds_clump)
@@ -309,24 +326,33 @@ contains
        ! first time step of the run to update filters to reflect state of CISM
        ! (particularly mask that is past through coupler).
 
+       call t_startf('dynsub_wrapup_weights')
        call dynSubgrid_wrapup_weight_changes(bounds_clump, glc2lnd_vars)
+       call t_stopf('dynsub_wrapup_weights')
        call set_new_patch_weights (patch_state_updater ,bounds_clump)
        call set_new_column_weights(column_state_updater,bounds_clump, nc)
 
 
+       call t_startf('dynsub_diag_fields')
        call set_subgrid_diagnostic_fields(bounds_clump)
+       call t_stopf('dynsub_diag_fields')
 
+       call t_startf('dynsub_init_newcols')
        call initialize_new_columns(bounds_clump, &
             prior_weights%cactive(bounds_clump%begc:bounds_clump%endc), soilhydrology_vars )
+       call t_stopf('dynsub_init_newcols')
 
 
+       call t_startf('dynsub_hwcontent_final')
        call dyn_hwcontent_final(bounds_clump, &
             filter(nc)%num_nolakec, filter(nc)%nolakec, &
             filter(nc)%num_lakec, filter(nc)%lakec, &
             urbanparams_vars, soilstate_vars, soilhydrology_vars, lakestate_vars, &
             energyflux_vars, dt)
+       call t_stopf('dynsub_hwcontent_final')
 
-       if (use_cn) then
+      if (use_cn) then
+          call t_startf('dynsub_cnbal_patch')
           call dyn_cnbal_patch(bounds_clump, &
                filter_inactive_and_active(nc)%num_soilp, filter_inactive_and_active(nc)%soilp, &
                filter_inactive_and_active(nc)%num_soilc, filter_inactive_and_active(nc)%soilc, &
@@ -335,8 +361,10 @@ contains
                canopystate_vars, photosyns_vars, cnstate_vars, &
                veg_cs, c13_veg_cs, c14_veg_cs, &
                veg_ns, veg_ps, dt)
+          call t_stopf('dynsub_cnbal_patch')
 
           ! Transfer root/seed litter C/N/P to decomposer pools
+          call t_startf('dynsub_stateupdate_patch')
           call CarbonStateUpdateDynPatch(bounds_clump, &
                filter_inactive_and_active(nc)%num_soilc, filter_inactive_and_active(nc)%soilc,dt)
 
@@ -345,13 +373,16 @@ contains
 
           call PhosphorusStateUpdateDynPatch(bounds_clump, &
                filter_inactive_and_active(nc)%num_soilc, filter_inactive_and_active(nc)%soilc,dt)
+          call t_stopf('dynsub_stateupdate_patch')
 
        end if
 
        if(use_cn .or. use_fates)then
+          call t_startf('dynsub_cnbal_column')
           call dyn_cnbal_column(bounds_clump, nc, column_state_updater, &
                col_cs, c13_col_cs, c14_col_cs, &
                col_ns, col_ps )
+          call t_stopf('dynsub_cnbal_column')
        end if
 
     end do
@@ -384,23 +415,33 @@ contains
       )
     !SHR_ASSERT(bounds_clump%level == BOUNDS_LEVEL_CLUMP, subname // ': argument must be CLUMP-level bounds')
 
+    call t_startf('dynsub_update_landunit_wts')
     call update_landunit_weights(bounds_clump)
+    call t_stopf('dynsub_update_landunit_wts')
 
+    call t_startf('dynsub_higher_order_wts')
     call compute_higher_order_weights(bounds_clump)
+    call t_stopf('dynsub_higher_order_wts')
 
     if (iac_present) then
        ! make sure weights are all in order before applying the new pft wts
        ! this is because the active elements need to be correct
+       call t_startf('dynsub_reweight_iac_prep')
        call reweight_wrapup(bounds_clump, &
             glc2lnd_vars%icemask_grc(bounds_clump%begg:bounds_clump%endg))
+       call t_stopf('dynsub_reweight_iac_prep')
+       call t_startf('dynsub_set_iac_veg_wts')
        call set_iac_veg_weights(bounds_clump)
+       call t_stopf('dynsub_set_iac_veg_wts')
     end if
 
     ! Here: filters are re-made
     !
     ! This call requires clump-level bounds, which is why we need to ensure that the
     ! argument to this routine is clump-level bounds
+    call t_startf('dynsub_reweight_wrapup')
     call reweight_wrapup(bounds_clump, icemask_grc(bounds_clump%begg:bounds_clump%endg))
+    call t_stopf('dynsub_reweight_wrapup')
 
     end associate
   end subroutine dynSubgrid_wrapup_weight_changes
