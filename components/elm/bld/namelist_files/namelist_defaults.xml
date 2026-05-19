@@ -691,6 +691,7 @@ this mask will have smb calculated over the entire global land surface
 <use_finetop_rad>.false.</use_finetop_rad>
 <!-- Enable shrub shading on moss  -->
 <use_shrub_moss_shading>.false.</use_shrub_moss_shading>
+<use_canopyflux_emulator>.false.</use_canopyflux_emulator>
 
 <!-- SNICAR (SNow, ICe, and Aerosol Radiative model) datasets -->
 <!--  ***********  Resolution independent:   ***********  -->

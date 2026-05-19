@@ -171,6 +171,11 @@ If TRUE, apply flux limiter to phenology fluxes to avoid overextraction
 of plant carbon and nutrient fluxes
 </entry>
 
+<entry id="use_canopyflux_emulator" type="logical" category="elm_physics"
+       group="elm_inparm" valid_values="" >
+If TRUE, use the canopy flux emulator instead of the native canopy flux calculation.
+</entry>
+
 <entry id="create_crop_landunit" type="logical" category="elm_physics"
        group="elm_inparm" valid_values="" >
 If TRUE, separate the vegetated landunit into a crop landunit and a natural vegetation landunit

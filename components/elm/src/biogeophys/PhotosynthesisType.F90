@@ -256,17 +256,17 @@ contains
          avgflag='A', long_name='Product-limited photosynthesis', &
          ptr_patch=this%fpsn_wp_patch, set_lake=0._r8, set_urb=0._r8)
 
+    this%psnsun_patch(begp:endp) = spval
+    call hist_addfld1d (fname='PSNSUN', units='umolCO2/m^2/s', &
+         avgflag='A', long_name='sunlit leaf photosynthesis', &
+         ptr_patch=this%psnsun_patch)
+
+    this%psnsha_patch(begp:endp) = spval
+    call hist_addfld1d (fname='PSNSHA', units='umolCO2/m^2/s', &
+         avgflag='A', long_name='shaded leaf photosynthesis', &
+         ptr_patch=this%psnsha_patch)
+
     if (use_cn) then
-       this%psnsun_patch(begp:endp) = spval
-       call hist_addfld1d (fname='PSNSUN', units='umolCO2/m^2/s', &
-            avgflag='A', long_name='sunlit leaf photosynthesis', &
-            ptr_patch=this%psnsun_patch)
-
-       this%psnsha_patch(begp:endp) = spval
-       call hist_addfld1d (fname='PSNSHA', units='umolCO2/m^2/s', &
-            avgflag='A', long_name='shaded leaf photosynthesis', &
-            ptr_patch=this%psnsha_patch)
-
        this%vcmax25_top_patch(begp:endp) = spval
        call hist_addfld1d (fname='VCMAX25TOP', units='umolCO2/m^2/s', &
             avgflag='A', long_name='vcmax at top canopy at 25oC', &

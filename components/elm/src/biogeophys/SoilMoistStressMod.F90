@@ -371,6 +371,12 @@ contains
          h2osfc        => col_ws%h2osfc                          & ! Input:  [real(r8) (:)   ]  surface water (mm)
          ) 
 
+      do f = 1, fn
+         p = filterp(f)
+         btran(p)  = 0._r8
+         btran2(p) = 0._r8
+      end do
+
       do j = 1,nlevgrnd
          do f = 1, fn
             p = filterp(f)
