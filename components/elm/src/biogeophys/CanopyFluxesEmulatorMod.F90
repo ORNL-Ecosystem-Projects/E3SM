@@ -37,11 +37,13 @@ module CanopyFluxesEmulatorMod
   use SoilMoistStressMod    , only : calc_effective_soilporosity, calc_volumetric_h2oliq
   use SoilMoistStressMod    , only : calc_root_moist_stress, set_perchroot_opt
   use elm_varpar            , only : numpft, nlevgrnd
-   use elm_varcon            , only : denice, denh2o, sb, cpair, hvap, secspday
+  use elm_varcon            , only : denice, denh2o, sb, cpair, hvap, secspday
+  use elm_varcon            , only : nameg, namep
+  use GetGlobalValuesMod    , only : GetGlobalIndex
   use spmdMod               , only : masterproc, mpicom
-   use elm_time_manager      , only : get_curr_date, get_curr_calday, get_days_per_year
-   use elm_time_manager      , only : get_nstep, get_step_size
-   use elm_varctl            , only : caseid
+  use elm_time_manager      , only : get_curr_date, get_curr_calday, get_days_per_year
+  use elm_time_manager      , only : get_nstep, get_step_size
+  use elm_varctl            , only : caseid
   use shr_mpi_mod           , only : shr_mpi_gathScatVInit, shr_mpi_gatherv
   use netcdf                , only : nf90_clobber, nf90_noerr, nf90_double, nf90_int, nf90_global
   use netcdf                , only : nf90_create, nf90_open, nf90_def_dim, nf90_def_var
@@ -913,13 +915,15 @@ contains
   subroutine flush_canopyflux_training_capture()
 
     real(r8), allocatable :: local_patch_ids(:)
-    real(r8), allocatable :: local_cell_ids(:)
+    real(r8), allocatable :: local_pft_ids(:)
+    real(r8), allocatable :: local_gridcell_ids(:)
     real(r8), allocatable :: local_features_flat(:)
     real(r8), allocatable :: local_targets_flat(:)
     real(r8), allocatable :: local_debug_flat(:)
     real(r8), allocatable :: local_params_flat(:)
     real(r8), pointer :: global_patch_ids(:) => null()
-    real(r8), pointer :: global_cell_ids(:) => null()
+    real(r8), pointer :: global_pft_ids(:) => null()
+    real(r8), pointer :: global_gridcell_ids(:) => null()
     real(r8), pointer :: global_features_flat(:) => null()
     real(r8), pointer :: global_targets_flat(:) => null()
     real(r8), pointer :: global_debug_flat(:) => null()
@@ -934,8 +938,10 @@ contains
     integer :: year, mon, day, sec, nstep
     integer, pointer :: patch_counts(:) => null()
     integer, pointer :: patch_displs(:) => null()
-    integer, pointer :: cell_counts(:) => null()
-    integer, pointer :: cell_displs(:) => null()
+    integer, pointer :: pft_counts(:) => null()
+    integer, pointer :: pft_displs(:) => null()
+    integer, pointer :: gridcell_counts(:) => null()
+    integer, pointer :: gridcell_displs(:) => null()
     integer, pointer :: feature_counts(:) => null()
     integer, pointer :: feature_displs(:) => null()
     integer, pointer :: target_counts(:) => null()
@@ -953,13 +959,15 @@ contains
     allocate(local_params(size(captured_features,1), canopyflux_emulator_num_params))
     local_params(:,:) = 0._r8
     allocate(local_patch_ids(local_natveg_count))
-    allocate(local_cell_ids(local_natveg_count))
+    allocate(local_pft_ids(local_natveg_count))
+    allocate(local_gridcell_ids(local_natveg_count))
     allocate(local_features_flat(local_natveg_count * canopyflux_emulator_num_features))
     allocate(local_targets_flat(local_natveg_count * canopyflux_emulator_num_targets))
     allocate(local_debug_flat(local_natveg_count * canopyflux_emulator_num_debug))
     allocate(local_params_flat(local_natveg_count * canopyflux_emulator_num_params))
 
-    call assemble_canopyflux_emulator_params(size(captured_features,1), [(captured_begp + slot - 1, slot=1,size(captured_features,1))], local_params)
+    call assemble_canopyflux_emulator_params(size(captured_features,1), &
+         [(captured_begp + slot - 1, slot=1,size(captured_features,1))], local_params)
 
     sample = 0
     do slot = 1, size(captured_natveg_mask)
@@ -967,7 +975,8 @@ contains
        sample = sample + 1
        p = captured_begp + slot - 1
        local_patch_ids(sample) = real(veg_pp%itype(p), r8)
-       local_cell_ids(sample)  = real(p, r8)
+       local_pft_ids(sample)  = real(GetGlobalIndex(p, namep), r8)
+       local_gridcell_ids(sample) = real(GetGlobalIndex(veg_pp%gridcell(p), nameg), r8)
        local_features_flat((sample-1)*canopyflux_emulator_num_features + 1 : sample*canopyflux_emulator_num_features) = &
             captured_features(slot,:)
        local_targets_flat((sample-1)*canopyflux_emulator_num_targets + 1 : sample*canopyflux_emulator_num_targets) = &
@@ -981,11 +990,16 @@ contains
     call shr_mpi_gathScatvInit(mpicom, 0, local_patch_ids, global_patch_ids, patch_counts, patch_displs)
     call shr_mpi_gatherv(local_patch_ids, size(local_patch_ids), global_patch_ids, patch_counts, patch_displs, 0, mpicom)
 
-    call shr_mpi_gathScatvInit(mpicom, 0, local_cell_ids, global_cell_ids, cell_counts, cell_displs)
-    call shr_mpi_gatherv(local_cell_ids, size(local_cell_ids), global_cell_ids, cell_counts, cell_displs, 0, mpicom)
+    call shr_mpi_gathScatvInit(mpicom, 0, local_pft_ids, global_pft_ids, pft_counts, pft_displs)
+    call shr_mpi_gatherv(local_pft_ids, size(local_pft_ids), global_pft_ids, pft_counts, pft_displs, 0, mpicom)
+
+    call shr_mpi_gathScatvInit(mpicom, 0, local_gridcell_ids, global_gridcell_ids, gridcell_counts, gridcell_displs)
+    call shr_mpi_gatherv(local_gridcell_ids, size(local_gridcell_ids), global_gridcell_ids, &
+         gridcell_counts, gridcell_displs, 0, mpicom)
 
     call shr_mpi_gathScatvInit(mpicom, 0, local_features_flat, global_features_flat, feature_counts, feature_displs)
-    call shr_mpi_gatherv(local_features_flat, size(local_features_flat), global_features_flat, feature_counts, feature_displs, 0, mpicom)
+    call shr_mpi_gatherv(local_features_flat, size(local_features_flat), global_features_flat, &
+         feature_counts, feature_displs, 0, mpicom)
 
     call shr_mpi_gathScatvInit(mpicom, 0, local_targets_flat, global_targets_flat, target_counts, target_displs)
     call shr_mpi_gatherv(local_targets_flat, size(local_targets_flat), global_targets_flat, target_counts, target_displs, 0, mpicom)
@@ -1001,12 +1015,17 @@ contains
        if (global_natveg_count == 0) then
           capture_ready = .false.
           deallocate(global_patch_ids, global_features_flat, global_targets_flat, global_debug_flat, global_params_flat)
+          if (associated(global_pft_ids)) deallocate(global_pft_ids)
+          if (associated(global_gridcell_ids)) deallocate(global_gridcell_ids)
           if (associated(patch_counts)) deallocate(patch_counts, patch_displs)
+          if (associated(pft_counts)) deallocate(pft_counts, pft_displs)
+          if (associated(gridcell_counts)) deallocate(gridcell_counts, gridcell_displs)
           if (associated(feature_counts)) deallocate(feature_counts, feature_displs)
           if (associated(target_counts)) deallocate(target_counts, target_displs)
           if (associated(debug_counts)) deallocate(debug_counts, debug_displs)
           if (associated(param_counts)) deallocate(param_counts, param_displs)
-          deallocate(local_patch_ids, local_features_flat, local_targets_flat, local_debug_flat, local_params_flat, local_params)
+          deallocate(local_patch_ids, local_pft_ids, local_gridcell_ids, local_features_flat, &
+               local_targets_flat, local_debug_flat, local_params_flat, local_params)
           return
        end if
        allocate(global_features(global_natveg_count, canopyflux_emulator_num_features))
@@ -1025,32 +1044,38 @@ contains
        end do
        call get_curr_date(year, mon, day, sec)
        nstep = get_nstep()
-       call write_canopyflux_training_netcdf(global_patch_ids, global_cell_ids, global_features, global_targets, global_debug, global_params, year, mon, day, sec, nstep)
+       call write_canopyflux_training_netcdf(global_patch_ids, global_pft_ids, global_gridcell_ids, &
+            global_features, global_targets, global_debug, global_params, year, mon, day, sec, nstep)
        deallocate(global_features, global_targets, global_debug, global_params)
     end if
 
     if (associated(patch_counts)) deallocate(patch_counts, patch_displs)
-    if (associated(cell_counts)) deallocate(cell_counts, cell_displs)
+    if (associated(pft_counts)) deallocate(pft_counts, pft_displs)
+    if (associated(gridcell_counts)) deallocate(gridcell_counts, gridcell_displs)
     if (associated(feature_counts)) deallocate(feature_counts, feature_displs)
     if (associated(target_counts)) deallocate(target_counts, target_displs)
     if (associated(debug_counts)) deallocate(debug_counts, debug_displs)
     if (associated(param_counts)) deallocate(param_counts, param_displs)
     if (associated(global_patch_ids)) deallocate(global_patch_ids)
-    if (associated(global_cell_ids)) deallocate(global_cell_ids)
+    if (associated(global_pft_ids)) deallocate(global_pft_ids)
+    if (associated(global_gridcell_ids)) deallocate(global_gridcell_ids)
     if (associated(global_features_flat)) deallocate(global_features_flat)
     if (associated(global_targets_flat)) deallocate(global_targets_flat)
     if (associated(global_debug_flat)) deallocate(global_debug_flat)
     if (associated(global_params_flat)) deallocate(global_params_flat)
-    deallocate(local_patch_ids, local_cell_ids, local_features_flat, local_targets_flat, local_debug_flat, local_params_flat, local_params)
+    deallocate(local_patch_ids, local_pft_ids, local_gridcell_ids, local_features_flat, &
+         local_targets_flat, local_debug_flat, local_params_flat, local_params)
 
     capture_ready = .false.
 
   end subroutine flush_canopyflux_training_capture
 
-  subroutine write_canopyflux_training_netcdf(patch_ids_r8, cell_ids_r8, features, targets, debug, params, year, mon, day, sec, nstep)
+  subroutine write_canopyflux_training_netcdf(patch_ids_r8, pft_ids_r8, gridcell_ids_r8, &
+       features, targets, debug, params, year, mon, day, sec, nstep)
 
     real(r8), intent(in) :: patch_ids_r8(:)
-    real(r8), intent(in) :: cell_ids_r8(:)
+    real(r8), intent(in) :: pft_ids_r8(:)
+    real(r8), intent(in) :: gridcell_ids_r8(:)
     real(r8), intent(in) :: features(:,:)
     real(r8), intent(in) :: targets(:,:)
     real(r8), intent(in) :: debug(:,:)
@@ -1058,7 +1083,7 @@ contains
     integer , intent(in) :: year, mon, day, sec, nstep
 
     integer :: ncid, dim_sample, dim_feature, dim_target, dim_debug, dim_param
-    integer :: var_patch, var_cell, var_nstep, var_year, var_month, var_day, var_sec
+    integer :: var_patch, var_cell, var_pft, var_gridcell, var_nstep, var_year, var_month, var_day, var_sec
     integer :: var_features, var_targets, var_debug, var_params
     integer :: sample_start
     integer :: sample_count
@@ -1066,6 +1091,8 @@ contains
     integer :: status
     integer, allocatable :: patch_ids(:)
     integer, allocatable :: cell_ids(:)
+    integer, allocatable :: pft_ids(:)
+    integer, allocatable :: gridcell_ids(:)
     integer, allocatable :: nstep_vec(:), year_vec(:), month_vec(:), day_vec(:), sec_vec(:)
     real(r8), allocatable :: features_out(:,:), targets_out(:,:), debug_out(:,:), params_out(:,:)
     character(len=256) :: file_name
@@ -1073,8 +1100,12 @@ contains
 
     allocate(patch_ids(size(patch_ids_r8)))
     patch_ids(:) = int(patch_ids_r8(:))
-    allocate(cell_ids(size(cell_ids_r8)))
-    cell_ids(:) = int(cell_ids_r8(:))
+    allocate(pft_ids(size(pft_ids_r8)))
+    pft_ids(:) = int(pft_ids_r8(:))
+    allocate(cell_ids(size(pft_ids_r8)))
+    cell_ids(:) = pft_ids(:)
+    allocate(gridcell_ids(size(gridcell_ids_r8)))
+    gridcell_ids(:) = int(gridcell_ids_r8(:))
     sample_count = size(patch_ids)
     allocate(nstep_vec(sample_count), year_vec(sample_count), month_vec(sample_count), day_vec(sample_count), sec_vec(sample_count))
     allocate(features_out(canopyflux_emulator_num_features, sample_count))
@@ -1109,8 +1140,12 @@ contains
        else
           file_exists = .false.
        end if
-       ! Require cell_index variable; recreate the file if it is absent (old format).
+       ! Require explicit PFT and gridcell index variables; recreate old-format files.
        status = nf90_inq_varid(ncid, 'cell_index', var_cell)
+       if (status /= nf90_noerr) file_exists = .false.
+       status = nf90_inq_varid(ncid, 'pft_index', var_pft)
+       if (status /= nf90_noerr) file_exists = .false.
+       status = nf90_inq_varid(ncid, 'gridcell_index', var_gridcell)
        if (status /= nf90_noerr) file_exists = .false.
        call netcdf_check(nf90_inq_dimid(ncid, 'param', dim_param), 'inq_dimid param')
        call netcdf_check(nf90_inquire_dimension(ncid, dim_param, len=file_param_count), 'inquire_dimension param')
@@ -1128,8 +1163,17 @@ contains
        call netcdf_check(nf90_create(trim(file_name), nf90_clobber, ncid), 'create '//trim(file_name))
        call netcdf_check(nf90_put_att(ncid, nf90_global, 'title', 'ELM canopy-flux training data'), 'put_att title')
        call netcdf_check(nf90_put_att(ncid, nf90_global, 'case', trim(caseid)), 'put_att case')
-       call netcdf_check(nf90_put_att(ncid, nf90_global, 'patch_filter', 'natural vegetation only (istsoil)'), 'put_att patch_filter')
-       call netcdf_check(nf90_put_att(ncid, nf90_global, 'patch_index_meaning', 'veg_pp%itype (PFT index), not raw patch id'), 'put_att patch_index_meaning')
+       call netcdf_check(nf90_put_att(ncid, nf90_global, 'patch_filter', &
+            'natural vegetation only (istsoil)'), 'put_att patch_filter')
+       call netcdf_check(nf90_put_att(ncid, nf90_global, 'patch_index_meaning', &
+            'veg_pp%itype (PFT index), not raw patch id'), 'put_att patch_index_meaning')
+       call netcdf_check(nf90_put_att(ncid, nf90_global, 'pft_index_meaning', &
+            'global ELM PFT subgrid index (namep)'), 'put_att pft_index_meaning')
+       call netcdf_check(nf90_put_att(ncid, nf90_global, 'cell_index_meaning', &
+            'deprecated alias of pft_index'), 'put_att cell_index_meaning')
+       call netcdf_check(nf90_put_att(ncid, nf90_global, 'gridcell_index_meaning', &
+            'global ELM gridcell index corresponding to each PFT sample (nameg)'), &
+            'put_att gridcell_index_meaning')
        call netcdf_check(nf90_put_att(ncid, nf90_global, 'feature_names', canopyflux_feature_names), 'put_att feature_names')
        call netcdf_check(nf90_put_att(ncid, nf90_global, 'target_names', canopyflux_target_names), 'put_att target_names')
        call netcdf_check(nf90_put_att(ncid, nf90_global, 'debug_names', &
@@ -1149,6 +1193,8 @@ contains
 
        call netcdf_check(nf90_def_var(ncid, 'patch_index', nf90_int, (/dim_sample/), var_patch), 'def_var patch_index')
        call netcdf_check(nf90_def_var(ncid, 'cell_index',  nf90_int, (/dim_sample/), var_cell),  'def_var cell_index')
+       call netcdf_check(nf90_def_var(ncid, 'pft_index',  nf90_int, (/dim_sample/), var_pft),  'def_var pft_index')
+       call netcdf_check(nf90_def_var(ncid, 'gridcell_index', nf90_int, (/dim_sample/), var_gridcell), 'def_var gridcell_index')
        call netcdf_check(nf90_def_var(ncid, 'nstep', nf90_int, (/dim_sample/), var_nstep), 'def_var nstep')
        call netcdf_check(nf90_def_var(ncid, 'year', nf90_int, (/dim_sample/), var_year), 'def_var year')
        call netcdf_check(nf90_def_var(ncid, 'month', nf90_int, (/dim_sample/), var_month), 'def_var month')
@@ -1167,6 +1213,8 @@ contains
        sample_start = sample_start + 1
        call netcdf_check(nf90_inq_varid(ncid, 'patch_index', var_patch), 'inq_varid patch_index')
        call netcdf_check(nf90_inq_varid(ncid, 'cell_index',  var_cell),  'inq_varid cell_index')
+       call netcdf_check(nf90_inq_varid(ncid, 'pft_index', var_pft), 'inq_varid pft_index')
+       call netcdf_check(nf90_inq_varid(ncid, 'gridcell_index', var_gridcell), 'inq_varid gridcell_index')
        call netcdf_check(nf90_inq_varid(ncid, 'nstep', var_nstep), 'inq_varid nstep')
        call netcdf_check(nf90_inq_varid(ncid, 'year', var_year), 'inq_varid year')
        call netcdf_check(nf90_inq_varid(ncid, 'month', var_month), 'inq_varid month')
@@ -1178,8 +1226,14 @@ contains
        call netcdf_check(nf90_inq_varid(ncid, 'parameters', var_params), 'inq_varid parameters')
     end if
 
-    call netcdf_check(nf90_put_var(ncid, var_patch, patch_ids, start=(/sample_start/), count=(/sample_count/)), 'put_var patch_index')
-    call netcdf_check(nf90_put_var(ncid, var_cell,  cell_ids,  start=(/sample_start/), count=(/sample_count/)), 'put_var cell_index')
+    call netcdf_check(nf90_put_var(ncid, var_patch, patch_ids, start=(/sample_start/), &
+         count=(/sample_count/)), 'put_var patch_index')
+    call netcdf_check(nf90_put_var(ncid, var_cell,  cell_ids,  start=(/sample_start/), &
+         count=(/sample_count/)), 'put_var cell_index')
+    call netcdf_check(nf90_put_var(ncid, var_pft, pft_ids, start=(/sample_start/), &
+         count=(/sample_count/)), 'put_var pft_index')
+    call netcdf_check(nf90_put_var(ncid, var_gridcell, gridcell_ids, start=(/sample_start/), &
+         count=(/sample_count/)), 'put_var gridcell_index')
     call netcdf_check(nf90_put_var(ncid, var_nstep, nstep_vec, start=(/sample_start/), count=(/sample_count/)), 'put_var nstep')
     call netcdf_check(nf90_put_var(ncid, var_year, year_vec, start=(/sample_start/), count=(/sample_count/)), 'put_var year')
     call netcdf_check(nf90_put_var(ncid, var_month, month_vec, start=(/sample_start/), count=(/sample_count/)), 'put_var month')
@@ -1196,7 +1250,8 @@ contains
     call netcdf_check(nf90_close(ncid), 'close')
     canopyflux_training_file_initialized = .true.
 
-    deallocate(patch_ids, cell_ids, nstep_vec, year_vec, month_vec, day_vec, sec_vec, features_out, targets_out, debug_out, params_out)
+    deallocate(patch_ids, cell_ids, pft_ids, gridcell_ids, nstep_vec, year_vec, month_vec, day_vec, sec_vec, &
+         features_out, targets_out, debug_out, params_out)
 
   end subroutine write_canopyflux_training_netcdf
 
