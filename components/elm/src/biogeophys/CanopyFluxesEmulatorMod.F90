@@ -82,7 +82,7 @@ module CanopyFluxesEmulatorMod
   logical, save :: capture_ready = .false.
   logical, save :: reported_required_pfts = .false.
   logical, save :: reported_emulator_outputs = .false.
-  logical, save :: canopyflux_training_file_initialized = .false.
+  ! (per-patch output files — existence determined via inquire, no flag needed)
   integer, save :: info3330_reset_nstep = -1
   real(r8), save :: canopyflux_native_time_total = 0._r8
   real(r8), save :: canopyflux_emulator_time_total = 0._r8
@@ -914,6 +914,7 @@ contains
 
   subroutine flush_canopyflux_training_capture()
 
+    ! Gather all patches to masterproc, then write one netCDF file per PFT type.
     real(r8), allocatable :: local_patch_ids(:)
     real(r8), allocatable :: local_pft_ids(:)
     real(r8), allocatable :: local_gridcell_ids(:)
@@ -932,9 +933,10 @@ contains
     real(r8), allocatable :: global_targets(:,:)
     real(r8), allocatable :: global_debug(:,:)
     real(r8), allocatable :: global_params(:,:)
-    integer :: local_natveg_count
-    integer :: global_natveg_count
-    integer :: slot, sample, p
+    real(r8), allocatable :: pft_patch_ids(:), pft_pft_ids(:), pft_gridcell_ids(:)
+    real(r8), allocatable :: pft_features(:,:), pft_targets(:,:), pft_debug(:,:), pft_params(:,:)
+    integer :: local_natveg_count, global_natveg_count
+    integer :: slot, sample, p, i, j, ivt, pft_count
     integer :: year, mon, day, sec, nstep
     integer, pointer :: patch_counts(:) => null()
     integer, pointer :: patch_displs(:) => null()
@@ -952,7 +954,7 @@ contains
     integer, pointer :: param_displs(:) => null()
     real(r8), allocatable :: local_params(:,:)
 
-   if (.not. canopyflux_training_capture_enabled()) return
+    if (.not. canopyflux_training_capture_enabled()) return
     if (.not. capture_ready) return
 
     local_natveg_count = count(captured_natveg_mask)
@@ -974,8 +976,8 @@ contains
        if (.not. captured_natveg_mask(slot)) cycle
        sample = sample + 1
        p = captured_begp + slot - 1
-       local_patch_ids(sample) = real(veg_pp%itype(p), r8)
-       local_pft_ids(sample)  = real(GetGlobalIndex(p, namep), r8)
+       local_patch_ids(sample)    = real(veg_pp%itype(p), r8)
+       local_pft_ids(sample)      = real(GetGlobalIndex(p, namep), r8)
        local_gridcell_ids(sample) = real(GetGlobalIndex(veg_pp%gridcell(p), nameg), r8)
        local_features_flat((sample-1)*canopyflux_emulator_num_features + 1 : sample*canopyflux_emulator_num_features) = &
             captured_features(slot,:)
@@ -1012,41 +1014,54 @@ contains
 
     if (masterproc) then
        global_natveg_count = size(global_patch_ids)
-       if (global_natveg_count == 0) then
-          capture_ready = .false.
-          deallocate(global_patch_ids, global_features_flat, global_targets_flat, global_debug_flat, global_params_flat)
-          if (associated(global_pft_ids)) deallocate(global_pft_ids)
-          if (associated(global_gridcell_ids)) deallocate(global_gridcell_ids)
-          if (associated(patch_counts)) deallocate(patch_counts, patch_displs)
-          if (associated(pft_counts)) deallocate(pft_counts, pft_displs)
-          if (associated(gridcell_counts)) deallocate(gridcell_counts, gridcell_displs)
-          if (associated(feature_counts)) deallocate(feature_counts, feature_displs)
-          if (associated(target_counts)) deallocate(target_counts, target_displs)
-          if (associated(debug_counts)) deallocate(debug_counts, debug_displs)
-          if (associated(param_counts)) deallocate(param_counts, param_displs)
-          deallocate(local_patch_ids, local_pft_ids, local_gridcell_ids, local_features_flat, &
-               local_targets_flat, local_debug_flat, local_params_flat, local_params)
-          return
+       if (global_natveg_count > 0) then
+          allocate(global_features(global_natveg_count, canopyflux_emulator_num_features))
+          allocate(global_targets(global_natveg_count, canopyflux_emulator_num_targets))
+          allocate(global_debug(global_natveg_count, canopyflux_emulator_num_debug))
+          allocate(global_params(global_natveg_count, canopyflux_emulator_num_params))
+          do sample = 1, global_natveg_count
+             global_features(sample,:) = global_features_flat((sample-1)*canopyflux_emulator_num_features + 1 : &
+                  sample*canopyflux_emulator_num_features)
+             global_targets(sample,:) = global_targets_flat((sample-1)*canopyflux_emulator_num_targets + 1 : &
+                  sample*canopyflux_emulator_num_targets)
+             global_debug(sample,:) = global_debug_flat((sample-1)*canopyflux_emulator_num_debug + 1 : &
+                  sample*canopyflux_emulator_num_debug)
+             global_params(sample,:) = global_params_flat((sample-1)*canopyflux_emulator_num_params + 1 : &
+                  sample*canopyflux_emulator_num_params)
+          end do
+
+          call get_curr_date(year, mon, day, sec)
+          nstep = get_nstep()
+
+          ! Write one file per PFT type, collecting all gridcells for that PFT.
+          do ivt = 0, numpft
+             pft_count = count(int(global_patch_ids(:)) == ivt)
+             if (pft_count == 0) cycle
+             allocate(pft_patch_ids(pft_count), pft_pft_ids(pft_count), pft_gridcell_ids(pft_count))
+             allocate(pft_features(pft_count, canopyflux_emulator_num_features))
+             allocate(pft_targets(pft_count, canopyflux_emulator_num_targets))
+             allocate(pft_debug(pft_count, canopyflux_emulator_num_debug))
+             allocate(pft_params(pft_count, canopyflux_emulator_num_params))
+             j = 0
+             do i = 1, global_natveg_count
+                if (int(global_patch_ids(i)) /= ivt) cycle
+                j = j + 1
+                pft_patch_ids(j)    = global_patch_ids(i)
+                pft_pft_ids(j)      = global_pft_ids(i)
+                pft_gridcell_ids(j) = global_gridcell_ids(i)
+                pft_features(j,:)   = global_features(i,:)
+                pft_targets(j,:)    = global_targets(i,:)
+                pft_debug(j,:)      = global_debug(i,:)
+                pft_params(j,:)     = global_params(i,:)
+             end do
+             call write_canopyflux_training_netcdf(pft_patch_ids, pft_pft_ids, pft_gridcell_ids, &
+                  pft_features, pft_targets, pft_debug, pft_params, year, mon, day, sec, nstep)
+             deallocate(pft_patch_ids, pft_pft_ids, pft_gridcell_ids)
+             deallocate(pft_features, pft_targets, pft_debug, pft_params)
+          end do
+
+          deallocate(global_features, global_targets, global_debug, global_params)
        end if
-       allocate(global_features(global_natveg_count, canopyflux_emulator_num_features))
-       allocate(global_targets(global_natveg_count, canopyflux_emulator_num_targets))
-       allocate(global_debug(global_natveg_count, canopyflux_emulator_num_debug))
-       allocate(global_params(global_natveg_count, canopyflux_emulator_num_params))
-       do sample = 1, global_natveg_count
-          global_features(sample,:) = global_features_flat((sample-1)*canopyflux_emulator_num_features + 1 : &
-               sample*canopyflux_emulator_num_features)
-          global_targets(sample,:) = global_targets_flat((sample-1)*canopyflux_emulator_num_targets + 1 : &
-               sample*canopyflux_emulator_num_targets)
-          global_debug(sample,:) = global_debug_flat((sample-1)*canopyflux_emulator_num_debug + 1 : &
-               sample*canopyflux_emulator_num_debug)
-          global_params(sample,:) = global_params_flat((sample-1)*canopyflux_emulator_num_params + 1 : &
-               sample*canopyflux_emulator_num_params)
-       end do
-       call get_curr_date(year, mon, day, sec)
-       nstep = get_nstep()
-       call write_canopyflux_training_netcdf(global_patch_ids, global_pft_ids, global_gridcell_ids, &
-            global_features, global_targets, global_debug, global_params, year, mon, day, sec, nstep)
-       deallocate(global_features, global_targets, global_debug, global_params)
     end if
 
     if (associated(patch_counts)) deallocate(patch_counts, patch_displs)
@@ -1124,9 +1139,8 @@ contains
     debug_out(:,:) = transpose(debug)
     params_out(:,:) = transpose(params)
 
-    write(file_name,'(a,".canopyflux_training.nc")') trim(caseid)
+    write(file_name,'(a,".canopyflux_training.pft",i0,".nc")') trim(caseid), int(patch_ids_r8(1))
     inquire(file=trim(file_name), exist=file_exists)
-    if (.not. canopyflux_training_file_initialized) file_exists = .false.
 
     if (file_exists) then
        call netcdf_check(nf90_open(trim(file_name), nf90_write, ncid), 'open '//trim(file_name))
@@ -1248,7 +1262,6 @@ contains
     call netcdf_check(nf90_put_var(ncid, var_params, params_out, start=(/1, sample_start/), &
          count=(/canopyflux_emulator_num_params, sample_count/)), 'put_var parameters')
     call netcdf_check(nf90_close(ncid), 'close')
-    canopyflux_training_file_initialized = .true.
 
     deallocate(patch_ids, cell_ids, pft_ids, gridcell_ids, nstep_vec, year_vec, month_vec, day_vec, sec_vec, &
          features_out, targets_out, debug_out, params_out)
