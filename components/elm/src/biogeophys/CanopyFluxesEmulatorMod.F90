@@ -21,7 +21,7 @@ module CanopyFluxesEmulatorMod
   use SoilStateType         , only : soilstate_type
   use SoilHydrologyType     , only : soilhydrology_type
   use SolarAbsorbedType     , only : solarabs_type
-  use SurfaceAlbedoType     , only : surfalb_type
+  use SurfaceAlbedoType     , only : surfalb_type, isoicol
   use CH4Mod                , only : ch4_type
   use PhotosynthesisType    , only : photosyns_type
   use VegetationType        , only : veg_pp
@@ -56,7 +56,7 @@ module CanopyFluxesEmulatorMod
   private
 
    logical, public :: use_canopyflux_emulator = .false.
-  logical, public :: write_canopyflux_training_data = .true.
+  logical, public :: write_canopyflux_training_data = .false. ! .true.
   logical, public :: randomize_canopyflux_training_traits = .true.
   logical, public :: debug_canopyflux_emulator = .false.
   integer, public :: debug_canopyflux_patch = 2
@@ -66,7 +66,7 @@ module CanopyFluxesEmulatorMod
   integer, parameter, public :: canopyflux_emulator_profile_layers = 10
   integer, parameter, public :: canopyflux_emulator_rootfr_layers = 10
   integer, parameter, public :: canopyflux_emulator_base_features = 28
-  integer, parameter, public :: canopyflux_emulator_post_profile_features = 6
+  integer, parameter, public :: canopyflux_emulator_post_profile_features = 24
   integer, parameter, public :: canopyflux_emulator_num_features = canopyflux_emulator_base_features + &
        4 * canopyflux_emulator_profile_layers + canopyflux_emulator_rootfr_layers + &
        canopyflux_emulator_post_profile_features
@@ -122,6 +122,14 @@ module CanopyFluxesEmulatorMod
   real(r8), parameter :: canopyflux_training_flnr_max = 0.2_r8
   real(r8), parameter :: canopyflux_training_mbbopt_min = 4._r8
   real(r8), parameter :: canopyflux_training_mbbopt_max = 13._r8
+  real(r8), parameter :: canopyflux_training_smpso_min = -83000._r8
+  real(r8), parameter :: canopyflux_training_smpso_max = -35000._r8
+  real(r8), parameter :: canopyflux_training_smpsc_min = -428000._r8
+  real(r8), parameter :: canopyflux_training_smpsc_max = -224000._r8
+  real(r8), parameter :: canopyflux_training_slatop_min = 0.008_r8
+  real(r8), parameter :: canopyflux_training_slatop_max = 0.07_r8
+  real(r8), parameter :: canopyflux_training_leafcn_min = 25._r8
+  real(r8), parameter :: canopyflux_training_leafcn_max = 40._r8
    real(r8), parameter :: canopyflux_training_pco2_min = 18._r8
    real(r8), parameter :: canopyflux_training_pco2_max = 80._r8
    real(r8), public :: canopyflux_training_start_delay_years = 10._r8
@@ -148,7 +156,8 @@ module CanopyFluxesEmulatorMod
        't_grnd,t_h2osfc,ugust,' // &
        't_soisno_lev1,t_soisno_lev2,t_soisno_lev3,t_soisno_lev4,t_soisno_lev5,t_soisno_lev6,t_soisno_lev7,t_soisno_lev8,' // &
        't_soisno_lev9,t_soisno_lev10,' // &
-       'flnr,mbbopt,sabg_snow'
+       'smpso,smpsc,slatop,leafcn,flnr,mbbopt,sabg_snow,soilbeta_col,soil_color,z0mr,htop_patch,' // &
+       'rholvis,rholnir,taulvis,taulnir,rhosvis,rhosnir,tausvis,tausnir,xl,pft_type'
 
   character(len=*), parameter :: canopyflux_target_names = &
        'fpsn_patch,eflx_sh_tot,qflx_tran_veg,qflx_evap_canopy,' // &
@@ -525,13 +534,18 @@ contains
   end subroutine bind_canopyflux_emulator_output_view
 
   subroutine assemble_canopyflux_emulator_features(bounds, num_nolakeurbanp, filter_nolakeurbanp, &
-     inputs, features, flnr_override, mbbopt_override, pco2_override)
+     inputs, features, smpso_override, smpsc_override, slatop_override, leafcn_override, &
+     flnr_override, mbbopt_override, pco2_override)
 
     type(bounds_type)                         , intent(in)  :: bounds
     integer                                   , intent(in)  :: num_nolakeurbanp
     integer                                   , intent(in)  :: filter_nolakeurbanp(:)
     type(canopyflux_emulator_input_view_type) , intent(in)  :: inputs
     real(r8)                                  , intent(out) :: features(:,:)
+    real(r8), intent(in), optional            :: smpso_override(:)
+    real(r8), intent(in), optional            :: smpsc_override(:)
+    real(r8), intent(in), optional            :: slatop_override(:)
+    real(r8), intent(in), optional            :: leafcn_override(:)
     real(r8), intent(in), optional            :: flnr_override(:)
     real(r8), intent(in), optional            :: mbbopt_override(:)
    real(r8), intent(in), optional            :: pco2_override(:)
@@ -623,28 +637,79 @@ contains
        end do
 
        idx = idx + canopyflux_emulator_profile_layers
-       if (present(flnr_override)) then
-          features(fp, idx    ) = flnr_override(fp)
+       if (present(smpso_override)) then
+          features(fp, idx    ) = smpso_override(fp)
        else
-          features(fp, idx    ) = veg_vp%flnr(ivt)
+          features(fp, idx    ) = veg_vp%smpso(ivt)
+       end if
+       if (present(smpsc_override)) then
+          features(fp, idx + 1) = smpsc_override(fp)
+       else
+          features(fp, idx + 1) = veg_vp%smpsc(ivt)
+       end if
+       if (present(slatop_override)) then
+          features(fp, idx + 2) = slatop_override(fp)
+       else
+          features(fp, idx + 2) = veg_vp%slatop(ivt)
+       end if
+       if (present(leafcn_override)) then
+          features(fp, idx + 3) = leafcn_override(fp)
+       else
+          features(fp, idx + 3) = veg_vp%leafcn(ivt)
+       end if
+       if (present(flnr_override)) then
+          features(fp, idx + 4) = flnr_override(fp)
+       else
+          features(fp, idx + 4) = veg_vp%flnr(ivt)
        end if
        if (present(mbbopt_override)) then
-          features(fp, idx + 1) = mbbopt_override(fp)
+          features(fp, idx + 5) = mbbopt_override(fp)
        else
-          features(fp, idx + 1) = veg_vp%mbbopt(ivt)
+          features(fp, idx + 5) = veg_vp%mbbopt(ivt)
        end if
-       features(fp, idx + 2) = inputs%sabg_snow_patch(p)  ! solar radiation absorbed by snow [W m-2]
+       features(fp, idx + 6) = inputs%sabg_snow_patch(p)  ! solar radiation absorbed by snow [W m-2]
+       features(fp, idx + 7) = inputs%soilbeta_col(c)     ! factor that reduces ground evaporation [-]
+       features(fp, idx + 8) = real(isoicol(c), r8)        ! soil color class [-]
+       features(fp, idx + 9) = veg_vp%z0mr(ivt)            ! ratio of momentum roughness length to canopy top height [-]
+       features(fp, idx + 10) = inputs%htop_patch(p)       ! canopy top height [m]
+       features(fp, idx + 11) = veg_vp%rhol(ivt, 1)        ! leaf visible reflectance [-]
+       features(fp, idx + 12) = veg_vp%rhol(ivt, 2)        ! leaf NIR reflectance [-]
+       features(fp, idx + 13) = veg_vp%taul(ivt, 1)        ! leaf visible transmittance [-]
+       features(fp, idx + 14) = veg_vp%taul(ivt, 2)        ! leaf NIR transmittance [-]
+       features(fp, idx + 15) = veg_vp%rhos(ivt, 1)        ! stem visible reflectance [-]
+       features(fp, idx + 16) = veg_vp%rhos(ivt, 2)        ! stem NIR reflectance [-]
+       features(fp, idx + 17) = veg_vp%taus(ivt, 1)        ! stem visible transmittance [-]
+       features(fp, idx + 18) = veg_vp%taus(ivt, 2)        ! stem NIR transmittance [-]
+       features(fp, idx + 19) = veg_vp%xl(ivt)             ! leaf/stem orientation index [-]
+       features(fp, idx + 20) = real(ivt, r8)              ! PFT identity index [-]
     end do
 
   end subroutine assemble_canopyflux_emulator_features
 
-  subroutine sample_canopyflux_training_traits(flnr_sample, mbbopt_sample)
+  subroutine sample_canopyflux_training_traits(smpso_sample, smpsc_sample, slatop_sample, leafcn_sample, &
+       flnr_sample, mbbopt_sample)
 
+    real(r8), intent(out) :: smpso_sample
+    real(r8), intent(out) :: smpsc_sample
+    real(r8), intent(out) :: slatop_sample
+    real(r8), intent(out) :: leafcn_sample
     real(r8), intent(out) :: flnr_sample
     real(r8), intent(out) :: mbbopt_sample
 
     real(r8) :: draw
 
+    call random_number(draw)
+    smpso_sample = canopyflux_training_smpso_min + &
+         (canopyflux_training_smpso_max - canopyflux_training_smpso_min) * draw
+    call random_number(draw)
+    smpsc_sample = canopyflux_training_smpsc_min + &
+         (canopyflux_training_smpsc_max - canopyflux_training_smpsc_min) * draw
+    call random_number(draw)
+    slatop_sample = canopyflux_training_slatop_min + &
+         (canopyflux_training_slatop_max - canopyflux_training_slatop_min) * draw
+    call random_number(draw)
+    leafcn_sample = canopyflux_training_leafcn_min + &
+         (canopyflux_training_leafcn_max - canopyflux_training_leafcn_min) * draw
     call random_number(draw)
     flnr_sample = canopyflux_training_flnr_min + &
          (canopyflux_training_flnr_max - canopyflux_training_flnr_min) * draw
@@ -654,7 +719,7 @@ contains
 
   end subroutine sample_canopyflux_training_traits
 
-   subroutine sample_canopyflux_training_pco2(pco2_sample)
+  subroutine sample_canopyflux_training_pco2(pco2_sample)
 
       real(r8), intent(out) :: pco2_sample
 
@@ -914,7 +979,7 @@ contains
 
   subroutine flush_canopyflux_training_capture()
 
-    ! Gather all patches to masterproc, then write one netCDF file per PFT type.
+    ! Gather all patches to masterproc, then write one netCDF file with all PFT types.
     real(r8), allocatable :: local_patch_ids(:)
     real(r8), allocatable :: local_pft_ids(:)
     real(r8), allocatable :: local_gridcell_ids(:)
@@ -933,10 +998,8 @@ contains
     real(r8), allocatable :: global_targets(:,:)
     real(r8), allocatable :: global_debug(:,:)
     real(r8), allocatable :: global_params(:,:)
-    real(r8), allocatable :: pft_patch_ids(:), pft_pft_ids(:), pft_gridcell_ids(:)
-    real(r8), allocatable :: pft_features(:,:), pft_targets(:,:), pft_debug(:,:), pft_params(:,:)
     integer :: local_natveg_count, global_natveg_count
-    integer :: slot, sample, p, i, j, ivt, pft_count
+    integer :: slot, sample, p
     integer :: year, mon, day, sec, nstep
     integer, pointer :: patch_counts(:) => null()
     integer, pointer :: patch_displs(:) => null()
@@ -1033,32 +1096,8 @@ contains
           call get_curr_date(year, mon, day, sec)
           nstep = get_nstep()
 
-          ! Write one file per PFT type, collecting all gridcells for that PFT.
-          do ivt = 0, numpft
-             pft_count = count(int(global_patch_ids(:)) == ivt)
-             if (pft_count == 0) cycle
-             allocate(pft_patch_ids(pft_count), pft_pft_ids(pft_count), pft_gridcell_ids(pft_count))
-             allocate(pft_features(pft_count, canopyflux_emulator_num_features))
-             allocate(pft_targets(pft_count, canopyflux_emulator_num_targets))
-             allocate(pft_debug(pft_count, canopyflux_emulator_num_debug))
-             allocate(pft_params(pft_count, canopyflux_emulator_num_params))
-             j = 0
-             do i = 1, global_natveg_count
-                if (int(global_patch_ids(i)) /= ivt) cycle
-                j = j + 1
-                pft_patch_ids(j)    = global_patch_ids(i)
-                pft_pft_ids(j)      = global_pft_ids(i)
-                pft_gridcell_ids(j) = global_gridcell_ids(i)
-                pft_features(j,:)   = global_features(i,:)
-                pft_targets(j,:)    = global_targets(i,:)
-                pft_debug(j,:)      = global_debug(i,:)
-                pft_params(j,:)     = global_params(i,:)
-             end do
-             call write_canopyflux_training_netcdf(pft_patch_ids, pft_pft_ids, pft_gridcell_ids, &
-                  pft_features, pft_targets, pft_debug, pft_params, year, mon, day, sec, nstep)
-             deallocate(pft_patch_ids, pft_pft_ids, pft_gridcell_ids)
-             deallocate(pft_features, pft_targets, pft_debug, pft_params)
-          end do
+          call write_canopyflux_training_netcdf(global_patch_ids, global_pft_ids, global_gridcell_ids, &
+               global_features, global_targets, global_debug, global_params, year, mon, day, sec, nstep)
 
           deallocate(global_features, global_targets, global_debug, global_params)
        end if
@@ -1127,7 +1166,10 @@ contains
     allocate(targets_out(canopyflux_emulator_num_targets, sample_count))
     allocate(debug_out(canopyflux_emulator_num_debug, sample_count))
     allocate(params_out(canopyflux_emulator_num_params, sample_count))
+    file_feature_count = -1
+    file_target_count = -1
     file_debug_count = -1
+    file_param_count = -1
 
     nstep_vec(:) = nstep
     year_vec(:) = year
@@ -1139,7 +1181,7 @@ contains
     debug_out(:,:) = transpose(debug)
     params_out(:,:) = transpose(params)
 
-    write(file_name,'(a,".canopyflux_training.pft",i0,".nc")') trim(caseid), int(patch_ids_r8(1))
+    write(file_name,'(a,".canopyflux_training.nc")') trim(caseid)
     inquire(file=trim(file_name), exist=file_exists)
 
     if (file_exists) then
@@ -1161,8 +1203,12 @@ contains
        if (status /= nf90_noerr) file_exists = .false.
        status = nf90_inq_varid(ncid, 'gridcell_index', var_gridcell)
        if (status /= nf90_noerr) file_exists = .false.
-       call netcdf_check(nf90_inq_dimid(ncid, 'param', dim_param), 'inq_dimid param')
-       call netcdf_check(nf90_inquire_dimension(ncid, dim_param, len=file_param_count), 'inquire_dimension param')
+       status = nf90_inq_dimid(ncid, 'param', dim_param)
+       if (status == nf90_noerr) then
+          call netcdf_check(nf90_inquire_dimension(ncid, dim_param, len=file_param_count), 'inquire_dimension param')
+       else
+          file_exists = .false.
+       end if
        call netcdf_check(nf90_close(ncid), 'close')
 
        if (file_feature_count /= canopyflux_emulator_num_features .or. &
@@ -1489,9 +1535,6 @@ contains
     end if
     if (size(file_target_names) /= output_count) then
        error stop 'CanopyFluxesEmulatorMod: target_names length does not match model output dimension'
-    end if
-    if (input_count /= size(canonical_input_names)) then
-       error stop 'CanopyFluxesEmulatorMod: model input count does not match current emulator contract'
     end if
     allocate(model%input_map(input_count), model%x_mean(input_count), model%x_std(input_count))
     allocate(model%target_map(output_count), model%y_mean(output_count), model%y_std(output_count))
@@ -2401,15 +2444,25 @@ contains
     type(soilhydrology_type)  , intent(in)    :: soilhydrology_vars
     type(canopyflux_emulator_input_view_type) :: inputs
     real(r8) :: features(num_nolakeurbanp, canopyflux_emulator_num_features)
+    real(r8), allocatable :: training_smpso(:)
+    real(r8), allocatable :: training_smpsc(:)
+    real(r8), allocatable :: training_slatop(:)
+    real(r8), allocatable :: training_leafcn(:)
     real(r8), allocatable :: training_flnr(:)
     real(r8), allocatable :: training_mbbopt(:)
-   real(r8), allocatable :: training_pco2(:)
+    real(r8), allocatable :: training_pco2(:)
+    real(r8), allocatable :: smpso_saved(:)
+    real(r8), allocatable :: smpsc_saved(:)
+    real(r8), allocatable :: slatop_saved(:)
+    real(r8), allocatable :: leafcn_saved(:)
     real(r8), allocatable :: flnr_saved(:)
     real(r8), allocatable :: mbbopt_saved(:)
-   real(r8), allocatable :: forc_pco2_saved(:)
+    real(r8), allocatable :: forc_pco2_saved(:)
+    real(r8) :: training_smpso_value, training_smpsc_value
+    real(r8) :: training_slatop_value, training_leafcn_value
     real(r8) :: training_flnr_value, training_mbbopt_value
-   real(r8) :: training_pco2_value
-   logical :: training_capture_active
+    real(r8) :: training_pco2_value
+    logical :: training_capture_active
 
     call inputs%bind(atm2lnd_vars, canopystate_vars, energyflux_vars, frictionvel_vars, &
          soilstate_vars, solarabs_vars, surfalb_vars, soilhydrology_vars)
@@ -2432,13 +2485,49 @@ contains
        call sample_canopyflux_training_pco2(training_pco2_value)
        training_pco2(:) = training_pco2_value
        if (randomize_canopyflux_training_traits) then
+          allocate(training_smpso(num_nolakeurbanp))
+          allocate(training_smpsc(num_nolakeurbanp))
+          allocate(training_slatop(num_nolakeurbanp))
+          allocate(training_leafcn(num_nolakeurbanp))
           allocate(training_flnr(num_nolakeurbanp))
           allocate(training_mbbopt(num_nolakeurbanp))
-          call sample_canopyflux_training_traits(training_flnr_value, training_mbbopt_value)
+          call sample_canopyflux_training_traits(training_smpso_value, training_smpsc_value, &
+               training_slatop_value, training_leafcn_value, training_flnr_value, training_mbbopt_value)
+          training_smpso(:) = training_smpso_value
+          training_smpsc(:) = training_smpsc_value
+          training_slatop(:) = training_slatop_value
+          training_leafcn(:) = training_leafcn_value
           training_flnr(:) = training_flnr_value
           training_mbbopt(:) = training_mbbopt_value
+          allocate(smpso_saved(lbound(veg_vp%smpso, 1):ubound(veg_vp%smpso, 1)))
+          allocate(smpsc_saved(lbound(veg_vp%smpsc, 1):ubound(veg_vp%smpsc, 1)))
+          allocate(slatop_saved(lbound(veg_vp%slatop, 1):ubound(veg_vp%slatop, 1)))
+          allocate(leafcn_saved(lbound(veg_vp%leafcn, 1):ubound(veg_vp%leafcn, 1)))
+          allocate(flnr_saved(lbound(veg_vp%flnr, 1):ubound(veg_vp%flnr, 1)))
+          allocate(mbbopt_saved(lbound(veg_vp%mbbopt, 1):ubound(veg_vp%mbbopt, 1)))
+          smpso_saved(:) = veg_vp%smpso(:)
+          smpsc_saved(:) = veg_vp%smpsc(:)
+          slatop_saved(:) = veg_vp%slatop(:)
+          leafcn_saved(:) = veg_vp%leafcn(:)
+          flnr_saved(:) = veg_vp%flnr(:)
+          mbbopt_saved(:) = veg_vp%mbbopt(:)
+          veg_vp%smpso(:) = training_smpso_value
+          veg_vp%smpsc(:) = training_smpsc_value
+          veg_vp%slatop(:) = training_slatop_value
+          veg_vp%leafcn(:) = training_leafcn_value
+          veg_vp%flnr(:) = training_flnr_value
+          veg_vp%mbbopt(:) = training_mbbopt_value
+          call calc_root_moist_stress(bounds,     &
+               nlevgrnd = nlevgrnd,               &
+               fn = num_nolakeurbanp,             &
+               filterp = filter_nolakeurbanp,     &
+               canopystate_vars = canopystate_vars, &
+               energyflux_vars = energyflux_vars, &
+               soilstate_vars = soilstate_vars)
           call assemble_canopyflux_emulator_features(bounds, num_nolakeurbanp, filter_nolakeurbanp, &
-               inputs, features, flnr_override=training_flnr, mbbopt_override=training_mbbopt, pco2_override=training_pco2)
+               inputs, features, smpso_override=training_smpso, smpsc_override=training_smpsc, &
+               slatop_override=training_slatop, leafcn_override=training_leafcn, &
+               flnr_override=training_flnr, mbbopt_override=training_mbbopt, pco2_override=training_pco2)
        else
           call assemble_canopyflux_emulator_features(bounds, num_nolakeurbanp, filter_nolakeurbanp, &
                inputs, features, pco2_override=training_pco2)
@@ -2447,14 +2536,6 @@ contains
        allocate(forc_pco2_saved(lbound(inputs%forc_pco2, 1):ubound(inputs%forc_pco2, 1)))
        forc_pco2_saved(:) = inputs%forc_pco2(:)
        inputs%forc_pco2(:) = training_pco2_value
-       if (randomize_canopyflux_training_traits) then
-          allocate(flnr_saved(lbound(veg_vp%flnr, 1):ubound(veg_vp%flnr, 1)))
-          allocate(mbbopt_saved(lbound(veg_vp%mbbopt, 1):ubound(veg_vp%mbbopt, 1)))
-          flnr_saved(:) = veg_vp%flnr(:)
-          mbbopt_saved(:) = veg_vp%mbbopt(:)
-          veg_vp%flnr(:) = training_flnr_value
-          veg_vp%mbbopt(:) = training_mbbopt_value
-       end if
     end if
 
     call CanopyFluxes(bounds, num_nolakeurbanp, filter_nolakeurbanp, &
@@ -2466,9 +2547,14 @@ contains
        inputs%forc_pco2(:) = forc_pco2_saved(:)
        deallocate(forc_pco2_saved, training_pco2)
        if (randomize_canopyflux_training_traits) then
+          veg_vp%smpso(:) = smpso_saved(:)
+          veg_vp%smpsc(:) = smpsc_saved(:)
+          veg_vp%slatop(:) = slatop_saved(:)
+          veg_vp%leafcn(:) = leafcn_saved(:)
           veg_vp%flnr(:) = flnr_saved(:)
           veg_vp%mbbopt(:) = mbbopt_saved(:)
-          deallocate(flnr_saved, mbbopt_saved, training_flnr, training_mbbopt)
+          deallocate(smpso_saved, smpsc_saved, slatop_saved, leafcn_saved, flnr_saved, mbbopt_saved)
+          deallocate(training_smpso, training_smpsc, training_slatop, training_leafcn, training_flnr, training_mbbopt)
        end if
     end if
 

@@ -251,6 +251,7 @@ contains
           if (index(metdata_type,'gswp3') .gt. 0) atm2lnd_vars%metsource = 4
           if (index(metdata_type,'cpl') .gt. 0) atm2lnd_vars%metsource = 5
           if (index(metdata_type,'crujra') .gt. 0) atm2lnd_vars%metsource = 6
+          if (index(metdata_type,'era5') .gt. 0) atm2lnd_vars%metsource = 7
           if (atm2lnd_vars%metsource == -1) then
             call endrun( sub//' ERROR: Invalid met data source for cpl_bypass' )
           end if
@@ -341,6 +342,10 @@ contains
             atm2lnd_vars%startyear_met      = 1901
             atm2lnd_vars%endyear_met_spinup = 1920
             atm2lnd_vars%endyear_met_trans  = 2024
+          else if (atm2lnd_vars%metsource == 7) then 
+            atm2lnd_vars%startyear_met      = 1980
+            atm2lnd_vars%endyear_met_spinup = 1999
+            atm2lnd_vars%endyear_met_trans  = 2023
           end if
 
           if (use_livneh) then 
@@ -348,7 +353,7 @@ contains
               atm2lnd_vars%endyear_met_spinup = 1969
           else if (use_daymet) then 
               atm2lnd_vars%startyear_met      = 1980
-              atm2lnd_vars%endyear_met_spinup = atm2lnd_vars%endyear_met_trans
+              atm2lnd_vars%endyear_met_spinup = 1999 !atm2lnd_vars%endyear_met_trans
           end if
 
           nyears_spinup = atm2lnd_vars%endyear_met_spinup - &
@@ -454,10 +459,12 @@ contains
                     metdata_fname = 'CBGC1850S.ne30_' // trim(metvars(v)) // '_0566-0590_z' // zst(2:3) // '.nc'
             else if (atm2lnd_vars%metsource == 6) then
                 metdata_fname = 'elmforc.TRENDY.c2025_0.5x0.5_' // trim(metvars(v)) // '_1901-2024_z' // zst(2:3) // '.nc'
+            else if (atm2lnd_vars%metsource == 7) then 
+                metdata_fname = 'Daymet_ERA5_TESSFA.4km_' // trim(metvars(v)) // '_1980-2023_z' // zst(2:3) // '.nc'
             end if
-  
+
             ierr = nf90_open(trim(metdata_bypass) // '/' // trim(metdata_fname), NF90_NOWRITE, met_ncids(v))
-            if (ierr .ne. 0) call endrun(msg=' ERROR: Failed to open cpl_bypass input meteorology file' )
+            if (ierr .ne. 0) call endrun(msg=' ERROR: Failed to open cpl_bypass input meteorology file ' // trim(metdata_fname) )
        
             !get timestep information
             ierr = nf90_inq_dimid(met_ncids(v), 'DTIME', dimid)
