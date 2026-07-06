@@ -303,7 +303,8 @@ contains
 
          end if
 
-         ! if using topounit hillslope hydrology, fractions of qflx_surf, qflx_drain_perched, and qflx_h2osfc
+         ! if using topounit hillslope hydrology, fractions of qflx_surf, qflx_drain,
+         ! qflx_drain_perched, and qflx_h2osfc
          ! are passed to the from_uphill water state on the downhill topounit, via qflx_to_downhill
          ! only shift positive fluxes, and only set fluxes if there is a downhill topounit
          if (use_IM2_hillslope_hydrology .or. use_humhol) then
@@ -313,6 +314,11 @@ contains
                temp_to_downhill = max(0._r8, frac_to_downhill * qflx_surf(c))
                qflx_to_downhill(c) = temp_to_downhill
                qflx_surf(c) = qflx_surf(c) - temp_to_downhill
+
+               ! shift a fixed fraction of regular subsurface drainage
+               temp_to_downhill = max(0._r8, frac_to_downhill * qflx_drain(c))
+               qflx_to_downhill(c) = qflx_to_downhill(c) + temp_to_downhill
+               qflx_drain(c) = qflx_drain(c) - temp_to_downhill
                
                ! shift a fixed fraction of qflx_drain_perched
                temp_to_downhill = max(0._r8, frac_to_downhill * qflx_drain_perched(c))

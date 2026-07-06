@@ -13,6 +13,7 @@ Module SoilHydrologyType
   use LandunitType          , only : lun_pp                
   use ColumnType            , only : col_pp      
   use GridcellType          , only : grc_pp   
+  use TopounitType          , only : top_pp
   use topounit_varcon       , only : max_topounits
   !
   ! !PUBLIC TYPES:
@@ -24,6 +25,7 @@ Module SoilHydrologyType
   private :: initSoilParVIC    ! Convert default elm soil properties to VIC parameters
   private :: initELMVICMap     ! Initialize map from VIC to elm layers
   private :: linear_interp     ! function for linear interperation
+  private :: InitBogPerchedWaterTable ! Initialize bog perched water table from topounit peat depth
   !
   type, public :: soilhydrology_type
 
@@ -35,6 +37,10 @@ Module SoilHydrologyType
      real(r8), pointer :: zwt_col           (:)    => null() ! col water table depth
      real(r8), pointer :: zwts_col          (:)    => null() ! col water table depth, the shallower of the two water depths
      real(r8), pointer :: zwt_perched_col   (:)    => null() ! col perched water table depth
+     real(r8), pointer :: zwt_perched_k_col (:)    => null() ! col perched water table crossing layer
+     real(r8), pointer :: zwt_perched_kbarrier_col(:)=> null() ! col perched water table barrier layer
+     real(r8), pointer :: zwt_perched_sat1_col(:)  => null() ! saturation ratio at perched crossing layer
+     real(r8), pointer :: zwt_perched_sat2_col(:)  => null() ! saturation ratio below perched crossing layer
      real(r8), pointer :: wa_col            (:)    => null() ! col water in the unconfined aquifer (mm)
      real(r8), pointer :: beg_wa_grc        (:)    => null() ! grid-level water in the unconfined aquifer at beginning of the time step (mm)
      real(r8), pointer :: end_wa_grc        (:)    => null() ! grid-level water in the unconfined aquifer at end of the time step (mm)
@@ -128,6 +134,10 @@ contains
     allocate(this%zwt_col           (begc:endc))                 ; this%zwt_col           (:)     = spval
     allocate(this%qflx_bot_col      (begc:endc))                 ; this%qflx_bot_col      (:)     = spval
     allocate(this%zwt_perched_col   (begc:endc))                 ; this%zwt_perched_col   (:)     = spval
+    allocate(this%zwt_perched_k_col (begc:endc))                 ; this%zwt_perched_k_col (:)     = spval
+    allocate(this%zwt_perched_kbarrier_col(begc:endc))           ; this%zwt_perched_kbarrier_col(:) = spval
+    allocate(this%zwt_perched_sat1_col(begc:endc))               ; this%zwt_perched_sat1_col(:) = spval
+    allocate(this%zwt_perched_sat2_col(begc:endc))               ; this%zwt_perched_sat2_col(:) = spval
     allocate(this%zwts_col          (begc:endc))                 ; this%zwts_col          (:)     = spval
 
     allocate(this%wa_col            (begc:endc))                 ; this%wa_col            (:)     = spval
@@ -223,6 +233,26 @@ contains
     call hist_addfld1d (fname='ZWT_PERCH',  units='m',  &
          avgflag='A', long_name='perched water table depth (vegetated landunits only)', &
          ptr_col=this%zwt_perched_col, l2g_scale_type='veg')
+
+    this%zwt_perched_k_col(begc:endc) = spval
+    call hist_addfld1d (fname='ZWT_PERCH_K',  units='1',  &
+         avgflag='A', long_name='perched water table diagnostic crossing layer', &
+         ptr_col=this%zwt_perched_k_col, l2g_scale_type='veg')
+
+    this%zwt_perched_kbarrier_col(begc:endc) = spval
+    call hist_addfld1d (fname='ZWT_PERCH_KBARRIER',  units='1',  &
+         avgflag='A', long_name='perched water table diagnostic barrier layer', &
+         ptr_col=this%zwt_perched_kbarrier_col, l2g_scale_type='veg')
+
+    this%zwt_perched_sat1_col(begc:endc) = spval
+    call hist_addfld1d (fname='ZWT_PERCH_SAT1',  units='1',  &
+         avgflag='A', long_name='saturation ratio at perched water table crossing layer', &
+         ptr_col=this%zwt_perched_sat1_col, l2g_scale_type='veg')
+
+    this%zwt_perched_sat2_col(begc:endc) = spval
+    call hist_addfld1d (fname='ZWT_PERCH_SAT2',  units='1',  &
+         avgflag='A', long_name='saturation ratio below perched water table crossing layer', &
+         ptr_col=this%zwt_perched_sat2_col, l2g_scale_type='veg')
 
   end subroutine InitHistory
 
@@ -340,6 +370,8 @@ contains
           end if
        end do
     end if
+
+    call InitBogPerchedWaterTable(this, bounds)
 
     ! Initialize VIC variables
 
@@ -660,9 +692,44 @@ contains
          interpinic_flag='interp', readvar=readvar, data=this%zwt_perched_col)
     if (flag == 'read' .and. .not. readvar) then
        this%zwt_perched_col(bounds%begc:bounds%endc) = col_pp%zi(bounds%begc:bounds%endc,nlevsoi)
+       call InitBogPerchedWaterTable(this, bounds)
     end if
 
   end subroutine Restart
+
+  !------------------------------------------------------------------------
+  subroutine InitBogPerchedWaterTable(this, bounds)
+    !
+    ! !DESCRIPTION:
+    ! Initialize bog topounits with a shallow perched water table above the
+    ! restrictive till barrier. Restart files that already carry ZWT_PERCH
+    ! are left unchanged.
+    !
+    ! !ARGUMENTS:
+    class(soilhydrology_type) :: this
+    type(bounds_type) , intent(in)    :: bounds
+    !
+    ! !LOCAL VARIABLES:
+    integer  :: c,l,t,nlevbed
+    real(r8) :: barrier_depth
+    real(r8) :: initial_perched_depth
+    !-----------------------------------------------------------------------
+
+    do c = bounds%begc,bounds%endc
+       l = col_pp%landunit(c)
+       if (lun_pp%lakpoi(l) .or. lun_pp%urbpoi(l)) cycle
+
+       t = col_pp%topounit(c)
+       if (.not. top_pp%active(t)) cycle
+       if (.not. (top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8)) cycle
+
+       nlevbed = col_pp%nlevbed(c)
+       barrier_depth = min(max(top_pp%peat_depth(t), col_pp%z(c,1)), col_pp%zi(c,nlevbed))
+       initial_perched_depth = min(0.05_r8, 0.5_r8 * barrier_depth)
+       this%zwt_perched_col(c) = max(0._r8, min(initial_perched_depth, barrier_depth))
+    enddo
+
+  end subroutine InitBogPerchedWaterTable
 
   !-----------------------------------------------------------------------
   subroutine initSoilParVIC(c, claycol, sandcol, om_fraccol, soilhydrology_vars)

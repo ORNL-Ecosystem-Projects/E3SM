@@ -56,8 +56,8 @@ contains
     logical               :: readvar 
     integer               :: dimid             ! dimension id
     character(len=256)    :: locfn             ! local filename
-    real(r8) ,pointer     :: std (:)           ! read in - topo_std
-    real(r8) ,pointer     :: tslope (:)        ! read in - topo_slope
+    real(r8) ,pointer     :: std (:,:)         ! read in - topo_std
+    real(r8) ,pointer     :: tslope (:,:)      ! read in - topo_slope
     real(r8) ,pointer     :: gradz(:)          ! read in - gradz (polygonal tundra only)
     real(r8) ,pointer     :: hslp_p10 (:,:,:)    ! read in - hillslope slope percentiles
     real(r8) ,pointer     :: dtb (:,:)           ! read in - DTB
@@ -561,7 +561,7 @@ contains
       ! Read in topographic index and slope
       !-----------------------------------------------
 
-      allocate(tslope(bounds%begg:bounds%endg))
+      allocate(tslope(bounds%begg:bounds%endg,1:max_topounits))
       call ncd_io(ncid=ncid, varname='SLOPE', flag='read', data=tslope, dim1name=grlnd, readvar=readvar)
       if (.not. readvar) then
          call shr_sys_abort(' ERROR: TOPOGRAPHIC SLOPE NOT on surfdata file'//&
@@ -569,8 +569,11 @@ contains
       end if
       do c = begc,endc
          g = col_pp%gridcell(c)
+         t = col_pp%topounit(c)
+         topi = grc_pp%topi(g)
+         ti = t - topi + 1
          ! check for near zero slopes, set minimum value
-         col_pp%topo_slope(c) = max(tslope(g), 0.2_r8)
+         col_pp%topo_slope(c) = max(tslope(g,ti), 0.2_r8)
       end do
       deallocate(tslope)
 
@@ -588,7 +591,7 @@ contains
          deallocate(gradz)
       end if
 
-      allocate(std(bounds%begg:bounds%endg))
+      allocate(std(bounds%begg:bounds%endg,1:max_topounits))
       call ncd_io(ncid=ncid, varname='STD_ELEV', flag='read', data=std, dim1name=grlnd, readvar=readvar)
       if (.not. readvar) then
          call shr_sys_abort(' ERROR: TOPOGRAPHIC STDdev (STD_ELEV) NOT on surfdata file'//&
@@ -596,8 +599,11 @@ contains
       end if
       do c = begc,endc
          g = col_pp%gridcell(c)
+         t = col_pp%topounit(c)
+         topi = grc_pp%topi(g)
+         ti = t - topi + 1
          ! Topographic variables
-         col_pp%topo_std(c) = std(g)
+         col_pp%topo_std(c) = std(g,ti)
       end do
       deallocate(std)
 

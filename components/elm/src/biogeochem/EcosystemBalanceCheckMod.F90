@@ -41,7 +41,7 @@ module EcosystemBalanceCheckMod
   use ColumnDataType      , only : column_nitrogen_state, column_nitrogen_flux
   use ColumnDataType      , only : column_phosphorus_state, column_phosphorus_flux
   use VegetationType      , only : veg_pp
-  use VegetationDataType  , only : veg_cf, veg_nf, veg_pf
+  use VegetationDataType  , only : veg_cs, veg_cf, veg_nf, veg_pf
 
   use timeinfoMod
 
@@ -195,7 +195,7 @@ contains
     type(column_carbon_flux)  , intent(in)    :: col_cf
     !
     ! !LOCAL VARIABLES:
-    integer  :: c,err_index    ! indices
+    integer  :: c,err_index,p  ! indices
     integer  :: fc             ! lake filter indices
     logical  :: err_found      ! error flag
     real(r8) :: dt             ! radiation time step (seconds)
@@ -306,6 +306,22 @@ contains
           write(iulog,*)'endcb                 = ',col_endcb(c),col_cs%totsomc(c)
           write(iulog,*)'totsomc               = ',col_cs%totsomc(c)
           write(iulog,*)'delta store           = ',col_endcb(c)-col_begcb(c)
+          write(iulog,*)'patch carbon diagnostics for failing column'
+          write(iulog,*)'  patch, pft, wtcol, ar_dt, ar_wt_dt, mr_dt, gr_dt, xr_dt, gpp_dt, npp_dt'
+          do p = col_pp%pfti(c), col_pp%pftf(c)
+             if (veg_pp%active(p) .and. (veg_pp%itype(p) .ne. noveg)) then
+                write(iulog,*)'  patch_fluxes = ', p, veg_pp%itype(p), veg_pp%wtcol(p), &
+                     veg_cf%ar(p)*dt, veg_cf%ar(p)*veg_pp%wtcol(p)*dt, &
+                     veg_cf%mr(p)*dt, veg_cf%gr(p)*dt, veg_cf%xr(p)*dt, &
+                     veg_cf%gpp(p)*dt, veg_cf%npp(p)*dt
+                write(iulog,*)'  patch_xsmr   = ', p, &
+                     veg_cf%cpool_to_xsmrpool(p)*dt, veg_cf%xsmrpool_recover(p)*dt, &
+                     veg_cf%xsmrpool_turnover(p)*dt, veg_cf%xsmrpool_to_atm(p)*dt
+                write(iulog,*)'  patch_pools  = ', p, &
+                     veg_cs%cpool(p), veg_cs%xsmrpool(p), veg_cs%totpftc(p), veg_cs%totvegc(p), &
+                     veg_cs%leafc(p), veg_cs%frootc(p), veg_cs%livestemc(p), veg_cs%livecrootc(p)
+             end if
+          end do
 
           if (ero_ccycle) then
              write(iulog,*)'erosion               = ',som_c_yield(c)*dt

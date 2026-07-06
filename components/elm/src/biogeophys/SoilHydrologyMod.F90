@@ -10,7 +10,7 @@ module SoilHydrologyMod
    use elm_varctl        , only : iulog, use_vichydro, use_humhol, obs_zwt_forcing
   use elm_varctl        , only : use_lnd_rof_two_way, lnd_rof_coupling_nstep
   use elm_varctl        , only : use_modified_infil
-  use elm_varcon        , only : e_ice, denh2o, denice, rpi
+  use elm_varcon        , only : e_ice, denh2o, denice, rpi, spval
   use EnergyFluxType    , only : energyflux_type
   use SoilHydrologyType , only : soilhydrology_type
   use SoilStateType     , only : soilstate_type
@@ -82,6 +82,7 @@ contains
     real(r8) :: qinmax                                     !maximum infiltration capacity (mm/s)
     real(r8) :: A(bounds%begc:bounds%endc)                 !fraction of the saturated area
     real(r8) :: ex(bounds%begc:bounds%endc)                !temporary variable (exponent)
+    real(r8) :: frac_from_uphill_eff                       ! fraction of uphill storage applied this timestep
     real(r8) :: top_moist(bounds%begc:bounds%endc)         !temporary, soil moisture in top VIC layers
     real(r8) :: top_max_moist(bounds%begc:bounds%endc)     !temporary, maximum soil moisture in top VIC layers
     real(r8) :: top_ice(bounds%begc:bounds%endc)           !temporary, ice len in top VIC layers
@@ -219,6 +220,13 @@ contains
 !             if (topo_index .eq. 2) fsat(c) = min(1.0 * exp(-3.0_r8/humhol_ht*(zwt(c)-h2osfc(c)/1000.+humhol_ht)), 1._r8) !TAO 0.3 t 1.5, 0.15 to 0.35
 #endif 
          endif
+         ! For peat bog topounits, surface saturation follows the perched
+         ! peat water table rather than the deeper regional water table.
+         if (use_humhol .and. top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8 .and. &
+              zwt_perched(c) < top_pp%peat_depth(t)) then
+            fsat(c) = exp(-3.0_r8/humhol_ht*zwt_perched(c))
+            fsat(c) = min(1._r8, max(0._r8, fsat(c)))
+         endif
          if (origflag == 1) then
             if (use_vichydro) then
 #ifndef _OPENACC
@@ -334,8 +342,15 @@ contains
          do fc = 1, num_hydrologyc
             c = filter_hydrologyc(fc)
             t = col_pp%topounit(c)
-            qflx_from_uphill(c) = (col_pp%wttopounit(c)/top_pp%uphill_wt(t)) * (frac_from_uphill * top_ws%from_uphill(t)) / dtime
-            qflx_top_soil(c) = qflx_top_soil(c) + qflx_from_uphill(c)
+            if (top_pp%uphill_wt(t) > 0._r8) then
+               frac_from_uphill_eff = frac_from_uphill
+               if (top_pp%peat_depth(t) > 0._r8) frac_from_uphill_eff = 1.0_r8
+               qflx_from_uphill(c) = (col_pp%wttopounit(c)/top_pp%uphill_wt(t)) * &
+                    (frac_from_uphill_eff * top_ws%from_uphill(t)) / dtime
+               qflx_top_soil(c) = qflx_top_soil(c) + qflx_from_uphill(c)
+            else
+               qflx_from_uphill(c) = 0._r8
+            endif
          end do
       endif
 
@@ -413,7 +428,6 @@ contains
      real(r8) :: f_sno
      real(r8) :: imped
      real(r8) :: d
-     real(r8) :: export_sill_mm                            ! surface-water sill height for export from the lowest topounit (mm)
      !real(r8) :: h2osoi_vol
      real(r8) :: basis                                      ! temporary, variable soil moisture holding capacity
      real(r8) :: vdep                                       ! temporary, ice wedge polygon volumetric depression depth (m)
@@ -448,7 +462,15 @@ contains
      real(r8) :: qflx_lat_aqu_top(bounds%begt:bounds%endt) ! topounit lateral aquifer flux before mapping back to columns
      real(r8) :: elev_offset                             ! elevation difference between adjacent / reference topounits (m)
      real(r8) :: flux_pair                               ! lateral flux exchanged between a pair of topounits (mm/s)
+     real(r8) :: receiver_increment                      ! local lateral aquifer inflow into the receiver topounit (mm/s)
+     real(r8) :: receiver_scale                          ! area scaling from pair flux to receiver-column flux
+     real(r8) :: receiver_capacity                       ! capacity for positive inflow to a bog regional aquifer (mm/s)
+     real(r8) :: bog_zwt_cap_depth                       ! minimum depth allowed for the bog regional water table (m)
+     real(r8) :: rous_recv                               ! regional aquifer specific yield for a receiver topounit (-)
      real(r8) :: obs_ref_zwt                             ! observed water table referenced to the first topounit in the gridcell
+     real(r8) :: barrier_depth                           ! depth to restrictive till below bog peat (m)
+     real(r8), parameter :: bog_zwt_cap_epsilon = 1.e-3_r8 ! keep bog regional WT just below the peat/till interface (m)
+     integer  :: t_recv,c_recv,nlevbed_recv              ! receiver topounit/column indices for lateral exchange
      integer  :: natveg_col_top(bounds%begt:bounds%endt) ! natural vegetation hydrology column associated with each topounit
      logical  :: ice_block_top(bounds%begt:bounds%endt)  ! true when ice suppresses HUM_HOL lateral exchange on a topounit
    ! obs_zwt_forcing is set via namelist (elm_inparm) in elm_varctl
@@ -457,6 +479,7 @@ contains
      associate(                                                    &
           snl                  =>    col_pp%snl                  , & ! Input:  [integer  (:)   ]  minus number of snow layers
           dz                   =>    col_pp%dz                   , & ! Input:  [real(r8) (:,:) ]  layer depth (m)
+          z                    =>    col_pp%z                    , & ! Input:  [real(r8) (:,:) ]  layer depth (m)
           nlev2bed             =>    col_pp%nlevbed              , & ! Input:  [integer  (:)   ]  number of layers to bedrock
           cgridcell            =>    col_pp%gridcell             , & ! Input:  [integer  (:)   ]  column's gridcell    
           wtgcell              =>    col_pp%wtgcell              , & ! Input:  [real(r8) (:)   ]  weight (relative to gridcell)
@@ -710,15 +733,14 @@ contains
              else
                ! limit runoff to value of storage above S(pc)
                if (use_humhol) then
-                  if (topo_index == 1) then
-                     if (grc_pp%ntopounits(g) > 1) then
-                        export_sill_mm = 1000._r8 * (top_pp%elevation(grc_pp%topi(g)+1) - top_pp%elevation(grc_pp%topi(g)))
-                     else
-                        export_sill_mm = 0._r8
-                     end if
-                     if (h2osfc(c) .gt. export_sill_mm) then
-                        qflx_h2osfc_surf(c) = min(qflx_h2osfc_surfrate * (h2osfc(c)-export_sill_mm)**2.0_r8, &
-                             (h2osfc(c)-export_sill_mm) / dtime)
+                  ! HUM_HOL surface water can leave the lowest topounit and
+                  ! the bog peat units. The fen/boardwalk topounit has no
+                  ! peat barrier and the bog units drain from their perched
+                  ! surface store, not from the regional aquifer.
+                  if (topo_index == 1 .or. top_pp%peat_depth(t) > 0._r8) then
+                     if (h2osfc(c) .gt. 0._r8) then
+                        qflx_h2osfc_surf(c) = min(qflx_h2osfc_surfrate*h2osfc(c)**2.0_r8, &
+                             h2osfc(c) / dtime)
                      else
                         qflx_h2osfc_surf(c) = 0._r8
                      endif
@@ -791,10 +813,18 @@ contains
              if (use_humhol) then
                 ! Compute column-local states first, then aggregate to topounits.
                 ka_col(c) = 0._r8
-                ! Use total hydraulic head for lateral exchange so ponded surface water can
-                ! drive flow between adjacent topounits, while explicit surface routing is
-                ! still handled by qflx_h2osfc_surf.
-                head_depth_lat(c) = zwt(c) - h2osfc(c)/1000._r8
+                ! Use total hydraulic head for non-bog lateral exchange so
+                ! ponded surface water can affect adjacent topounits. For bog
+                ! peat columns, the regular aquifer is below the restrictive
+                ! till; keep perched/ponded water out of the regional head.
+                ! The cap is a ceiling on regional ZWT, not a source of water.
+                if (top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8) then
+                   barrier_depth = min(max(top_pp%peat_depth(t), z(c,1)), zi(c,nlevbed))
+                   bog_zwt_cap_depth = min(max(barrier_depth + bog_zwt_cap_epsilon, z(c,1)), zi(c,nlevbed))
+                   head_depth_lat(c) = max(zwt(c), bog_zwt_cap_depth)
+                else
+                   head_depth_lat(c) = zwt(c) - h2osfc(c)/1000._r8
+                endif
                 if (jwt(c) .lt. nlevbed) then
                    do j=nlevbed,jwt(c)+1,-1
                      s_node = max(h2osoi_vol(c,j)/watsat(c,j), 0.01_r8)
@@ -968,9 +998,17 @@ contains
 
              if (obs_zwt_forcing) then
                 obs_ref_zwt = atm2lnd_vars%forc_zwt_not_downscaled_grc(g)
-                do t = topi + 1, topf
-                   t_ref = t - 1
+                do t = topi, topf
+                   t_ref = top_pp%regional_target_ti(t)
+                   if (t_ref < topi .or. t_ref > topf .or. t_ref == t) cycle
                    if (natveg_col_top(t_ref) == 0 .or. natveg_col_top(t) == 0) cycle
+                   ! Bog peat columns have a perched reservoir above
+                   ! restrictive till and a separate below-till regional
+                   ! aquifer. Regional aquifer exchange is allowed for all
+                   ! adjacent topounits; perched bog microtopography is still
+                   ! handled separately in Drainage. Bog regional receivers
+                   ! are capacity-limited below so lateral inflow cannot fill
+                   ! the below-till aquifer above the peat/till cap.
                    ! Temporarily allow lateral exchange through partially frozen topounits.
                    ! if (ice_block_top(t_ref) .or. ice_block_top(t)) cycle
 
@@ -984,9 +1022,17 @@ contains
                         ka_ho * (head_depth_top(t) - (obs_ref_zwt + elev_offset))
                 end do
              else
-                do t = topi + 1, topf
-                   t_ref = t - 1
+                do t = topi, topf
+                   t_ref = top_pp%regional_target_ti(t)
+                   if (t_ref < topi .or. t_ref > topf .or. t_ref == t) cycle
                    if (natveg_col_top(t_ref) == 0 .or. natveg_col_top(t) == 0) cycle
+                   ! Bog peat columns have a perched reservoir above
+                   ! restrictive till and a separate below-till regional
+                   ! aquifer. Regional aquifer exchange is allowed for all
+                   ! adjacent topounits; perched bog microtopography is still
+                   ! handled separately in Drainage. Bog regional receivers
+                   ! are capacity-limited below so lateral inflow cannot fill
+                   ! the below-till aquifer above the peat/till cap.
                    ! Temporarily allow lateral exchange through partially frozen topounits.
                    ! if (ice_block_top(t_ref) .or. ice_block_top(t)) cycle
 
@@ -995,6 +1041,51 @@ contains
                    elev_offset = top_pp%elevation(t) - top_pp%elevation(t_ref)
                    flux_pair = 2._r8/(1._r8/ka_hu + 1._r8/ka_ho) * &
                         (elev_offset - (head_depth_top(t) - head_depth_top(t_ref))) / top_pp%lateral_dist(t)
+
+                   if (flux_pair > 0._r8) then
+                      t_recv = t_ref
+                      c_recv = natveg_col_top(t_ref)
+                      receiver_scale = sqrt(top_pp%wtgcell(t)/top_pp%wtgcell(t_ref))
+                      receiver_increment = flux_pair * receiver_scale
+                   else if (flux_pair < 0._r8) then
+                      t_recv = t
+                      c_recv = natveg_col_top(t)
+                      receiver_scale = sqrt(top_pp%wtgcell(t_ref)/top_pp%wtgcell(t))
+                      receiver_increment = -flux_pair * receiver_scale
+                   else
+                      t_recv = -1
+                      c_recv = 0
+                      receiver_scale = 0._r8
+                      receiver_increment = 0._r8
+                   endif
+
+                   if (receiver_increment > 0._r8) then
+                      if (top_pp%is_bog(t_recv) .and. top_pp%peat_depth(t_recv) > 0._r8) then
+                         nlevbed_recv = nlev2bed(c_recv)
+                         barrier_depth = min(max(top_pp%peat_depth(t_recv), z(c_recv,1)), zi(c_recv,nlevbed_recv))
+                         bog_zwt_cap_depth = min(max(barrier_depth + 1.e-3_r8, z(c_recv,1)), zi(c_recv,nlevbed_recv))
+
+                         if (zwt(c_recv) > bog_zwt_cap_depth) then
+                            rous_recv = watsat(c_recv,nlevbed_recv) &
+                                 * ( 1. - (1.+1.e3*zwt(c_recv)/sucsat(c_recv,nlevbed_recv)) &
+                                 **(-1./bsw(c_recv,nlevbed_recv)))
+                            rous_recv = max(rous_recv,0.02_r8)
+                            receiver_capacity = (zwt(c_recv) - bog_zwt_cap_depth) * 1000._r8 * rous_recv / dtime
+                         else
+                            receiver_capacity = 0._r8
+                         endif
+                         receiver_capacity = max(0._r8, receiver_capacity - max(0._r8, qflx_lat_aqu_top(t_recv)))
+
+                         if (receiver_increment > receiver_capacity) then
+                            if (receiver_capacity <= 0._r8) then
+                               flux_pair = 0._r8
+                            else if (receiver_scale > 0._r8) then
+                               flux_pair = sign(receiver_capacity/receiver_scale, flux_pair)
+                            endif
+                         endif
+                      endif
+                   endif
+
                    qflx_lat_aqu_top(t_ref) = qflx_lat_aqu_top(t_ref) + flux_pair * &
                         sqrt(top_pp%wtgcell(t)/top_pp%wtgcell(t_ref))
                    qflx_lat_aqu_top(t) = qflx_lat_aqu_top(t) - flux_pair * &
@@ -1082,10 +1173,12 @@ contains
      real(r8) :: rsub_top_layer
      real(r8) :: qcharge_tot
      real(r8) :: qcharge_layer
+     real(r8) :: ponded_fill_tot
+     real(r8) :: ponded_fill_layer
      real(r8) :: theta_unsat
      real(r8) :: f_unsat
      real(r8) :: s_y
-     integer  :: k,k_frz,k_perch
+     integer  :: k,k_frz,k_perch,k_barrier
      real(r8) :: sat_lev
      real(r8) :: s1
      real(r8) :: s2
@@ -1096,8 +1189,11 @@ contains
      real(r8) :: dflag=0._r8
      real(r8) :: qcharge_temp
      real(r8) :: qflx_lat_aqu_tot
-     real(r8) :: qflx_lat_aqu_applied
+     real(r8) :: lat_aqu_store_beg
+     real(r8) :: lat_aqu_store_end
+     real(r8) :: barrier_depth
      integer  :: days, seconds  
+     logical  :: use_bog_perched          ! apply bog perched water table over restrictive till
      !-----------------------------------------------------------------------
 
      associate(                                                            &
@@ -1137,6 +1233,10 @@ contains
 
           zwt                =>    soilhydrology_vars%zwt_col            , & ! Output: [real(r8) (:)   ]  water table depth (m)
           zwt_perched        =>    soilhydrology_vars%zwt_perched_col    , & ! Output: [real(r8) (:)   ]  perched water table depth (m)
+          zwt_perched_k      =>    soilhydrology_vars%zwt_perched_k_col  , & ! Output: [real(r8) (:)   ]  perched water table crossing layer
+          zwt_perched_kbarrier =>  soilhydrology_vars%zwt_perched_kbarrier_col, & ! Output: [real(r8) (:)   ]  perched water table barrier layer
+          zwt_perched_sat1   =>    soilhydrology_vars%zwt_perched_sat1_col, & ! Output: [real(r8) (:)   ]  saturation ratio at crossing layer
+          zwt_perched_sat2   =>    soilhydrology_vars%zwt_perched_sat2_col, & ! Output: [real(r8) (:)   ]  saturation ratio below crossing layer
           frost_table        =>    soilhydrology_vars%frost_table_col    , & ! Output: [real(r8) (:)   ]  frost table depth (m)
           wa                 =>    soilhydrology_vars%wa_col             , & ! Output: [real(r8) (:)   ]  water in the unconfined aquifer (mm)
           qcharge            =>    soilhydrology_vars%qcharge_col        , & ! Input:  [real(r8) (:)   ]  aquifer recharge rate (mm/s)
@@ -1202,7 +1302,49 @@ contains
           !--  water table is below the soil column  --------------------------------------
           g = col_pp%gridcell(c)
           l = col_pp%landunit(c)
+          t = col_pp%topounit(c)
           qcharge_temp = qcharge(c)
+
+          use_bog_perched = use_humhol .and. top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8
+          if (use_bog_perched) then
+             barrier_depth = min(max(top_pp%peat_depth(t), z(c,1)), zi(c,nlevbed))
+             if (zwt(c) > barrier_depth .and. qcharge(c) > 0._r8) then
+                if (jwt(c) == nlevbed .and. .not. zengdecker_2009_with_var_soil_thick) then
+                   ! qcharge is the lower-boundary solver's recharge request.
+                   ! For a bog with regional WT below the peat/till interface,
+                   ! do not let that request directly charge the below-till
+                   ! aquifer. Hold the water above the barrier; the later
+                   ! till-leak block is the explicit, conductivity-limited
+                   ! path from perched peat storage to the regional aquifer.
+                   k_barrier = nlevbed
+                   do k = 1, nlevbed
+                      if (zi(c,k) >= barrier_depth) then
+                         k_barrier = k
+                         exit
+                      endif
+                   enddo
+
+                   qcharge_tot = qcharge(c) * dtime
+                   do j = k_barrier, 1, -1
+                      qcharge_layer = min(qcharge_tot, &
+                           max(0._r8, eff_porosity(c,j)*dz(c,j)*denh2o - h2osoi_liq(c,j)))
+                      if (qcharge_layer > 0._r8) then
+                         h2osoi_liq(c,j) = h2osoi_liq(c,j) + qcharge_layer
+                         h2osoi_vol(c,j) = h2osoi_liq(c,j)/(dz(c,j)*denh2o) &
+                              + h2osoi_ice(c,j)/(dz(c,j)*denice)
+                         qcharge_tot = qcharge_tot - qcharge_layer
+                      endif
+                      if (qcharge_tot <= 0._r8) exit
+                   enddo
+                   if (qcharge_tot > 0._r8) h2osfc(c) = h2osfc(c) + qcharge_tot
+                endif
+                ! Temporarily zero qcharge so the standard update below does
+                ! not also raise WA/ZWT. qcharge_temp is restored after the
+                ! update so QCHARGE history still reports the raw solver
+                ! request, not the amount allowed through the till.
+                qcharge(c) = 0._r8
+             endif
+          endif
 
           wa(c)  = wa(c) - qflx_grnd_irrig_col(c) * dtime
           zwt(c) = zwt(c) + (qflx_grnd_irrig_col(c) * dtime)/1000._r8/rous
@@ -1286,9 +1428,12 @@ contains
                 rous=max(rous,0.02_r8)
 
                 qflx_rsub_sat(c) = 0._r8
+                lat_aqu_store_beg = wa(c) + h2osfc(c)
+                do j = 1, nlevgrnd
+                   lat_aqu_store_beg = lat_aqu_store_beg + h2osoi_liq(c,j)
+                enddo
           !-  water table is below the soil column -----------------------------------
                 qflx_lat_aqu_tot = qflx_lat_aqu(c) * dtime
-                qflx_lat_aqu_applied = 0._r8
                 if(jwt(c) == nlevbed) then
                  if (qflx_lat_aqu_tot .gt. 0._r8) then
                    qflx_lat_aqu_tot = min(qflx_lat_aqu_tot, max(0._r8, 5000._r8 - wa(c)) + &
@@ -1297,16 +1442,13 @@ contains
                    qflx_lat_aqu_tot = max(qflx_lat_aqu_tot, -max(0._r8, wa(c)))
                  endif
                  wa(c)  = wa(c) + qflx_lat_aqu_tot
-                 qflx_lat_aqu_applied = qflx_lat_aqu_tot
                  zwt(c) = zwt(c) - qflx_lat_aqu_tot/1000._r8/rous
                  h2osoi_liq(c,nlevbed) =  h2osoi_liq(c,nlevbed)+max(0._r8,(wa(c)-5000._r8))
                  wa(c)  = min(wa(c), 5000._r8)
-                 qflx_lat_aqu(c) = qflx_lat_aqu_applied / dtime
              else
       !-- water table within soil layers 1-9  -------------------------------------
       ! try to raise water table to account for lateral flux qflx_lat_aqu
                 qflx_lat_aqu_tot = qflx_lat_aqu(c)  * dtime
-                qflx_lat_aqu_applied = 0._r8
                 if(qflx_lat_aqu_tot > 0.) then !rising water table
                    do j = jwt(c)+1, 1,-1
       ! use analytical expression for specific yield
@@ -1325,7 +1467,6 @@ contains
                       if (qflx_lat_aqu_layer(c,j) > 0._r8) then
                         h2osoi_liq(c,j) = h2osoi_liq(c,j) + qflx_lat_aqu_layer(c,j)
                         qflx_lat_aqu_tot = qflx_lat_aqu_tot - qflx_lat_aqu_layer(c,j)
-                        qflx_lat_aqu_applied = qflx_lat_aqu_applied + qflx_lat_aqu_layer(c,j)
                       end if
 
                       if(s_y > 0._r8) zwt(c) = zwt(c) - qflx_lat_aqu_layer(c,j)/s_y/1000._r8
@@ -1333,7 +1474,6 @@ contains
                         exit
                       else if (j .eq. 1) then
                          h2osfc(c) = h2osfc(c) + qflx_lat_aqu_tot
-                         qflx_lat_aqu_applied = qflx_lat_aqu_applied + qflx_lat_aqu_tot
                          qflx_lat_aqu_tot = 0._r8
                       end if
                     end do
@@ -1343,7 +1483,6 @@ contains
                      available_h2osoi_liq = min(-qflx_lat_aqu_tot, h2osfc(c))
                      h2osfc(c) = h2osfc(c) - available_h2osoi_liq
                      qflx_lat_aqu_tot = qflx_lat_aqu_tot + available_h2osoi_liq
-                     qflx_lat_aqu_applied = qflx_lat_aqu_applied - available_h2osoi_liq
                    end if
                    do j = jwt(c)+1, nlevbed
 
@@ -1357,7 +1496,6 @@ contains
                       qflx_lat_aqu_layer(c,j)=min(qflx_lat_aqu_layer(c,j),0._r8)
                       h2osoi_liq(c,j) = h2osoi_liq(c,j) + qflx_lat_aqu_layer(c,j)
                       qflx_lat_aqu_tot = qflx_lat_aqu_tot - qflx_lat_aqu_layer(c,j)
-                      qflx_lat_aqu_applied = qflx_lat_aqu_applied + qflx_lat_aqu_layer(c,j)
 
                       if (qflx_lat_aqu_tot >= 0.) then
                          zwt(c) = zwt(c) - qflx_lat_aqu_layer(c,j)/s_y/1000._r8
@@ -1368,27 +1506,37 @@ contains
                    enddo
                    if (qflx_lat_aqu_tot > 0.) zwt(c) = zwt(c) - qflx_lat_aqu_tot/1000._r8/rous
                 endif
-                qflx_lat_aqu(c) = qflx_lat_aqu_applied / dtime
+             endif
+             lat_aqu_store_end = wa(c) + h2osfc(c)
+             do j = 1, nlevgrnd
+                lat_aqu_store_end = lat_aqu_store_end + h2osoi_liq(c,j)
+             enddo
+             qflx_lat_aqu(c) = (lat_aqu_store_end - lat_aqu_store_beg) / dtime
       !-- recompute jwt for following calculations  ---------------------------------
       ! allow jwt to equal zero when zwt is in top layer
-                jwt(c) = nlevbed
-                do j = 1,nlevbed
-                   if(zwt(c) <= zi(c,j)) then
-                      jwt(c) = j-1
-                      exit
-                   end if
-                enddo
-             endif
+             jwt(c) = nlevbed
+             do j = 1,nlevbed
+                if(zwt(c) <= zi(c,j)) then
+                   jwt(c) = j-1
+                   exit
+                end if
+             enddo
           enddo
        end if
-
 
        !==  BASEFLOW ==================================================
        ! perched water table code
        do fc = 1, num_hydrologyc
           c = filter_hydrologyc(fc)
           nlevbed = nlev2bed(c)
-
+          g = col_pp%gridcell(c)
+          t = col_pp%topounit(c)
+          use_bog_perched = use_humhol .and. top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8
+          if (use_bog_perched) then
+             barrier_depth = min(max(top_pp%peat_depth(t), z(c,1)), zi(c,nlevbed))
+          else
+             barrier_depth = 0._r8
+          endif
           ! define frost table as first frozen layer with unfrozen layer above it
           if(t_soisno(c,1) > tfrz) then
              k_frz=nlevbed
@@ -1407,10 +1555,16 @@ contains
 
           ! initialize perched water table to frost table, and qflx_drain_perched(c) to zero
           zwt_perched(c)=frost_table(c)
+          if (use_humhol .and. .not. use_bog_perched) zwt_perched(c) = spval
+          zwt_perched_k(c) = spval
+          zwt_perched_kbarrier(c) = spval
+          zwt_perched_sat1(c) = spval
+          zwt_perched_sat2(c) = spval
 
           !===================  water table above frost table  =============================
           ! if water table is above frost table, do not use topmodel baseflow formulation
-          if (.not. use_humhol .and. zwt(c) < frost_table(c) .and. t_soisno(c,k_frz) <= tfrz &
+          if (.not. use_humhol .and. &
+               zwt(c) < frost_table(c) .and. t_soisno(c,k_frz) <= tfrz &
                .and. origflag == 0) then
           else
              !===================  water table below frost table  =============================
@@ -1440,12 +1594,116 @@ contains
                      + h2osoi_ice(c,k_perch)/(dz(c,k_perch)*denice))/watsat(c,k_perch)
                 s2 = (h2osoi_liq(c,k_perch+1)/(dz(c,k_perch+1)*denh2o) &
                      + h2osoi_ice(c,k_perch+1)/(dz(c,k_perch+1)*denice))/watsat(c,k_perch+1)
+                zwt_perched_k(c) = real(k_perch, r8)
+                zwt_perched_kbarrier(c) = real(k_frz, r8)
+                zwt_perched_sat1(c) = s1
+                zwt_perched_sat2(c) = s2
 
                 m=(z(c,k_perch+1)-z(c,k_perch))/(s2-s1)
                 b=z(c,k_perch+1)-m*s2
                 zwt_perched(c)=max(0._r8,m*sat_lev+b)
 
              endif !k_frz > k_perch
+          endif
+
+          if (use_bog_perched) then
+             zwt_perched(c) = zi(c,nlevbed)
+             if (zwt(c) > barrier_depth) then
+                k_barrier = nlevbed
+                do k = 1, nlevbed
+                   if (zi(c,k) >= barrier_depth) then
+                      k_barrier = k
+                      exit
+                   endif
+                enddo
+
+                sat_lev = 0.9_r8
+                k_perch = 0
+                ! The peat/till boundary can fall inside a model layer. Diagnose
+                ! the perched table from layers above that crossing layer so a
+                ! partially saturated barrier layer does not mask the perch.
+                do k = max(k_barrier - 1, 1), 1, -1
+                   h2osoi_vol(c,k) = h2osoi_liq(c,k)/(dz(c,k)*denh2o) &
+                        + h2osoi_ice(c,k)/(dz(c,k)*denice)
+
+                   if (h2osoi_vol(c,k)/watsat(c,k) <= sat_lev) then
+                      k_perch = k
+                      exit
+                   endif
+                enddo
+
+                zwt_perched_k(c) = real(k_perch, r8)
+                zwt_perched_kbarrier(c) = real(k_barrier, r8)
+                zwt_perched_sat1(c) = spval
+                zwt_perched_sat2(c) = spval
+                if (k_perch == 0) then
+                   zwt_perched(c) = 0._r8
+                else if (k_barrier > k_perch) then
+                   s1 = (h2osoi_liq(c,k_perch)/(dz(c,k_perch)*denh2o) &
+                        + h2osoi_ice(c,k_perch)/(dz(c,k_perch)*denice))/watsat(c,k_perch)
+                   s2 = (h2osoi_liq(c,k_perch+1)/(dz(c,k_perch+1)*denh2o) &
+                        + h2osoi_ice(c,k_perch+1)/(dz(c,k_perch+1)*denice))/watsat(c,k_perch+1)
+                   zwt_perched_sat1(c) = s1
+                   zwt_perched_sat2(c) = s2
+
+                   if (abs(s2-s1) > 1.e-12_r8) then
+                      m=(z(c,k_perch+1)-z(c,k_perch))/(s2-s1)
+                      b=z(c,k_perch+1)-m*s2
+                      zwt_perched(c)=min(barrier_depth,max(0._r8,m*sat_lev+b))
+                   else
+                      zwt_perched(c)=z(c,k_perch)
+                   endif
+                endif
+
+                if (h2osfc(c) > 0._r8) then
+                   ponded_fill_tot = h2osfc(c)
+                   do j = 1, k_barrier
+                      ponded_fill_layer = min(ponded_fill_tot, &
+                           max(0._r8, eff_porosity(c,j)*dz(c,j)*denh2o - h2osoi_liq(c,j)))
+                      if (ponded_fill_layer > 0._r8) then
+                         h2osoi_liq(c,j) = h2osoi_liq(c,j) + ponded_fill_layer
+                         h2osoi_vol(c,j) = h2osoi_liq(c,j)/(dz(c,j)*denh2o) &
+                              + h2osoi_ice(c,j)/(dz(c,j)*denice)
+                         ponded_fill_tot = ponded_fill_tot - ponded_fill_layer
+                      endif
+                      if (ponded_fill_tot <= 0._r8) exit
+                   enddo
+                   h2osfc(c) = ponded_fill_tot
+
+                   k_perch = 0
+                   do k = max(k_barrier - 1, 1), 1, -1
+                      h2osoi_vol(c,k) = h2osoi_liq(c,k)/(dz(c,k)*denh2o) &
+                           + h2osoi_ice(c,k)/(dz(c,k)*denice)
+                      if (h2osoi_vol(c,k)/watsat(c,k) <= sat_lev) then
+                         k_perch = k
+                         exit
+                      endif
+                   enddo
+
+                   zwt_perched_k(c) = real(k_perch, r8)
+                   zwt_perched_kbarrier(c) = real(k_barrier, r8)
+                   zwt_perched_sat1(c) = spval
+                   zwt_perched_sat2(c) = spval
+                   if (k_perch == 0) then
+                      zwt_perched(c) = 0._r8
+                   else if (k_barrier > k_perch) then
+                      s1 = (h2osoi_liq(c,k_perch)/(dz(c,k_perch)*denh2o) &
+                           + h2osoi_ice(c,k_perch)/(dz(c,k_perch)*denice))/watsat(c,k_perch)
+                      s2 = (h2osoi_liq(c,k_perch+1)/(dz(c,k_perch+1)*denh2o) &
+                           + h2osoi_ice(c,k_perch+1)/(dz(c,k_perch+1)*denice))/watsat(c,k_perch+1)
+                      zwt_perched_sat1(c) = s1
+                      zwt_perched_sat2(c) = s2
+
+                      if (abs(s2-s1) > 1.e-12_r8) then
+                         m=(z(c,k_perch+1)-z(c,k_perch))/(s2-s1)
+                         b=z(c,k_perch+1)-m*s2
+                         zwt_perched(c)=min(barrier_depth,max(0._r8,m*sat_lev+b))
+                      else
+                         zwt_perched(c)=z(c,k_perch)
+                      endif
+                   endif
+                endif
+             endif
           endif
        end do
 
@@ -1504,13 +1762,13 @@ contains
      ! !USES:
       !$acc routine seq
      use elm_varpar       , only : nlevsoi, nlevgrnd, nlayer, nlayert
-     use elm_varcon       , only : pondmx, tfrz, watmin,rpi, secspday, nlvic
+     use elm_varcon       , only : pondmx, tfrz, watmin,rpi, secspday, nlvic, aquifer_water_baseline
      use column_varcon    , only : icol_roof, icol_road_imperv, icol_road_perv
      use elm_varctl       , only : use_vsfm, use_var_soil_thick, use_firn_percolation_and_compaction
      use SoilWaterMovementMod, only : zengdecker_2009_with_var_soil_thick
      use pftvarcon        , only : rsub_top_globalmax
      use LandunitType      , only : lun_pp
-     use landunit_varcon  , only : istice_mec, istice
+     use landunit_varcon  , only : istice_mec, istice, istsoil
      use pftvarcon        , only : humhol_ht
      !
      ! !ARGUMENTS:
@@ -1525,7 +1783,12 @@ contains
      !
      ! !LOCAL VARIABLES:
      !character(len=32) :: subname = 'Drainage'           ! subroutine name
-     integer  :: c,j,fc,i,g,t,topi                   ! indices
+     real(r8), parameter :: bog_zwt_cap_epsilon = 1.e-3_r8 ! keep bog regional WT just below the peat/till interface (m)
+     real(r8), parameter :: till_leak_head_scale = 0.05_r8 ! head range limiting bog till leakage near the cap (m)
+     real(r8), parameter :: aquifer_water_tol = 1.e-8_r8   ! tolerance for the implicit aquifer baseline (mm)
+     real(r8), parameter :: fen_rsub_top_max = 2500._r8/(365._r8*86400._r8) ! Marcell S2 total seepage routed through lagg/fen (mm/s)
+     integer  :: c,j,fc,i,g,t,topi,topf,t_ref         ! indices
+     integer  :: c_ref,c_from,c_to,t_from,t_to        ! lateral perched water transfer indices
      integer  :: nlevbed                                 ! # layers to bedrock
      real(r8) :: xs(bounds%begc:bounds%endc)             ! water needed to bring soil moisture to watmin (mm)
      real(r8) :: dzmm(bounds%begc:bounds%endc,1:nlevgrnd) ! layer thickness (mm)
@@ -1556,10 +1819,12 @@ contains
      real(r8) :: rsub_top_layer
      real(r8) :: qcharge_tot
      real(r8) :: qcharge_layer
+     real(r8) :: ponded_fill_tot
+     real(r8) :: ponded_fill_layer
      real(r8) :: theta_unsat
      real(r8) :: f_unsat
      real(r8) :: s_y
-     integer  :: k,k_frz,k_perch
+     integer  :: k,k_frz,k_perch,k_barrier,k_fill
      real(r8) :: sat_lev
      real(r8) :: s1
      real(r8) :: s2
@@ -1573,11 +1838,45 @@ contains
      real(r8) :: frac                     ! temporary variable for ARNO subsurface runoff calculation
      real(r8) :: rel_moist                ! relative moisture, temporary variable
      real(r8) :: wtsub_vic                ! summation of hk*dzmm for layers in the third VIC layer
-     real(r8) :: rsub_top_ref_offset      ! HUM_HOL exponential drainage rate at the topounit reference depth (mm/s)
-     real(r8) :: topounit_depth_offset    ! depth offset relative to the lowest topounit in the gridcell (m)
-     real(r8) :: head_depth_drain         ! total-head depth used for HUM_HOL drainage/deep seepage (m)
+     real(r8) :: rsub_top_ref_offset      ! perched drainage rate at the reference depth (mm/s)
+     real(r8) :: head_depth_drain         ! total-head depth used for perched drainage/deep seepage (m)
+     real(r8) :: barrier_depth             ! depth to restrictive till below bog peat (m)
+     real(r8) :: bog_zwt_cap_depth         ! minimum depth allowed for the bog regional water table (m)
+     real(r8) :: till_thickness            ! characteristic restrictive till thickness (m)
+     real(r8) :: till_gradient             ! hydraulic gradient from perched to regular water table
+     real(r8) :: till_leak_limiter          ! receiving aquifer head limiter for bog till leakage (-)
+     real(r8) :: bog_zwt_capacity_rate      ! bog regional aquifer capacity to receive till leakage (mm/s)
+     real(r8) :: qflx_till_leak            ! bog perched water leakage through till to regular aquifer (mm/s)
+     real(r8) :: qflx_till_leak_req        ! requested bog perched leakage through till (mm/s)
+     real(r8) :: qflx_bog_zwt_excess_tot   ! bog regional aquifer water above the cap, exported from the gridcell (mm)
+     real(r8) :: qflx_bog_zwt_to_aquifer_tot ! bog perched leakage retained in the regular aquifer (mm)
+     real(r8) :: qflx_perched_drain_req    ! requested routed bog perched drainage (mm/s)
+     real(r8) :: qflx_perched_drain_sfc    ! routed bog perched drainage supplied by ponded surface water (mm/s)
+     real(r8) :: qflx_perched_total_req    ! requested total bog perched water removal (mm/s)
+     real(r8) :: qflx_perched_total        ! actual total bog perched water removal (mm/s)
+     real(r8) :: liq_capacity              ! ice-adjusted liquid water capacity in a soil layer (mm)
+     real(r8) :: liq_excess                ! liquid water above ice-adjusted pore capacity (mm)
+     real(r8) :: liq_add                   ! liquid water added to a receiving layer (mm)
+     real(r8) :: perched_ka_top(bounds%begt:bounds%endt)          ! active perched bog hydraulic conductivity (mm/s)
+     real(r8) :: perched_head_depth_top(bounds%begt:bounds%endt)  ! active perched bog total-head depth (m)
+     real(r8) :: flux_pair                  ! pairwise perched bog lateral flux before area weighting (mm/s)
+     real(r8) :: donor_scale                ! topounit area conversion from pair flux to donor column flux
+     real(r8) :: receiver_scale             ! topounit area conversion from pair flux to receiver column flux
+     real(r8) :: qflx_from_perched          ! lateral outflow from donor perched reservoir (mm/s)
+     real(r8) :: qflx_to_perched            ! lateral inflow to receiver perched reservoir (mm/s)
+     real(r8) :: perched_water_avail        ! water available from donor perched reservoir (mm)
+     real(r8) :: perched_add_tot            ! water added to receiver perched reservoir (mm)
+     real(r8) :: perched_add_layer          ! layer increment from perched lateral inflow (mm)
+     real(r8) :: sumdz_perched              ! thickness sum for receiver perched lateral inflow weighting (mm)
+     real(r8) :: elev_offset                ! elevation offset between two adjacent perched bogs (m)
+     real(r8) :: ka_ref                     ! reference topounit hydraulic conductivity for perched exchange (mm/s)
+     real(r8) :: ka_to                      ! upper/paired topounit hydraulic conductivity for perched exchange (mm/s)
      real(r8) :: qflx_adv_tot(bounds%begc:bounds%endc,1:nlevgrnd)             ! amount of water transported between layers during a time step (mm)
-     logical  :: drain_blocked            ! true when frozen saturated layers should suppress HUM_HOL subsurface drainage
+     integer  :: perched_col_top(bounds%begt:bounds%endt)       ! natural vegetation column for active perched bog
+     integer  :: k_barrier_from,k_barrier_to,k_perch_from,k_perch_to ! donor/receiver perched layer bounds
+     logical  :: drain_blocked            ! true when frozen saturated layers should suppress perched bog drainage
+     logical  :: use_bog_perched          ! apply bog perched water table over restrictive till
+     logical  :: perched_active_top(bounds%begt:bounds%endt)    ! true when bog has active perched water table
 
      !-----------------------------------------------------------------------
 
@@ -1612,6 +1911,10 @@ contains
           frost_table        =>    soilhydrology_vars%frost_table_col    , & ! Input:  [real(r8) (:)   ] frost table depth (m)
           zwt                =>    soilhydrology_vars%zwt_col            , & ! Input:  [real(r8) (:)   ] water table depth (m)
           zwt_perched        =>    soilhydrology_vars%zwt_perched_col    , & ! Input:  [real(r8) (:)   ] perched water table depth (m)
+          zwt_perched_k      =>    soilhydrology_vars%zwt_perched_k_col  , & ! Output: [real(r8) (:)   ] perched water table crossing layer
+          zwt_perched_kbarrier =>  soilhydrology_vars%zwt_perched_kbarrier_col, & ! Output: [real(r8) (:)   ] perched water table barrier layer
+          zwt_perched_sat1   =>    soilhydrology_vars%zwt_perched_sat1_col, & ! Output: [real(r8) (:)   ] saturation ratio at crossing layer
+          zwt_perched_sat2   =>    soilhydrology_vars%zwt_perched_sat2_col, & ! Output: [real(r8) (:)   ] saturation ratio below crossing layer
           wa                 =>    soilhydrology_vars%wa_col             , & ! Input:  [real(r8) (:)   ] water in the unconfined aquifer (mm)
           ice                =>    soilhydrology_vars%ice_col            , & ! Input:  [real(r8) (:,:) ] soil layer moisture (mm)
           qcharge            =>    soilhydrology_vars%qcharge_col        , & ! Input:  [real(r8) (:)   ] aquifer recharge rate (mm/s)
@@ -1686,6 +1989,352 @@ contains
           enddo
        end do
 
+       if (use_humhol .and. any(top_pp%peat_depth(bounds%begt:bounds%endt) > 0._r8)) then
+          ! Keep the bog regional aquifer below the peat/till interface.
+          ! This block is a numerical/state cap, not a water source: if the
+          ! regional table or implicit WA storage rises above the cap, excess
+          ! goes to qrgwl; if it is deeper than the cap, other fluxes such as
+          ! qcharge-fed till leakage must fill it.
+          do fc = 1, num_hydrologyc
+             c = filter_hydrologyc(fc)
+             t = col_pp%topounit(c)
+             nlevbed = nlev2bed(c)
+
+             if (.not. (top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8)) cycle
+
+             barrier_depth = min(max(top_pp%peat_depth(t), z(c,1)), zi(c,nlevbed))
+             bog_zwt_cap_depth = min(max(barrier_depth + bog_zwt_cap_epsilon, z(c,1)), zi(c,nlevbed))
+
+             if (zwt(c) < bog_zwt_cap_depth .or. &
+                  (.not. zengdecker_2009_with_var_soil_thick .and. &
+                  abs(wa(c) - aquifer_water_baseline) > aquifer_water_tol)) then
+                rous = watsat(c,nlevbed) &
+                     * ( 1. - (1.+1.e3*zwt(c)/sucsat(c,nlevbed))**(-1./bsw(c,nlevbed)))
+                rous=max(rous,0.02_r8)
+
+                if (zengdecker_2009_with_var_soil_thick) then
+                   zwt(c) = max(zwt(c), bog_zwt_cap_depth)
+                else if (wa(c) < aquifer_water_baseline - aquifer_water_tol) then
+                   zwt(c) = max(zwt(c), &
+                        zi(c,nlevbed) + (aquifer_water_baseline - wa(c))/(1000._r8*rous))
+                else
+                   qflx_bog_zwt_excess_tot = max(0._r8, wa(c) - aquifer_water_baseline)
+                   if (qflx_bog_zwt_excess_tot > 0._r8) then
+                      wa(c) = wa(c) - qflx_bog_zwt_excess_tot
+                      qflx_qrgwl(c) = qflx_qrgwl(c) + qflx_bog_zwt_excess_tot/dtime
+                   endif
+                   zwt(c) = max(zwt(c), bog_zwt_cap_depth)
+                endif
+
+                jwt(c) = nlevbed
+                do j = 1,nlevbed
+                   if(zwt(c) <= zi(c,j)) then
+                      if (zengdecker_2009_with_var_soil_thick .and. zwt(c) == zi(c,nlevbed)) then
+                         exit
+                      else
+                         jwt(c) = j-1
+                         exit
+                      end if
+                   end if
+                enddo
+             endif
+          enddo
+       endif
+
+       if (use_humhol .and. any(top_pp%peat_depth(bounds%begt:bounds%endt) > 0._r8)) then
+          ! Bog-bog lateral exchange is between perched peat reservoirs, not
+          ! below-till regional aquifers. Diagnose the current perched state
+          ! before calculating exchange so flow direction matches the state
+          ! later written to history.
+          perched_ka_top(:) = 0._r8
+          perched_head_depth_top(:) = 0._r8
+          perched_col_top(:) = 0
+          perched_active_top(:) = .false.
+
+          do fc = 1, num_hydrologyc
+             c = filter_hydrologyc(fc)
+             t = col_pp%topounit(c)
+             nlevbed = nlev2bed(c)
+
+             if (lun_pp%itype(col_pp%landunit(c)) /= istsoil) cycle
+             if (.not. (top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8)) cycle
+
+             barrier_depth = min(max(top_pp%peat_depth(t), z(c,1)), zi(c,nlevbed))
+             k_barrier = nlevbed
+             do k = 1, nlevbed
+                if (zi(c,k) >= barrier_depth) then
+                   k_barrier = k
+                   exit
+                endif
+             enddo
+
+             ! Put peat storage into the same diagnostic state used later in
+             ! this routine before using it to drive perched lateral exchange.
+             ! Excess liquid below the perched front is moved upward because
+             ! frozen/low-porosity layers can otherwise leave a supersaturated
+             ! deep layer that masks a shallow perched water table.
+             do k = k_barrier, 1, -1
+                liq_capacity = max(watmin, eff_porosity(c,k)*dzmm(c,k))
+                liq_excess = max(h2osoi_liq(c,k) - liq_capacity, 0._r8)
+                if (liq_excess <= 0._r8) cycle
+
+                h2osoi_liq(c,k) = h2osoi_liq(c,k) - liq_excess
+
+                do k_fill = k-1, 1, -1
+                   liq_capacity = max(watmin, eff_porosity(c,k_fill)*dzmm(c,k_fill))
+                   liq_add = min(liq_excess, max(0._r8, liq_capacity - h2osoi_liq(c,k_fill)))
+                   if (liq_add > 0._r8) then
+                      h2osoi_liq(c,k_fill) = h2osoi_liq(c,k_fill) + liq_add
+                      liq_excess = liq_excess - liq_add
+                   endif
+                   if (liq_excess <= 0._r8) exit
+                enddo
+
+                if (liq_excess > 0._r8) h2osfc(c) = h2osfc(c) + liq_excess
+             enddo
+
+             if (h2osfc(c) > 0._r8) then
+                ! Connect surface ponding to available pore space above the
+                ! till before computing total head for lateral exchange.
+                ponded_fill_tot = h2osfc(c)
+                do j = 1, k_barrier
+                   ponded_fill_layer = min(ponded_fill_tot, &
+                        max(0._r8, eff_porosity(c,j)*dz(c,j)*denh2o - h2osoi_liq(c,j)))
+                   if (ponded_fill_layer > 0._r8) then
+                      h2osoi_liq(c,j) = h2osoi_liq(c,j) + ponded_fill_layer
+                      ponded_fill_tot = ponded_fill_tot - ponded_fill_layer
+                   endif
+                   if (ponded_fill_tot <= 0._r8) exit
+                enddo
+                h2osfc(c) = ponded_fill_tot
+             endif
+
+             zwt_perched(c) = zi(c,nlevbed)
+             if (zwt(c) <= barrier_depth) cycle
+
+             sat_lev = 0.9_r8
+             k_perch = 0
+             do k = max(k_barrier - 1, 1), 1, -1
+                h2osoi_vol = h2osoi_liq(c,k)/(dz(c,k)*denh2o) &
+                     + h2osoi_ice(c,k)/(dz(c,k)*denice)
+
+                if (h2osoi_vol/watsat(c,k) <= sat_lev) then
+                   k_perch = k
+                   exit
+                endif
+             enddo
+
+             zwt_perched_k(c) = real(k_perch, r8)
+             zwt_perched_kbarrier(c) = real(k_barrier, r8)
+             zwt_perched_sat1(c) = spval
+             zwt_perched_sat2(c) = spval
+             if (k_perch == 0) then
+                zwt_perched(c) = 0._r8
+             else if (k_barrier > k_perch) then
+                s1 = (h2osoi_liq(c,k_perch)/(dz(c,k_perch)*denh2o) &
+                     + h2osoi_ice(c,k_perch)/(dz(c,k_perch)*denice))/watsat(c,k_perch)
+                s2 = (h2osoi_liq(c,k_perch+1)/(dz(c,k_perch+1)*denh2o) &
+                     + h2osoi_ice(c,k_perch+1)/(dz(c,k_perch+1)*denice))/watsat(c,k_perch+1)
+                zwt_perched_sat1(c) = s1
+                zwt_perched_sat2(c) = s2
+
+                if (abs(s2-s1) > 1.e-12_r8) then
+                   m=(z(c,k_perch+1)-z(c,k_perch))/(s2-s1)
+                   b=z(c,k_perch+1)-m*s2
+                   zwt_perched(c)=min(barrier_depth,max(0._r8,m*sat_lev+b))
+                else
+                   zwt_perched(c)=z(c,k_perch)
+                endif
+             endif
+             if (zwt_perched(c) >= barrier_depth) cycle
+
+             if (perched_col_top(t) /= 0 .and. perched_col_top(t) /= c) then
+                call endrun(msg='HUM_HOL perched bog exchange expects one natural vegetation hydrology column per topounit' &
+                     //errMsg(__FILE__, __LINE__))
+             endif
+
+             perched_col_top(t) = c
+             perched_active_top(t) = k_barrier > k_perch
+             perched_head_depth_top(t) = zwt_perched(c) - h2osfc(c)/1000._r8
+
+             wtsub = 0._r8
+             perched_ka_top(t) = 0._r8
+             do k = max(k_perch, 1), k_barrier
+                imped = 10._r8**(-e_ice*(0.5_r8*(icefrac(c,k)+icefrac(c,min(nlevbed, k+1)))))
+                perched_ka_top(t) = perched_ka_top(t) + imped*hksat(c,k)*dzmm(c,k)
+                wtsub = wtsub + dzmm(c,k)
+             enddo
+             if (wtsub > 0._r8) perched_ka_top(t) = perched_ka_top(t)/wtsub
+          enddo
+
+          do g = bounds%begg, bounds%endg
+             if (grc_pp%ntopounits(g) <= 1) cycle
+
+             topi = grc_pp%topi(g)
+             topf = grc_pp%topf(g)
+
+             do t = topi + 1, topf
+                t_ref = t - 1
+                if (.not. (perched_active_top(t_ref) .and. perched_active_top(t))) cycle
+                if (.not. (top_pp%is_bog(t_ref) .and. top_pp%is_bog(t))) cycle
+                if (.not. (top_pp%peat_depth(t_ref) > 0._r8 .and. top_pp%peat_depth(t) > 0._r8)) cycle
+
+                c_ref = perched_col_top(t_ref)
+                c = perched_col_top(t)
+                if (c_ref == 0 .or. c == 0) cycle
+
+                ka_ref = max(perched_ka_top(t_ref), 1.e-5_r8)
+                ka_to = max(perched_ka_top(t), 1.e-5_r8)
+                elev_offset = top_pp%elevation(t) - top_pp%elevation(t_ref)
+                flux_pair = 2._r8/(1._r8/ka_ref + 1._r8/ka_to) * &
+                     (elev_offset - (perched_head_depth_top(t) - perched_head_depth_top(t_ref))) / &
+                     max(top_pp%lateral_dist(t), 1._r8)
+
+                if (flux_pair > 0._r8) then
+                   t_from = t
+                   t_to = t_ref
+                   c_from = c
+                   c_to = c_ref
+                   donor_scale = sqrt(top_pp%wtgcell(t_ref)/top_pp%wtgcell(t))
+                   receiver_scale = sqrt(top_pp%wtgcell(t)/top_pp%wtgcell(t_ref))
+                else if (flux_pair < 0._r8) then
+                   t_from = t_ref
+                   t_to = t
+                   c_from = c_ref
+                   c_to = c
+                   donor_scale = sqrt(top_pp%wtgcell(t)/top_pp%wtgcell(t_ref))
+                   receiver_scale = sqrt(top_pp%wtgcell(t_ref)/top_pp%wtgcell(t))
+                else
+                   cycle
+                endif
+
+                nlevbed = nlev2bed(c_from)
+                barrier_depth = min(max(top_pp%peat_depth(t_from), z(c_from,1)), zi(c_from,nlevbed))
+                k_barrier_from = nlevbed
+                do k = 1, nlevbed
+                   if (zi(c_from,k) >= barrier_depth) then
+                      k_barrier_from = k
+                      exit
+                   endif
+                enddo
+                if (zwt_perched(c_from) <= 0._r8) then
+                   k_perch_from = 0
+                else
+                   k_perch_from = 1
+                   do k = 1, nlevbed
+                      if (zi(c_from,k) >= zwt_perched(c_from)) then
+                         k_perch_from = k
+                         exit
+                      endif
+                   enddo
+                endif
+
+                perched_water_avail = 0._r8
+                do k = max(k_perch_from+1, 1), k_barrier_from
+                   perched_water_avail = perched_water_avail + max(h2osoi_liq(c_from,k)-watmin, 0._r8)
+                enddo
+                if (perched_water_avail <= 0._r8) cycle
+
+                qflx_from_perched = min(abs(flux_pair)*donor_scale, perched_water_avail/dtime)
+                if (qflx_from_perched <= 0._r8) cycle
+                flux_pair = qflx_from_perched/donor_scale
+                qflx_to_perched = flux_pair*receiver_scale
+
+                rsub_top_tot = -qflx_from_perched*dtime
+                do k = max(k_perch_from+1, 1), k_barrier_from
+                   rsub_top_layer = max(rsub_top_tot, -(h2osoi_liq(c_from,k)-watmin))
+                   rsub_top_layer = min(rsub_top_layer, 0._r8)
+                   rsub_top_tot = rsub_top_tot - rsub_top_layer
+                   h2osoi_liq(c_from,k) = h2osoi_liq(c_from,k) + rsub_top_layer
+                   qflx_lat_aqu_layer(c_from,k) = qflx_lat_aqu_layer(c_from,k) + rsub_top_layer/dtime
+                   if (rsub_top_tot >= 0._r8) exit
+                enddo
+                qflx_lat_aqu(c_from) = qflx_lat_aqu(c_from) - qflx_from_perched
+
+                nlevbed = nlev2bed(c_to)
+                barrier_depth = min(max(top_pp%peat_depth(t_to), z(c_to,1)), zi(c_to,nlevbed))
+                k_barrier_to = nlevbed
+                do k = 1, nlevbed
+                   if (zi(c_to,k) >= barrier_depth) then
+                      k_barrier_to = k
+                      exit
+                   endif
+                enddo
+                if (zwt_perched(c_to) <= 0._r8) then
+                   k_perch_to = 0
+                else
+                   k_perch_to = 1
+                   do k = 1, nlevbed
+                      if (zi(c_to,k) >= zwt_perched(c_to)) then
+                         k_perch_to = k
+                         exit
+                      endif
+                   enddo
+                endif
+
+                sumdz_perched = 0._r8
+                do k = max(k_perch_to+1, 1), k_barrier_to
+                   sumdz_perched = sumdz_perched + dzmm(c_to,k)
+                enddo
+
+                perched_add_tot = qflx_to_perched*dtime
+                if (sumdz_perched > 0._r8) then
+                   do k = max(k_perch_to+1, 1), k_barrier_to
+                      perched_add_layer = perched_add_tot*dzmm(c_to,k)/sumdz_perched
+                      h2osoi_liq(c_to,k) = h2osoi_liq(c_to,k) + perched_add_layer
+                      qflx_lat_aqu_layer(c_to,k) = qflx_lat_aqu_layer(c_to,k) + perched_add_layer/dtime
+                   enddo
+                else
+                   h2osoi_liq(c_to,k_barrier_to) = h2osoi_liq(c_to,k_barrier_to) + perched_add_tot
+                   qflx_lat_aqu_layer(c_to,k_barrier_to) = qflx_lat_aqu_layer(c_to,k_barrier_to) + qflx_to_perched
+                endif
+                qflx_lat_aqu(c_to) = qflx_lat_aqu(c_to) + qflx_to_perched
+             enddo
+          enddo
+       endif
+
+       if (use_humhol .and. any(top_pp%peat_depth(bounds%begt:bounds%endt) > 0._r8)) then
+          do fc = 1, num_hydrologyc
+             c = filter_hydrologyc(fc)
+             t = col_pp%topounit(c)
+             nlevbed = nlev2bed(c)
+
+             if (lun_pp%itype(col_pp%landunit(c)) /= istsoil) cycle
+             if (.not. (top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8)) cycle
+
+             barrier_depth = min(max(top_pp%peat_depth(t), z(c,1)), zi(c,nlevbed))
+             k_barrier = nlevbed
+             do k = 1, nlevbed
+                if (zi(c,k) >= barrier_depth) then
+                   k_barrier = k
+                   exit
+                endif
+             enddo
+
+             ! Move liquid water that cannot fit around ice upward before
+             ! diagnosing the perched water table.
+             do k = k_barrier, 1, -1
+                liq_capacity = max(watmin, eff_porosity(c,k)*dzmm(c,k))
+                liq_excess = max(h2osoi_liq(c,k) - liq_capacity, 0._r8)
+                if (liq_excess <= 0._r8) cycle
+
+                h2osoi_liq(c,k) = h2osoi_liq(c,k) - liq_excess
+
+                do k_fill = k-1, 1, -1
+                   liq_capacity = max(watmin, eff_porosity(c,k_fill)*dzmm(c,k_fill))
+                   liq_add = min(liq_excess, max(0._r8, liq_capacity - h2osoi_liq(c,k_fill)))
+                   if (liq_add > 0._r8) then
+                      h2osoi_liq(c,k_fill) = h2osoi_liq(c,k_fill) + liq_add
+                      liq_excess = liq_excess - liq_add
+                   endif
+                   if (liq_excess <= 0._r8) exit
+                enddo
+
+                if (liq_excess > 0._r8) h2osfc(c) = h2osfc(c) + liq_excess
+             enddo
+          enddo
+       endif
+
        rous = 0.2_r8
 
        !==  BASEFLOW ==================================================
@@ -1693,9 +2342,13 @@ contains
        do fc = 1, num_hydrologyc
           c = filter_hydrologyc(fc)
           nlevbed = nlev2bed(c)
-          g = col_pp%gridcell(c)
           t = col_pp%topounit(c)
-          topi = grc_pp%topi(g)
+          use_bog_perched = use_humhol .and. top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8
+          if (use_bog_perched) then
+             barrier_depth = min(max(top_pp%peat_depth(t), z(c,1)), zi(c,nlevbed))
+          else
+             barrier_depth = 0._r8
+          endif
           !  specify maximum drainage rate
           q_perch_max = 1.e-5_r8 * sin(col_pp%topo_slope(c) * (rpi/180._r8))
 
@@ -1720,7 +2373,12 @@ contains
 
           ! initialize perched water table to frost table, and qflx_drain_perched(c) to zero
           zwt_perched(c)=frost_table(c)
+          if (use_humhol .and. .not. use_bog_perched) zwt_perched(c) = spval
           qflx_drain_perched(c) = 0._r8
+          zwt_perched_k(c) = spval
+          zwt_perched_kbarrier(c) = spval
+          zwt_perched_sat1(c) = spval
+          zwt_perched_sat2(c) = spval
 
           !===================  water table above frost table  =============================
           ! if water table is above frost table, do not use topmodel baseflow formulation
@@ -1806,6 +2464,10 @@ contains
                      + h2osoi_ice(c,k_perch)/(dz(c,k_perch)*denice))/watsat(c,k_perch)
                 s2 = (h2osoi_liq(c,k_perch+1)/(dz(c,k_perch+1)*denh2o) &
                      + h2osoi_ice(c,k_perch+1)/(dz(c,k_perch+1)*denice))/watsat(c,k_perch+1)
+                zwt_perched_k(c) = real(k_perch, r8)
+                zwt_perched_kbarrier(c) = real(k_frz, r8)
+                zwt_perched_sat1(c) = s1
+                zwt_perched_sat2(c) = s2
 
                 m=(z(c,k_perch+1)-z(c,k_perch))/(s2-s1)
                 b=z(c,k_perch+1)-m*s2
@@ -1855,8 +2517,211 @@ contains
                 qflx_drain_perched(c) = 0._r8
              endif !k_frz > k_perch
 
+             if (use_bog_perched) then
+                zwt_perched(c) = zi(c,nlevbed)
+                if (zwt(c) > barrier_depth) then
+                   k_barrier = nlevbed
+                   do k = 1, nlevbed
+                      if (zi(c,k) >= barrier_depth) then
+                         k_barrier = k
+                         exit
+                      endif
+                   enddo
+
+                   if (h2osfc(c) > 0._r8) then
+                      ponded_fill_tot = h2osfc(c)
+                      do j = 1, k_barrier
+                         ponded_fill_layer = min(ponded_fill_tot, &
+                              max(0._r8, eff_porosity(c,j)*dz(c,j)*denh2o - h2osoi_liq(c,j)))
+                         if (ponded_fill_layer > 0._r8) then
+                            h2osoi_liq(c,j) = h2osoi_liq(c,j) + ponded_fill_layer
+                            ponded_fill_tot = ponded_fill_tot - ponded_fill_layer
+                         endif
+                         if (ponded_fill_tot <= 0._r8) exit
+                      enddo
+                      h2osfc(c) = ponded_fill_tot
+                   endif
+
+                   sat_lev = 0.9_r8
+                   k_perch = 0
+                   ! The peat/till boundary can fall inside a model layer.
+                   ! Diagnose the perched table from layers above that
+                   ! crossing layer so a partially saturated barrier layer
+                   ! does not mask the perch.
+                   do k = max(k_barrier - 1, 1), 1, -1
+                      h2osoi_vol = h2osoi_liq(c,k)/(dz(c,k)*denh2o) &
+                           + h2osoi_ice(c,k)/(dz(c,k)*denice)
+
+                      if (h2osoi_vol/watsat(c,k) <= sat_lev) then
+                         k_perch = k
+                         exit
+                      endif
+                   enddo
+
+                   zwt_perched_k(c) = real(k_perch, r8)
+                   zwt_perched_kbarrier(c) = real(k_barrier, r8)
+                   zwt_perched_sat1(c) = spval
+                   zwt_perched_sat2(c) = spval
+                   if (k_perch == 0) then
+                      zwt_perched(c) = 0._r8
+                   else if (k_barrier > k_perch) then
+                      s1 = (h2osoi_liq(c,k_perch)/(dz(c,k_perch)*denh2o) &
+                           + h2osoi_ice(c,k_perch)/(dz(c,k_perch)*denice))/watsat(c,k_perch)
+                      s2 = (h2osoi_liq(c,k_perch+1)/(dz(c,k_perch+1)*denh2o) &
+                           + h2osoi_ice(c,k_perch+1)/(dz(c,k_perch+1)*denice))/watsat(c,k_perch+1)
+                      zwt_perched_sat1(c) = s1
+                      zwt_perched_sat2(c) = s2
+
+                      if (abs(s2-s1) > 1.e-12_r8) then
+                         m=(z(c,k_perch+1)-z(c,k_perch))/(s2-s1)
+                         b=z(c,k_perch+1)-m*s2
+                         zwt_perched(c)=min(barrier_depth,max(0._r8,m*sat_lev+b))
+                      else
+                         zwt_perched(c)=z(c,k_perch)
+                      endif
+                   endif
+
+                   if (k_perch == 0 .or. k_barrier > k_perch) then
+                      wtsub = 0._r8
+                      imped = 0._r8
+                      do k = max(k_perch, 1), k_barrier
+                         imped = imped + 10._r8**(-e_ice*(0.5_r8*(icefrac(c,k)+icefrac(c,min(nlevbed, k+1))))) &
+                              * dzmm(c,k)
+                         wtsub = wtsub + dzmm(c,k)
+                      end do
+                      if (wtsub > 0._r8) imped = imped/wtsub
+
+                      fff(c) = 1._r8/hkdepth(c)
+                      rsub_top_ref_offset = 0._r8
+                      head_depth_drain = zwt_perched(c) - h2osfc(c)/1000._r8
+                      ! Perched bog drainage is a local acrotelm outlet; do not
+                      ! use the full bog-to-fen elevation offset as hydraulic head.
+                      qflx_perched_drain_req = imped * rsub_top_ref_offset * &
+                           exp(-fff(c)*head_depth_drain)
+                      qflx_perched_drain_req = min(qflx_perched_drain_req, rsub_top_globalmax)
+                      till_thickness = max(1._r8, dz(c,k_barrier))
+                      bog_zwt_cap_depth = min(max(barrier_depth + bog_zwt_cap_epsilon, z(c,1)), zi(c,nlevbed))
+                      rous = watsat(c,nlevbed) &
+                           * ( 1. - (1.+1.e3*zwt(c)/sucsat(c,nlevbed))**(-1./bsw(c,nlevbed)))
+                      rous=max(rous,0.02_r8)
+                      ! Cross-barrier loss from the perched bog store is the
+                      ! explicit till-leak path. It is driven by head
+                      ! difference, limited by till Ksat/ice impedance, and
+                      ! cannot charge the regional aquifer above its cap.
+                      till_gradient = max(0._r8, zwt(c) - zwt_perched(c)) / till_thickness
+                      till_leak_limiter = min(1._r8, max(0._r8, zwt(c) - bog_zwt_cap_depth) / &
+                           till_leak_head_scale)
+                      bog_zwt_capacity_rate = max(0._r8, (zwt(c) - bog_zwt_cap_depth)*1000._r8*rous/dtime)
+                      qflx_till_leak_req = min(imped * max(0._r8, top_pp%till_ksat(t)) * &
+                           till_gradient * till_leak_limiter, bog_zwt_capacity_rate)
+                      qflx_perched_total_req = qflx_perched_drain_req + qflx_till_leak_req
+
+                      drain_blocked = any(t_soisno(c,max(k_perch, 1):k_barrier) <= tfrz)
+                      if (drain_blocked .or. use_vsfm) then
+                         qflx_perched_drain_req = 0._r8
+                         qflx_till_leak_req = 0._r8
+                      endif
+
+                      ! If ponded surface water is connected to the perched peat
+                      ! outlet, route it before removing water from peat layers.
+                      qflx_perched_drain_sfc = min(qflx_perched_drain_req, max(0._r8, h2osfc(c))/dtime)
+                      if (qflx_perched_drain_sfc > 0._r8) then
+                         h2osfc(c) = h2osfc(c) - qflx_perched_drain_sfc*dtime
+                         qflx_perched_drain_req = qflx_perched_drain_req - qflx_perched_drain_sfc
+                      endif
+
+                      qflx_perched_total_req = qflx_perched_drain_req + qflx_till_leak_req
+
+                      rsub_top_tot = -qflx_perched_total_req * dtime
+                      do k = max(k_perch+1, 1), k_barrier
+                         rsub_top_layer=max(rsub_top_tot,-(h2osoi_liq(c,k)-watmin))
+                         rsub_top_layer=min(rsub_top_layer,0._r8)
+                         if (use_vsfm) rsub_top_layer = 0._r8
+                         rsub_top_tot = rsub_top_tot - rsub_top_layer
+
+                         h2osoi_liq(c,k) = h2osoi_liq(c,k) + rsub_top_layer
+                         qflx_drain_vr(c,k) = qflx_drain_vr(c,k) - rsub_top_layer
+
+                         if (rsub_top_tot >= 0.) then
+                            zwt_perched(c) = zwt_perched(c) - rsub_top_layer/eff_porosity(c,k)/1000._r8
+                            exit
+                         else
+                            zwt_perched(c) = zi(c,k)
+                         endif
+                      enddo
+
+                      qflx_perched_total = max(0._r8, qflx_perched_total_req + rsub_top_tot/dtime)
+                      if (qflx_perched_total_req > 0._r8) then
+                         qflx_drain_perched(c) = qflx_perched_drain_sfc + qflx_perched_total * &
+                              qflx_perched_drain_req/qflx_perched_total_req
+                         qflx_till_leak = qflx_perched_total * qflx_till_leak_req/qflx_perched_total_req
+                      else
+                         qflx_drain_perched(c) = qflx_perched_drain_sfc
+                         qflx_till_leak = 0._r8
+                      endif
+
+                      if (qflx_till_leak > 0._r8) then
+                         ! Add till leakage to the regional aquifer only up
+                         ! to the peat/till cap. Any overflow is exported via
+                         ! qrgwl to avoid hiding water above the cap in WA.
+                         qcharge_tot = qflx_till_leak * dtime
+                         rous = watsat(c,nlevbed) &
+                              * ( 1. - (1.+1.e3*zwt(c)/sucsat(c,nlevbed))**(-1./bsw(c,nlevbed)))
+                         rous=max(rous,0.02_r8)
+
+                         bog_zwt_cap_depth = min(max(barrier_depth + bog_zwt_cap_epsilon, z(c,1)), zi(c,nlevbed))
+                         if (zwt(c) > bog_zwt_cap_depth) then
+                            qflx_bog_zwt_to_aquifer_tot = min(qcharge_tot, &
+                                 (zwt(c) - bog_zwt_cap_depth)*1000._r8*rous)
+                         else
+                            qflx_bog_zwt_to_aquifer_tot = 0._r8
+                         endif
+                         qflx_bog_zwt_to_aquifer_tot = max(0._r8, qflx_bog_zwt_to_aquifer_tot)
+                         qflx_bog_zwt_excess_tot = max(0._r8, qcharge_tot - qflx_bog_zwt_to_aquifer_tot)
+
+                         if (qflx_bog_zwt_to_aquifer_tot > 0._r8) then
+                            wa(c) = wa(c) + qflx_bog_zwt_to_aquifer_tot
+                            zwt(c) = zwt(c) - qflx_bog_zwt_to_aquifer_tot/1000._r8/rous
+                         endif
+                         if (qflx_bog_zwt_excess_tot > 0._r8) then
+                            qflx_qrgwl(c) = qflx_qrgwl(c) + qflx_bog_zwt_excess_tot/dtime
+                         endif
+
+                         if (zengdecker_2009_with_var_soil_thick) then
+                            zwt(c) = max(bog_zwt_cap_depth, zwt(c))
+                         else if (wa(c) < aquifer_water_baseline - aquifer_water_tol) then
+                            zwt(c) = max(zwt(c), &
+                                 zi(c,nlevbed) + (aquifer_water_baseline - wa(c))/(1000._r8*rous))
+                         else
+                            qflx_bog_zwt_excess_tot = max(0._r8, wa(c) - aquifer_water_baseline)
+                            if (qflx_bog_zwt_excess_tot > 0._r8) then
+                               wa(c) = wa(c) - qflx_bog_zwt_excess_tot
+                               qflx_qrgwl(c) = qflx_qrgwl(c) + qflx_bog_zwt_excess_tot/dtime
+                            endif
+                            zwt(c) = max(bog_zwt_cap_depth, zwt(c))
+                         endif
+
+                         jwt(c) = nlevbed
+                         do j = 1,nlevbed
+                            if(zwt(c) <= zi(c,j)) then
+                               if (zengdecker_2009_with_var_soil_thick .and. zwt(c) == zi(c,nlevbed)) then
+                                  exit
+                               else
+                                  jwt(c) = j-1
+                                  exit
+                               end if
+                            end if
+                         enddo
+                      endif
+                   endif
+                endif
+             endif
+
              !-- Topographic runoff  ----------------------------------------------------------------------
-             drain_blocked = use_humhol .and. any(t_soisno(c,max(jwt(c)+1,1):nlevbed) <= tfrz)
+             ! Apply the standard regional subsurface drainage calculation to
+             ! all topounits. Frozen-soil effects enter through imped below;
+             ! only the separate perched bog outlet has an explicit frozen
+             ! drainage block.
              fff(c)         = 1._r8/ hkdepth(c)
              dzsum = 0._r8
              icefracsum = 0._r8
@@ -1865,7 +2730,7 @@ contains
                 icefracsum = icefracsum + icefrac(c,j) * dzmm(c,j)
              end do
              ! add ice impedance factor to baseflow
-             if(origflag == 1) then 
+             if(origflag == 1) then
                 if (use_vichydro) then
 #ifndef _OPENACC
                    call endrun(msg="VICHYDRO is not available for origflag=1"//errmsg(__FILE__, __LINE__))
@@ -1875,7 +2740,6 @@ contains
                         - exp(-3._r8))/(1.0_r8-exp(-3._r8))
                    imped=(1._r8 - fracice_rsub(c))
                    rsub_top_max = 5.5e-3_r8
-                   if (use_humhol) rsub_top_max = min(5.5e-3_r8, rsub_top_globalmax)
 #if (defined MARSH)                   
                    rsub_top_max = rsub_top_globalmax
 #endif
@@ -1891,36 +2755,35 @@ contains
                 end if
              endif
 
-             if (use_humhol) then
-                rsub_top_ref_offset = 100._r8 / (365._r8 * secspday)
-                topounit_depth_offset = top_pp%elevation(t) - top_pp%elevation(topi)
-                head_depth_drain = zwt(c) - h2osfc(c)/1000._r8
-                rsub_top(c) = imped * rsub_top_ref_offset * exp(-fff(c)*(head_depth_drain - topounit_depth_offset))
+             if (use_vichydro) then
+                ! ARNO model for the bottom soil layer (based on bottom soil layer
+                ! moisture from previous time step
+                ! use watmin instead for resid_moist to be consistent with default hydrology
+                rel_moist = (moist(c,nlayer) - watmin)/(max_moist(c,nlayer)-watmin)
+                frac = (Ds(c) * rsub_top_max )/Wsvic(c)
+                rsub_tmp = (frac * rel_moist)/dtime
+                if(rel_moist > Wsvic(c))then
+                   frac = (rel_moist - Wsvic(c))/(1.0_r8 - Wsvic(c))
+                   rsub_tmp = rsub_tmp + (rsub_top_max * (1.0_r8 - Ds(c)/Wsvic(c)) *frac**c_param(c))/dtime
+                end if
+                rsub_top(c) = imped * rsub_tmp
+                ! make sure baseflow isn't negative
+                rsub_top(c) = max(0._r8, rsub_top(c))
              else
-                if (use_vichydro) then
-                   ! ARNO model for the bottom soil layer (based on bottom soil layer
-                   ! moisture from previous time step
-                   ! use watmin instead for resid_moist to be consistent with default hydrology
-                   rel_moist = (moist(c,nlayer) - watmin)/(max_moist(c,nlayer)-watmin)
-                   frac = (Ds(c) * rsub_top_max )/Wsvic(c)
-                   rsub_tmp = (frac * rel_moist)/dtime
-                   if(rel_moist > Wsvic(c))then
-                      frac = (rel_moist - Wsvic(c))/(1.0_r8 - Wsvic(c))
-                      rsub_tmp = rsub_tmp + (rsub_top_max * (1.0_r8 - Ds(c)/Wsvic(c)) *frac**c_param(c))/dtime
-                   end if
-                   rsub_top(c) = imped * rsub_tmp
-                   ! make sure baseflow isn't negative
-                   rsub_top(c) = max(0._r8, rsub_top(c))
+                if (jwt(c) == nlevbed .and. zengdecker_2009_with_var_soil_thick) then
+                   rsub_top(c)    = 0._r8
                 else
-                 if (jwt(c) == nlevbed .and. zengdecker_2009_with_var_soil_thick) then
-                      rsub_top(c)    = 0._r8
-                   else
-                      rsub_top(c)    = imped * rsub_top_max* exp(-fff(c)*zwt(c))
-                 end if
+                   rsub_top(c)    = imped * rsub_top_max* exp(-fff(c)*zwt(c))
                 end if
              end if
+             if (use_humhol .and. top_pp%peat_depth(t) > 0._r8 .and. .not. top_pp%is_bog(t)) then
+                ! Non-bog peat units represent fen/lagg seepage rather than
+                ! a freely draining upland hillslope. Cap the global TOPMODEL
+                ! drain at the Marcell S2 watershed seepage estimate concentrated
+                ! through the lagg/fen area (250 cm/yr local for 4% area).
+                rsub_top(c) = min(rsub_top(c), fen_rsub_top_max)
+             endif
              if (use_vsfm) rsub_top(c) = 0._r8
-             if (drain_blocked) rsub_top(c) = 0._r8
 
              ! use analytical expression for aquifer specific yield
              rous = watsat(c,nlevbed) &
@@ -2154,9 +3017,9 @@ contains
 
           qflx_drain(c) = qflx_rsub_sat(c) + rsub_top(c)
 
-          ! Set imbalance for snow capping
-
-          qflx_qrgwl(c) = qflx_snwcp_liq(c)
+          ! Set imbalance for snow capping without overwriting other qrgwl
+          ! terms such as bog regional aquifer overflow.
+          qflx_qrgwl(c) = qflx_qrgwl(c) + qflx_snwcp_liq(c)
 
        end do
 
@@ -2566,7 +3429,7 @@ contains
 
           ! Set imbalance for snow capping
 
-          qflx_qrgwl(c) = qflx_snwcp_liq(c)
+          qflx_qrgwl(c) = qflx_qrgwl(c) + qflx_snwcp_liq(c)
 
        end do
 

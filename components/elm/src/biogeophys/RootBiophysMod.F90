@@ -45,6 +45,8 @@ contains
     use shr_log_mod    , only : errMsg => shr_log_errMsg
     use decompMod      , only : bounds_type
     use abortutils     , only : endrun         
+    use TopounitType   , only : top_pp
+    use VegetationType , only : veg_pp
     !
     ! !ARGUMENTS:
     implicit none
@@ -56,13 +58,24 @@ contains
     !
     ! !LOCAL VARIABLES:
     character(len=32) :: subname = 'init_vegrootfr'  ! subroutine name
+    real(r8) :: rootfr_zeng(bounds%begp:bounds%endp, 1:nlevsoi)
+    real(r8) :: rootfr_spruce(bounds%begp:bounds%endp, 1:nlevsoi)
+    integer  :: p
     !------------------------------------------------------------------------
 
     SHR_ASSERT_ALL((ubound(rootfr) == (/bounds%endp, nlevgrnd/)), errMsg(__FILE__, __LINE__))
 
     select case (root_prof_method)
     case (zeng_2001_root)
-       rootfr(bounds%begp:bounds%endp, 1 : nlevsoi) = zeng2001_rootfr(bounds, nlevsoi, nlev2bed)
+       rootfr_zeng(bounds%begp:bounds%endp, 1:nlevsoi) = zeng2001_rootfr(bounds, nlevsoi, nlev2bed)
+       rootfr_spruce(bounds%begp:bounds%endp, 1:nlevsoi) = spruce_rootfr(bounds, nlevsoi, nlev2bed)
+       do p = bounds%begp,bounds%endp
+          if (top_pp%peat_depth(veg_pp%topounit(p)) > 0._r8) then
+             rootfr(p,1:nlevsoi) = rootfr_spruce(p,1:nlevsoi)
+          else
+             rootfr(p,1:nlevsoi) = rootfr_zeng(p,1:nlevsoi)
+          endif
+       enddo
     case (spruce_root)
        rootfr(bounds%begp:bounds%endp, 1 : nlevsoi) = spruce_rootfr(bounds,nlevsoi, nlev2bed)
 
@@ -161,7 +174,7 @@ contains
     use shr_assert_mod , only : shr_assert
     use shr_log_mod    , only : errMsg => shr_log_errMsg
     use decompMod      , only : bounds_type
-    use pftvarcon      , only : noveg, roota_par, rootb_par  !these pars shall
+    use pftvarcon      , only : noveg, roota_par, rootb_par
     use elm_varctl     , only : use_var_soil_thick
     use VegetationType , only : veg_pp
     use ColumnType     , only : col_pp
@@ -188,6 +201,8 @@ contains
     do p = bounds%begp,bounds%endp
        if (veg_pp%itype(p) /= noveg .and. .not.veg_pp%is_fates(p)) then
           c = veg_pp%column(p)
+          ! For this profile, roota_par/rootb_par store the observed
+          ! SPRUCE linear slope/intercept for peatland-tuned PFTs.
           rootb_intercept = rootb_par(veg_pp%itype(p))
           roota_slope     = roota_par(veg_pp%itype(p))
           nlevbed = njbed(c)

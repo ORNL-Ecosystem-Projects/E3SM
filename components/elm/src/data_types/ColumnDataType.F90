@@ -20,7 +20,7 @@ module ColumnDataType
   use elm_varcon      , only : spval, ispval, zlnd, snw_rds_min, denice, denh2o, tfrz, pondmx
   use elm_varcon      , only : watmin, bdsno, bdfirn, zsoi, zisoi, dzsoi_decomp
   use elm_varcon      , only : c13ratio, c14ratio, secspday
-  use elm_varctl      , only : use_fates, use_fates_planthydro, create_glacier_mec_landunit, use_IM2_hillslope_hydrology, use_humhol
+  use elm_varctl      , only : use_fates, use_fates_planthydro, create_glacier_mec_landunit, use_IM2_hillslope_hydrology
   use elm_varctl      , only : use_hydrstress, use_crop
   use elm_varctl      , only : bound_h2osoi, use_cn, iulog, use_vertsoilc, spinup_state
   use elm_varctl      , only : ero_ccycle
@@ -50,6 +50,7 @@ module ColumnDataType
   use ColumnType      , only : col_pp
   use LandunitType    , only : lun_pp
   use GridcellType    , only : grc_pp
+  use TopounitType    , only : top_pp
   use timeInfoMod , only : nstep_mod
   !
   ! !PUBLIC TYPES:
@@ -1955,6 +1956,10 @@ contains
        end if
     end do
 
+    call seed_bog_perched_soil_water(this, begc, endc, watsat_input)
+    this%h2osoi_liq_old(begc:endc,:) = this%h2osoi_liq(begc:endc,:)
+    this%h2osoi_ice_old(begc:endc,:) = this%h2osoi_ice(begc:endc,:)
+
   end subroutine col_ws_init
 
   !------------------------------------------------------------------------
@@ -2192,8 +2197,68 @@ contains
 
     endif   ! end if if-read flag
 
+    if (flag == 'read' .and. is_first_step()) then
+       call seed_bog_perched_soil_water(this, bounds%begc, bounds%endc, watsat_input)
+    endif
+
   end subroutine col_ws_restart
 
+  !------------------------------------------------------------------------
+  subroutine seed_bog_perched_soil_water(this, begc, endc, watsat_input)
+    !
+    ! !DESCRIPTION:
+    ! Saturate bog peat below the initialized perched table and above the
+    ! restrictive till barrier so ZWT_PERCH has matching liquid water storage.
+    !
+    ! !ARGUMENTS:
+    class(column_water_state) :: this
+    integer , intent(in)      :: begc,endc
+    real(r8), intent(in)      :: watsat_input(begc:, 1:)
+    !
+    ! !LOCAL VARIABLES:
+    integer  :: c,j,l,t,nlevbed
+    real(r8) :: barrier_depth
+    real(r8) :: perched_depth
+    real(r8) :: layer_top
+    real(r8) :: layer_bot
+    real(r8) :: overlap
+    real(r8) :: layer_frac
+    real(r8) :: target_vol
+    !------------------------------------------------------------------------
+
+    do c = begc,endc
+       l = col_pp%landunit(c)
+       if (.not. (lun_pp%itype(l) == istsoil .or. lun_pp%itype(l) == istcrop)) cycle
+
+       t = col_pp%topounit(c)
+       if (.not. top_pp%active(t)) cycle
+       if (.not. (top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8)) cycle
+
+       nlevbed = col_pp%nlevbed(c)
+       barrier_depth = min(max(top_pp%peat_depth(t), col_pp%z(c,1)), col_pp%zi(c,nlevbed))
+       perched_depth = min(0.05_r8, 0.5_r8 * barrier_depth)
+
+       do j = 1,nlevbed
+          layer_top = max(0._r8, col_pp%zi(c,j-1))
+          layer_bot = col_pp%zi(c,j)
+          overlap = max(0._r8, min(layer_bot, barrier_depth) - max(layer_top, perched_depth))
+          if (overlap <= 0._r8) cycle
+
+          layer_frac = min(1._r8, overlap / col_pp%dz(c,j))
+          target_vol = layer_frac * watsat_input(c,j) + (1._r8 - layer_frac) * this%h2osoi_vol(c,j)
+          this%h2osoi_vol(c,j) = min(watsat_input(c,j), max(this%h2osoi_vol(c,j), target_vol))
+
+          if (col_es%t_soisno(c,j) <= tfrz) then
+             this%h2osoi_ice(c,j) = col_pp%dz(c,j)*denice*this%h2osoi_vol(c,j)
+             this%h2osoi_liq(c,j) = 0._r8
+          else
+             this%h2osoi_ice(c,j) = 0._r8
+             this%h2osoi_liq(c,j) = col_pp%dz(c,j)*denh2o*this%h2osoi_vol(c,j)
+          endif
+       enddo
+    enddo
+
+  end subroutine seed_bog_perched_soil_water
 
   !------------------------------------------------------------------------
   subroutine col_ws_clean(this)
@@ -6060,7 +6125,7 @@ contains
           avgflag='A', long_name='Sub-surface drainage by layer', &
           ptr_col=this%qflx_drain_vr)
 
-    if (use_humhol) then
+    if (any(top_pp%peat_depth > 0._r8)) then
       this%qflx_lat_aqu(begc:endc) = spval
       call hist_addfld1d (fname='QFLX_LAT_AQU',  units='mm/s',  &
            avgflag='A', long_name='Lateral flow between hummock and hollow', &
@@ -6165,7 +6230,7 @@ contains
           avgflag='A', long_name='column-integrated snow freezing rate', &
            ptr_col=this%qflx_snofrz, set_lake=spval, c2l_scale_type='urbanf')
 
-    if (use_IM2_hillslope_hydrology .or. use_humhol) then
+    if (use_IM2_hillslope_hydrology .or. any(top_pp%peat_depth > 0._r8)) then
       call hist_addfld1d (fname='QFROM_UPHILL',  units='mm/s',  &
             avgflag='A', long_name='input to top layer soil from uphill topounit(s)', &
             ptr_col=this%qflx_from_uphill, c2l_scale_type='urbanf')
@@ -6175,7 +6240,7 @@ contains
             ptr_col=this%qflx_to_downhill, c2l_scale_type='urbanf')
     endif
 
-    if (use_humhol) then
+    if (any(top_pp%peat_depth > 0._r8)) then
       this%qflx_lat_aqu(begc:endc) = spval
       call hist_addfld1d (fname='QLAT_AQU', units='kg/m2/s', &
            avgflag='A', long_name='Lateral flux between hummock/hollow', &
