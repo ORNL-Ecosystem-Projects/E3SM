@@ -647,6 +647,8 @@ contains
             mr = mr + livestem_mr(p) + livecroot_mr(p)
          else if (iscft(ivt(p))) then
             if (croplive(p)) mr = mr + livestem_mr(p) + grain_mr(p)
+         else
+            mr = mr + livecroot_mr(p)
          end if
 
          ! carbon flux available for allocation
@@ -1434,6 +1436,8 @@ contains
            mr = mr + livestem_mr(p) + livecroot_mr(p)
          else if (iscft(ivt(p))) then
            if (croplive(p)) mr = mr + livestem_mr(p) + grain_mr(p)
+         else
+           mr = mr + livecroot_mr(p)
          end if
          ! try to take mr from xsmr storage pool first
          if (xsmrpool(p) > 0) then

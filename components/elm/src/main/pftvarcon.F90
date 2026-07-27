@@ -34,6 +34,7 @@ module pftvarcon
   integer :: ndllf_evr_tmp_tree     !value for Needleleaf evergreen temperate tree
   integer :: ndllf_evr_brl_tree     !value for Needleleaf evergreen boreal tree
   integer :: ndllf_dcd_brl_tree     !value for Needleleaf deciduous boreal tree
+  integer :: npeat_ndllf_dcd_brl_tree = -1 !value for peatland Needleleaf deciduous boreal tree
   integer :: nbrdlf_evr_trp_tree    !value for Broadleaf evergreen tropical tree
   integer :: nbrdlf_evr_tmp_tree    !value for Broadleaf evergreen temperate tree
   integer :: nbrdlf_dcd_trp_tree    !value for Broadleaf deciduous tropical tree
@@ -43,6 +44,7 @@ module pftvarcon
   integer :: nbrdlf_evr_shrub       !value for Broadleaf evergreen shrub
   integer :: nbrdlf_dcd_tmp_shrub   !value for Broadleaf deciduous temperate shrub
   integer :: nbrdlf_dcd_brl_shrub   !value for Broadleaf deciduous boreal shrub
+  integer :: npeat_nbrdlf_dcd_brl_shrub = -1 !value for peatland Broadleaf deciduous boreal shrub
   integer :: nc3_arctic_grass       !value for C3 arctic grass
   integer :: nc3_nonarctic_grass    !value for C3 non-arctic grass
   integer :: nc4_grass              !value for C4 grass
@@ -1406,6 +1408,13 @@ contains
     do i=0, mxpft
        if (temp_iscft(i) == 1._r8) iscft(i) = .true.
        if (temp_iscft(i) == 0._r8) iscft(i) = .false.
+    end do
+
+    npeat_ndllf_dcd_brl_tree = -1
+    npeat_nbrdlf_dcd_brl_shrub = -1
+    do i = 0, npft-1
+       if (trim(pftname(i)) == 'peatlnd_needleleaf_deciduous_boreal_tree') npeat_ndllf_dcd_brl_tree = i
+       if (trim(pftname(i)) == 'peatlnd_broadleaf_deciduous_boreal_shrub') npeat_nbrdlf_dcd_brl_shrub = i
     end do
 
    if ( PFT_DEFAULT ) then

@@ -17,6 +17,7 @@ module PhenologyMod
   use elm_varctl          , only : iulog, use_humhol
   use elm_varcon          , only : tfrz
   use elm_varcon          , only : secspday
+  use pftvarcon           , only : npeat_ndllf_dcd_brl_tree, npeat_nbrdlf_dcd_brl_shrub
   use abortutils          , only : endrun
   use CanopyStateType     , only : canopystate_type
   use CNStateType         , only : cnstate_type
@@ -28,6 +29,7 @@ module PhenologyMod
   use ColumnType          , only : col_pp
   use ColumnDataType      , only : col_es, col_ws, col_cf, col_nf, col_pf
   use TopounitDataType    , only : top_af, top_as
+  use TopounitType        , only : top_pp
   use GridcellType        , only : grc_pp
   use VegetationType      , only : veg_pp
   use VegetationDataType  , only : veg_es, veg_ef, veg_cs, veg_cf, veg_ns, veg_nf
@@ -673,12 +675,17 @@ contains
     type(cnstate_type)       , intent(inout) :: cnstate_vars
     !
     ! !LOCAL VARIABLES:
-    integer :: g,c,p          !indices
+    integer :: g,c,t,p        !indices
     integer :: fp             !lake filter pft index
     real(r8):: ws_flag        !winter-summer solstice flag (0 or 1)
     real(r8):: crit_onset_gdd !critical onset growing degree-day sum
     real(r8):: soilt
     real(r8):: dt
+    real(r8):: onset_xfer_c_resid
+    real(r8):: onset_xfer_n_resid
+    real(r8):: onset_xfer_p_resid
+    real(r8), parameter :: xfer_warn_tol = 1.e-10_r8
+    logical :: is_peatland_topounit
     !-----------------------------------------------------------------------
 
     associate(                                                                                             &
@@ -798,10 +805,12 @@ contains
       do fp = 1,num_soilp
          p = filter_soilp(fp)
          c = veg_pp%column(p)
+         t = veg_pp%topounit(p)
          g = veg_pp%gridcell(p)           
+         is_peatland_topounit = use_humhol .and. top_pp%peat_depth(t) > 0._r8
       
          if (season_decid(ivt(p)) == 1._r8) then
-            soilt = t_soisno(1,3)
+            soilt = t_soisno(c,3)
             crit_onset_gdd = exp(crit_gdd1(ivt(p)) + 0.13_r8*(annavg_t2m(p) - SHR_CONST_TKFRZ))
             ! set background litterfall rate, background transfer rate, and
             ! long growing season factor to 0 for seasonal deciduous types
@@ -822,15 +831,11 @@ contains
 
             ! update offset_counter and test for the end of the offset period
             if (offset_flag(p) == 1.0_r8) then
-               !if (c==2) then
-               !   offset_counter(p) = offset_counter(p)
-               !else if (c==1) then
-                  offset_counter(p) = offset_counter(p) - dt
-               !endif
+               offset_counter(p) = offset_counter(p) - dt
 
                ! if this is the end of the offset_period, reset phenology
                ! flags and indices
-               if (offset_counter(p) == 0.0_r8) then
+               if (offset_counter(p) <= 0.0_r8) then
                ! this code block was originally handled by call cn_offset_cleanup(p)
                ! inlined during vectorization
 
@@ -847,61 +852,60 @@ contains
             ! update onset_counter and test for the end of the onset period
             if (onset_flag(p) == 1.0_r8) then
                ! decrement counter for onset period
-               !if (c==2) then
-               !   onset_counter(p) = onset_counter(p)
-               !else if (c==1) then
-                  onset_counter(p) = onset_counter(p) - dt
-               !endif
+               onset_counter(p) = onset_counter(p) - dt
 
                   ! if this is the end of the onset period, reset phenology
                   ! flags and indices
-               if (onset_counter(p) == 0.0_r8) then
+               if (onset_counter(p) <= 0.0_r8) then
                ! this code block was originally handled by call cn_onset_cleanup(p)
                ! inlined during vectorization
 
+                  onset_xfer_c_resid = abs(leafc_xfer(p)) + abs(frootc_xfer(p)) + &
+                       abs(livecrootc_xfer(p))
+                  onset_xfer_n_resid = abs(leafn_xfer(p)) + abs(frootn_xfer(p)) + &
+                       abs(livecrootn_xfer(p))
+                  onset_xfer_p_resid = abs(leafp_xfer(p)) + abs(frootp_xfer(p)) + &
+                       abs(livecrootp_xfer(p))
+                  if (woody(ivt(p)) >= 1.0_r8) then
+                     onset_xfer_c_resid = onset_xfer_c_resid + abs(livestemc_xfer(p)) + &
+                          abs(deadstemc_xfer(p)) + abs(deadcrootc_xfer(p))
+                     onset_xfer_n_resid = onset_xfer_n_resid + abs(livestemn_xfer(p)) + &
+                          abs(deadstemn_xfer(p)) + abs(deadcrootn_xfer(p))
+                     onset_xfer_p_resid = onset_xfer_p_resid + abs(livestemp_xfer(p)) + &
+                          abs(deadstemp_xfer(p)) + abs(deadcrootp_xfer(p))
+                  end if
+                  if (onset_xfer_c_resid > xfer_warn_tol .or. &
+                      onset_xfer_n_resid > xfer_warn_tol .or. &
+                      onset_xfer_p_resid > xfer_warn_tol) then
+                     write(iulog,*) 'WARNING onset cleanup residual xfer seasonal:', &
+                          'patch=', p, 'ivt=', ivt(p), 'col=', c, 'grid=', g, &
+                          'counter=', onset_counter(p), 'dt=', dt, &
+                          'c_resid=', onset_xfer_c_resid, &
+                          'n_resid=', onset_xfer_n_resid, &
+                          'p_resid=', onset_xfer_p_resid
+                  end if
                   onset_flag(p) = 0.0_r8
                   onset_counter(p) = 0.0_r8
-                  ! set all transfer growth rates to 0.0
-                  leafc_xfer_to_leafc(p)   = 0.0_r8
-                  frootc_xfer_to_frootc(p) = 0.0_r8
-                  leafn_xfer_to_leafn(p)   = 0.0_r8
-                  frootn_xfer_to_frootn(p) = 0.0_r8
-                  leafp_xfer_to_leafp(p)   = 0.0_r8
-                  frootp_xfer_to_frootp(p) = 0.0_r8
-                  livecrootc_xfer_to_livecrootc(p) = 0.0_r8 ! Graminoid rhizomes
-                  livecrootn_xfer_to_livecrootn(p) = 0.0_r8
-                  livecrootp_xfer_to_livecrootp(p) = 0.0_r8
+                  ! transfer any remaining onset pools this timestep
+                  leafc_xfer_to_leafc(p)   = leafc_xfer(p) / dt
+                  frootc_xfer_to_frootc(p) = frootc_xfer(p) / dt
+                  leafn_xfer_to_leafn(p)   = leafn_xfer(p) / dt
+                  frootn_xfer_to_frootn(p) = frootn_xfer(p) / dt
+                  leafp_xfer_to_leafp(p)   = leafp_xfer(p) / dt
+                  frootp_xfer_to_frootp(p) = frootp_xfer(p) / dt
+                  livecrootc_xfer_to_livecrootc(p) = livecrootc_xfer(p) / dt ! Graminoid rhizomes
+                  livecrootn_xfer_to_livecrootn(p) = livecrootn_xfer(p) / dt
+                  livecrootp_xfer_to_livecrootp(p) = livecrootp_xfer(p) / dt
                   if (woody(ivt(p)) >= 1.0_r8) then
-                     livestemc_xfer_to_livestemc(p)   = 0.0_r8
-                     deadstemc_xfer_to_deadstemc(p)   = 0.0_r8
-                     deadcrootc_xfer_to_deadcrootc(p) = 0.0_r8
-                     livestemn_xfer_to_livestemn(p)   = 0.0_r8
-                     deadstemn_xfer_to_deadstemn(p)   = 0.0_r8
-                     deadcrootn_xfer_to_deadcrootn(p) = 0.0_r8
-                     livestemp_xfer_to_livestemp(p)   = 0.0_r8
-                     deadstemp_xfer_to_deadstemp(p)   = 0.0_r8
-                     deadcrootp_xfer_to_deadcrootp(p) = 0.0_r8
-                  end if
-                  ! set transfer pools to 0.0
-                  leafc_xfer(p) = 0.0_r8
-                  leafn_xfer(p) = 0.0_r8
-                  leafp_xfer(p) = 0.0_r8
-                  frootc_xfer(p) = 0.0_r8
-                  frootn_xfer(p) = 0.0_r8
-                  frootp_xfer(p) = 0.0_r8
-                  livecrootc_xfer(p) = 0.0_r8
-                  livecrootn_xfer(p) = 0.0_r8
-                  livecrootp_xfer(p) = 0.0_r8
-                  if (woody(ivt(p)) >= 1.0_r8) then
-                     livestemc_xfer(p) = 0.0_r8
-                     livestemn_xfer(p) = 0.0_r8
-                     livestemp_xfer(p) = 0.0_r8
-                     deadstemc_xfer(p) = 0.0_r8
-                     deadstemn_xfer(p) = 0.0_r8
-                     deadstemp_xfer(p) = 0.0_r8
-                     deadcrootc_xfer(p) = 0.0_r8
-                     deadcrootn_xfer(p) = 0.0_r8
-                     deadcrootp_xfer(p) = 0.0_r8
+                     livestemc_xfer_to_livestemc(p)   = livestemc_xfer(p) / dt
+                     deadstemc_xfer_to_deadstemc(p)   = deadstemc_xfer(p) / dt
+                     deadcrootc_xfer_to_deadcrootc(p) = deadcrootc_xfer(p) / dt
+                     livestemn_xfer_to_livestemn(p)   = livestemn_xfer(p) / dt
+                     deadstemn_xfer_to_deadstemn(p)   = deadstemn_xfer(p) / dt
+                     deadcrootn_xfer_to_deadcrootn(p) = deadcrootn_xfer(p) / dt
+                     livestemp_xfer_to_livestemp(p)   = livestemp_xfer(p) / dt
+                     deadstemp_xfer_to_deadstemp(p)   = deadstemp_xfer(p) / dt
+                     deadcrootp_xfer_to_deadcrootp(p) = deadcrootp_xfer(p) / dt
                   end if
                end if
             endif
@@ -942,7 +946,7 @@ contains
 
                !if (onset_gddflag(p) == 1.0_r8 .and. soilt > SHR_CONST_TKFRZ) then
                !   onset_gdd(p) = onset_gdd(p) + (soilt-SHR_CONST_TKFRZ)*fracday
-               if (use_humhol .and. ivt(p)==3) then!DN (3)
+               if (is_peatland_topounit .and. ivt(p) == npeat_ndllf_dcd_brl_tree) then
                  !forcing
                  if (onset_gddflag(p) == 1.0_r8 .and. t_ref2m(p) > 279.50_r8 .and. ws_flag == 1._r8) then
                    onset_gdd(p) = onset_gdd(p)+(t_ref2m(p)-279.50_r8)*fracday
@@ -952,7 +956,7 @@ contains
                    onset_chil(p) = onset_chil(p) + fracday
                  end if
                  crit_onset_gdd = 9._r8 +2112._r8 * exp(-0.04_r8 * onset_chil(p))
-               else if (use_humhol .and. ivt(p)==11) then !SH (11)
+               else if (is_peatland_topounit .and. ivt(p) == npeat_nbrdlf_dcd_brl_shrub) then
                  if (onset_gddflag(p) == 1.0_r8 .and. t_ref2m(p) > 279.05_r8 .and. ws_flag == 1._r8) then
                    onset_gdd(p) = onset_gdd(p) +(t_ref2m(p)-279.05_r8)*fracday
                  end if
@@ -1017,7 +1021,7 @@ contains
             else if (dormant_flag(p)==0.0_r8 .and. offset_flag(p) == 0.0_r8) then
                ! only begin to test for offset daylength once past the summer sol
 
-              if (use_humhol .and. ivt(p) == 3) then
+              if (is_peatland_topounit .and. ivt(p) == npeat_ndllf_dcd_brl_tree) then
                 if(ws_flag == 0._r8 .and. dayl(g) < 46800.0_r8 .and. t_ref2m(p) < 294.5_r8) then
                   dayl_temp(p) =dayl_temp(p) + ((294.5_r8 - t_ref2m(p))**2 * (dayl(g)/46800.0_r8 )) * fracday
                 end if
@@ -1029,7 +1033,7 @@ contains
                   prev_leafc_to_litter(p) = 0._r8
                   prev_frootc_to_litter(p) = 0._r8
                 end if
-              else if (use_humhol .and. ivt(p) == 11) then
+              else if (is_peatland_topounit .and. ivt(p) == npeat_nbrdlf_dcd_brl_shrub) then
                 if(ws_flag == 0._r8 .and. dayl(g) < 54600.0_r8 .and. t_ref2m(p) < 290.15_r8) then
                   dayl_temp(p) =dayl_temp(p) +( (290.15_r8 - t_ref2m(p))**2 *(dayl(g)/54600.0_r8))*fracday
                 end if
@@ -1052,7 +1056,7 @@ contains
             !make sure a second onset period doesn't occur SL 02-09-22
             if (ws_flag == 0._r8 .and. dayl(g) < PhenolParamsInst%crit_dayl) then
                onset_flag(p) = 0._r8
-               onset_counter = 0._r8 !SL this might interfere with arctic stuff but fixes random fall onset_counter > 0
+               onset_counter(p) = 0._r8 !SL this might interfere with arctic stuff but fixes random fall onset_counter > 0
                !dormant_flag(p) = 1._r8
             endif
          end if ! end if seasonal deciduous
@@ -1100,6 +1104,10 @@ contains
     real(r8):: crit_onset_gdd  ! degree days for onset trigger
     real(r8):: soilt           ! temperature of top soil layer
     real(r8):: psi             ! water stress of top soil layer
+    real(r8):: onset_xfer_c_resid
+    real(r8):: onset_xfer_n_resid
+    real(r8):: onset_xfer_p_resid
+    real(r8), parameter :: xfer_warn_tol = 1.e-10_r8
     !-----------------------------------------------------------------------
 
     associate(                                                                                             &
@@ -1245,7 +1253,7 @@ contains
 
                ! if this is the end of the offset_period, reset phenology
                ! flags and indices
-               if (offset_counter(p) == 0._r8) then
+               if (offset_counter(p) <= 0._r8) then
                   ! this code block was originally handled by call cn_offset_cleanup(p)
                   ! inlined during vectorization
                   offset_flag(p) = 0._r8
@@ -1266,52 +1274,55 @@ contains
 
                ! if this is the end of the onset period, reset phenology
                ! flags and indices
-               if (onset_counter(p) == 0.0_r8) then
+               if (onset_counter(p) <= 0.0_r8) then
                   ! this code block was originally handled by call cn_onset_cleanup(p)
                   ! inlined during vectorization
+                  onset_xfer_c_resid = abs(leafc_xfer(p)) + abs(frootc_xfer(p)) + &
+                       abs(livecrootc_xfer(p))
+                  onset_xfer_n_resid = abs(leafn_xfer(p)) + abs(frootn_xfer(p)) + &
+                       abs(livecrootn_xfer(p))
+                  onset_xfer_p_resid = abs(leafp_xfer(p)) + abs(frootp_xfer(p)) + &
+                       abs(livecrootp_xfer(p))
+                  if (woody(ivt(p)) >= 1.0_r8) then
+                     onset_xfer_c_resid = onset_xfer_c_resid + abs(livestemc_xfer(p)) + &
+                          abs(deadstemc_xfer(p)) + abs(deadcrootc_xfer(p))
+                     onset_xfer_n_resid = onset_xfer_n_resid + abs(livestemn_xfer(p)) + &
+                          abs(deadstemn_xfer(p)) + abs(deadcrootn_xfer(p))
+                     onset_xfer_p_resid = onset_xfer_p_resid + abs(livestemp_xfer(p)) + &
+                          abs(deadstemp_xfer(p)) + abs(deadcrootp_xfer(p))
+                  end if
+                  if (onset_xfer_c_resid > xfer_warn_tol .or. &
+                      onset_xfer_n_resid > xfer_warn_tol .or. &
+                      onset_xfer_p_resid > xfer_warn_tol) then
+                     write(iulog,*) 'WARNING onset cleanup residual xfer stress:', &
+                          'patch=', p, 'ivt=', ivt(p), 'col=', c, 'grid=', g, &
+                          'counter=', onset_counter(p), 'dt=', dt, &
+                          'c_resid=', onset_xfer_c_resid, &
+                          'n_resid=', onset_xfer_n_resid, &
+                          'p_resid=', onset_xfer_p_resid
+                  end if
                   onset_flag(p) = 0._r8
                   onset_counter(p) = 0._r8
-                  ! set all transfer growth rates to 0.0
-                  leafc_xfer_to_leafc(p)   = 0._r8
-                  frootc_xfer_to_frootc(p) = 0._r8
-                  leafn_xfer_to_leafn(p)   = 0._r8
-                  frootn_xfer_to_frootn(p) = 0._r8
-                  leafp_xfer_to_leafp(p)   = 0._r8
-                  frootp_xfer_to_frootp(p) = 0._r8
-                  livecrootc_xfer_to_livecrootc(p) = 0._r8
-                  livecrootn_xfer_to_livecrootn(p) = 0._r8
-                  livecrootp_xfer_to_livecrootp(p) = 0._r8
+                  ! transfer any remaining onset pools this timestep
+                  leafc_xfer_to_leafc(p)   = leafc_xfer(p) / dt
+                  frootc_xfer_to_frootc(p) = frootc_xfer(p) / dt
+                  leafn_xfer_to_leafn(p)   = leafn_xfer(p) / dt
+                  frootn_xfer_to_frootn(p) = frootn_xfer(p) / dt
+                  leafp_xfer_to_leafp(p)   = leafp_xfer(p) / dt
+                  frootp_xfer_to_frootp(p) = frootp_xfer(p) / dt
+                  livecrootc_xfer_to_livecrootc(p) = livecrootc_xfer(p) / dt
+                  livecrootn_xfer_to_livecrootn(p) = livecrootn_xfer(p) / dt
+                  livecrootp_xfer_to_livecrootp(p) = livecrootp_xfer(p) / dt
                   if (woody(ivt(p)) >= 1.0_r8) then
-                     livestemc_xfer_to_livestemc(p)   = 0._r8
-                     deadstemc_xfer_to_deadstemc(p)   = 0._r8
-                     deadcrootc_xfer_to_deadcrootc(p) = 0._r8
-                     livestemn_xfer_to_livestemn(p)   = 0._r8
-                     deadstemn_xfer_to_deadstemn(p)   = 0._r8
-                     deadcrootn_xfer_to_deadcrootn(p) = 0._r8
-                     livestemp_xfer_to_livestemp(p)   = 0._r8
-                     deadstemp_xfer_to_deadstemp(p)   = 0._r8
-                     deadcrootp_xfer_to_deadcrootp(p) = 0._r8
-                  end if
-                  ! set transfer pools to 0.0
-                  leafc_xfer(p) = 0._r8
-                  leafn_xfer(p) = 0._r8
-                  leafp_xfer(p) = 0._r8
-                  frootc_xfer(p) = 0._r8
-                  frootn_xfer(p) = 0._r8
-                  frootp_xfer(p) = 0._r8
-                  livecrootc_xfer(p) = 0._r8
-                  livecrootn_xfer(p) = 0._r8
-                  livecrootp_xfer(p) = 0._r8
-                  if (woody(ivt(p)) >= 1.0_r8) then
-                     livestemc_xfer(p) = 0._r8
-                     livestemn_xfer(p) = 0._r8
-                     livestemp_xfer(p) = 0._r8
-                     deadstemc_xfer(p) = 0._r8
-                     deadstemn_xfer(p) = 0._r8
-                     deadstemp_xfer(p) = 0._r8
-                     deadcrootc_xfer(p) = 0._r8
-                     deadcrootn_xfer(p) = 0._r8
-                     deadcrootp_xfer(p) = 0._r8
+                     livestemc_xfer_to_livestemc(p)   = livestemc_xfer(p) / dt
+                     deadstemc_xfer_to_deadstemc(p)   = deadstemc_xfer(p) / dt
+                     deadcrootc_xfer_to_deadcrootc(p) = deadcrootc_xfer(p) / dt
+                     livestemn_xfer_to_livestemn(p)   = livestemn_xfer(p) / dt
+                     deadstemn_xfer_to_deadstemn(p)   = deadstemn_xfer(p) / dt
+                     deadcrootn_xfer_to_deadcrootn(p) = deadcrootn_xfer(p) / dt
+                     livestemp_xfer_to_livestemp(p)   = livestemp_xfer(p) / dt
+                     deadstemp_xfer_to_deadstemp(p)   = deadstemp_xfer(p) / dt
+                     deadcrootp_xfer_to_deadcrootp(p) = deadcrootp_xfer(p) / dt
                   end if
                end if
             end if
@@ -2969,12 +2980,12 @@ contains
          p = filter_soilp(fp)
 
          ! only calculate these fluxes during onset period
-         if (onset_flag(p) == 1._r8) then
+         if (onset_flag(p) == 1._r8 .and. onset_counter(p) > 0._r8) then
 
             ! The transfer rate is a linearly decreasing function of time,
             ! going to zero on the last timestep of the onset period
 
-            if (onset_counter(p) == dt .or. (use_crop .and. percrop(ivt(p)) == 1.0_r8) ) then
+            if (onset_counter(p) <= dt .or. (use_crop .and. percrop(ivt(p)) == 1.0_r8) ) then
                t1 = 1.0_r8 / dt
             else
                t1 = 2.0_r8 / (onset_counter(p))
@@ -3111,7 +3122,7 @@ contains
       ! only calculate during the offset period
       if (offset_flag(p) == 1._r8) then
 
-         if (offset_counter(p) == dt) then
+         if (offset_counter(p) <= dt) then
          t1 = 1._r8 / dt
               !calculate yield (crpyld = bu/acre and dmyield = t/ha)
               crpyld(p)    = (grainc(p)+cpool_to_grainc(p)*dt) * fyield(ivt(p)) * convfact(ivt(p)) / (cgrain * 1000)
@@ -3223,7 +3234,7 @@ contains
       ! only calculate during the offset period
       if (offset_flag(p) == 1._r8) then
 
-         if (offset_counter(p) == dt) then
+         if (offset_counter(p) <= dt) then
          t1 = 1._r8 / dt
               ! calculate yield (crpyld = bu/acre and dmyield = t/ha)
               if (ivt(p)==nsugarcane .or. ivt(p)==nsugarcaneirrig) then
@@ -3370,7 +3381,7 @@ contains
          ! only calculate fluxes during offset period
          if (offset_flag(p) == 1._r8) then
 
-            if (offset_counter(p) == dt) then
+            if (offset_counter(p) <= dt) then
                t1 = 1.0_r8 / dt
                if (iscft(ivt(p))) then
                ! this assumes that offset_counter == dt for crops
@@ -3390,7 +3401,7 @@ contains
 
             if ( nu_com .eq. 'RD') then
                if (iscft(ivt(p))) then
-                  if (offset_counter(p) == dt) then
+                  if (offset_counter(p) <= dt) then
                       t1 = 1.0_r8 / dt
 
                      ! this assumes that offset_counter == dt for crops
@@ -3421,7 +3432,7 @@ contains
                   frootp_to_litter(p) = frootc_to_litter(p) / frootcp(ivt(p))
                end if
             else
-               if (offset_counter(p) == dt) then
+               if (offset_counter(p) <= dt) then
                   t1 = 1.0_r8 / dt
                   if (iscft(ivt(p))) then
                      ! this assumes that offset_counter == dt for crops

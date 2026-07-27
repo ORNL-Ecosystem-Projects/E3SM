@@ -385,7 +385,7 @@ contains
     use elm_varctl      , only : carbon_only          !
     use elm_varctl      , only : carbonnitrogen_only  !
     use elm_varctl      , only : carbonphosphorus_only!
-    use pftvarcon        , only: npcropmin, declfact, bfact, aleaff, arootf, astemf, noveg
+    use pftvarcon        , only: declfact, bfact, aleaff, arootf, astemf, noveg
     use pftvarcon        , only: arooti, fleafi, allconsl, allconss, grperc, grpnow, nsoybean
     use pftvarcon        , only: iscft, percrop, nwcereal, nwcerealirrig
     use elm_varpar       , only: nlevdecomp
@@ -593,6 +593,8 @@ contains
             mr = mr + livestem_mr(p) + livecroot_mr(p)
          else if (iscft(ivt(p))) then
             if (croplive(p)) mr = mr + livestem_mr(p) + grain_mr(p)
+         else
+            mr = mr + livecroot_mr(p)
          end if
 
          ! carbon flux available for allocation
@@ -2414,6 +2416,8 @@ contains
                 mr = mr + livestem_mr(p) + livecroot_mr(p)
              else if (iscft(ivt(p))) then
                 if (croplive(p)) mr = mr + livestem_mr(p) + grain_mr(p)
+             else
+                mr = mr + livecroot_mr(p)
              end if
 
              ! take mr from xsmrpool pool first

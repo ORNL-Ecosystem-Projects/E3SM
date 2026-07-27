@@ -249,11 +249,15 @@ contains
          ! gC/m2/s for each of the live plant tissues.
          ! Leaf and live wood MR
 
+         if (use_humhol) then
+            br_mr = br_mr_pft(ivt(p))
+            br_mr_woody = br_mr
+         end if
+
          ! Ben Sulman: Add dormant MR level below a certain temperature
          if(t_ref2m(p) > dormant_mr_temp) then
              if (use_humhol) then
                 tc = q10_mr_pft(ivt(p))**((t_ref2m(p)-SHR_CONST_TKFRZ - 20.0_r8)/10.0_r8)
-                br_mr = br_mr_pft(ivt(p))
              else
                 tc = Q10**((t_ref2m(p)-SHR_CONST_TKFRZ - 20.0_r8)/10.0_r8)
              end if
@@ -314,12 +318,12 @@ contains
             ! function of temperature and N content.
             if (use_humhol) then
                !recalculate pft-specific rates
+               br_mr = br_mr_pft(ivt(p))
                if (t_soisno(c,j) > dormant_mr_temp) then
                    tcsoi(c,j) = q10_mr_pft(ivt(p))**((t_soisno(c,j)-SHR_CONST_TKFRZ - 20.0_r8)/10.0_r8)
                else
                    tcsoi(c,j) = dormant_mr_factor
                end if
-               br_mr = br_mr_pft(ivt(p))
             end if
             froot_mr(p) = froot_mr(p) + frootn(p)*br_mr*tcsoi(c,j)*rootfr(p,j)
          end do

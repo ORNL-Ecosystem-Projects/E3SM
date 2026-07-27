@@ -393,20 +393,20 @@ contains
                (smp_node - smpsc(veg_pp%itype(p))) / (smpso(veg_pp%itype(p)) - smpsc(veg_pp%itype(p))), 1._r8)   
                
                !using osm_inhib to change root uptake -SLL
-               if (salinity(1) .ge. sal_threshold(veg_pp%itype(p))) then
+               if (salinity(c) .ge. sal_threshold(veg_pp%itype(p))) then
                   !osm_inhib(veg_pp%itype(p)) = (1-salinity(c)/(KM_salinity(veg_pp%itype(p))+salinity(c)))
-                  osm_inhib(veg_pp%itype(p)) = exp(-0.5*((salinity(1)-sal_opt(veg_pp%itype(p)))**2/sal_tol(veg_pp%itype(p))**2))
+                  osm_inhib(veg_pp%itype(p)) = exp(-0.5*((salinity(c)-sal_opt(veg_pp%itype(p)))**2/sal_tol(veg_pp%itype(p))**2))
                   rresis(p,j) = min( (eff_porosity(c,j)/watsat(c,j))* &
                     (smp_node - smpsc(veg_pp%itype(p))) / (smpso(veg_pp%itype(p)) - smpsc(veg_pp%itype(p))), 1._r8)
                   rresis(p,j) = rresis(p,j)*osm_inhib(veg_pp%itype(p))
                endif
 
                !use floodf to change root water uptake
-               if (h2osfc(1) .ge. 0._r8 .and. h2osfc(1) .le. 1000.0_r8) then
-                     floodf(veg_pp%itype(p))=1-0.001*h2osfc(1)
-               elseif(h2osfc(1) .gt. 1000._r8) then
+               if (h2osfc(c) .ge. 0._r8 .and. h2osfc(c) .le. 1000.0_r8) then
+                     floodf(veg_pp%itype(p))=1-0.001*h2osfc(c)
+               elseif(h2osfc(c) .gt. 1000._r8) then
                      floodf(veg_pp%itype(p))=0.0_r8
-               elseif(h2osfc(1) .lt. 0._r8) then
+               elseif(h2osfc(c) .lt. 0._r8) then
                      floodf(veg_pp%itype(p))=1.0_r8                       
                endif
                rresis(p,j) = rresis(p,j)*floodf(veg_pp%itype(p))

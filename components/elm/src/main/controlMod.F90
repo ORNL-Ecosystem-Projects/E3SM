@@ -861,7 +861,7 @@ contains
     call mpi_bcast(all_active, 1, MPI_LOGICAL, 0, mpicom, ier)
 
     ! max number of plant functional types in naturally vegetated landunit
-    call mpi_bcast(maxpatch_pft, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast(maxpatch_pft, 1, MPI_INTEGER, 0, mpicom, ier)
 
     ! BGC
     call mpi_bcast (co2_type, len(co2_type), MPI_CHARACTER, 0, mpicom, ier)

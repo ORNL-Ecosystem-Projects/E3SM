@@ -915,7 +915,6 @@ contains
       integer           :: fp_shrub                   ! helper index for searching shrub patches
       integer           :: p                          ! patch index
       integer           :: t                          ! topounit index
-      integer           :: g                          ! gridcell index
       integer           :: iv                         ! canopy layer index
       integer,parameter :: ipar = 1                   ! The band index for PAR
       real(r8) :: shrub_lai     ! To store shrub LAI for the current column
@@ -946,7 +945,6 @@ contains
 
            p = filter_nourbanp(fp)
            t = veg_pp%topounit(p)
-           g = veg_pp%gridcell(p)
 ! --- BEER-LAMBERT LIGHT COMPETITION LOGIC ---
       
       shrub_lai = 0.0_r8
@@ -954,12 +952,12 @@ contains
 
       ! Apply shrub shading on moss only if enabled by namelist
       if (use_shrub_moss_shading) then
-         ! 1. If the current patch is Moss (nonvascular==1), find the Shrub (PFT 11) LAI in this gridcell
+         ! 1. If the current patch is moss, find shrub LAI in this topounit
          if (nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
-            ! Search for a shrub patch in the same gridcell and use a fraction of its buried elai
+            ! Search for a shrub patch in the same topounit and use a fraction of its buried elai
             do fp_shrub = 1, num_nourbanp
                p_shrub = filter_nourbanp(fp_shrub)
-               if (veg_pp%gridcell(p_shrub) == g .and. veg_pp%itype(p_shrub) == 11) then
+               if (veg_pp%topounit(p_shrub) == t .and. nint(veg_vp%woody(veg_pp%itype(p_shrub))) == 2) then
                   shrub_lai = elai(p_shrub) * 0.25_r8
                   exit
                end if
