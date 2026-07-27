@@ -1003,9 +1003,6 @@ contains
            ! If the patch is NOT moss, transmission is 1.0 (no change).
            ! If the patch IS moss, transmission is the fraction of light passing through shrubs.
 
-
-           g = veg_pp%gridcell(p)
-           
            do iv = 1, nrad(p)
               parsun_z(p,iv) = (forc_solad(t,ipar) * transmission) * fabd_sun_z(p,iv) + &
                           (forc_solai(t,ipar) * transmission) * fabi_sun_z(p,iv)
