@@ -124,6 +124,7 @@ contains
          qflx_irr_demand        => col_wf%qflx_irr_demand         , & ! Input:  [real(r8) (:)   ]  irrigation demand sent to MOSART/WM (mm H2O /s)
          qflx_glcice_melt       => col_wf%qflx_glcice_melt        , & ! Input:  [real(r8) (:)]  ice melt (positive definite) (mm H2O/s)
          qflx_h2osfc_surf       => col_wf%qflx_h2osfc_surf        , & ! Output: [real(r8) (:)   ]  surface water runoff (mm/s)
+         qflx_h2osfc_to_downhill=> col_wf%qflx_h2osfc_to_downhill , & ! Output: surface water runoff routed downhill (mm/s)
          qflx_drain_perched     => col_wf%qflx_drain_perched      , & ! Output: [real(r8) (:)   ]  sub-surface runoff from perched zwt (mm H2O /s)
          qflx_rsub_sat          => col_wf%qflx_rsub_sat           , & ! Output: [real(r8) (:)   ]  soil saturation excess [mm h2o/s]
          qflx_drain             => col_wf%qflx_drain              , & ! Output: [real(r8) (:)   ]  sub-surface runoff (mm H2O /s)
@@ -272,6 +273,7 @@ contains
          t = col_pp%topounit(c)
          tpu_ind = top_pp%topo_grc_ind(t)  !Get topounit index on the grid
          g = col_pp%gridcell(c)
+         qflx_h2osfc_to_downhill(c) = 0._r8
 
          if (lun_pp%itype(l) == istwet .or. lun_pp%itype(l) == istice      &
                                   .or. lun_pp%itype(l) == istice_mec) then
@@ -320,6 +322,16 @@ contains
          ! only shift positive fluxes, and only set fluxes if there is a downhill topounit
          if (use_IM2_hillslope_hydrology .or. use_humhol) then
             downhill_t = top_pp%downhill_ti(t)
+            if (use_humhol .and. top_pp%is_bog(t) .and. top_pp%topo_grc_ind(t) == 3) then
+               topi = grc_pp%topi(g)
+               topf = grc_pp%topf(g)
+               do t2 = topi, topf
+                  if (top_pp%active(t2) .and. top_pp%topo_grc_ind(t2) == 2) then
+                     downhill_t = t2
+                     exit
+                  endif
+               enddo
+            endif
             if (downhill_t /= -1) then
                qflx_surf_before_downhill          = qflx_surf(c)
                qflx_drain_before_downhill         = qflx_drain(c)
@@ -370,6 +382,7 @@ contains
                else
                   qflx_h2osfc_surf_to_downhill = 0._r8
                endif
+               qflx_h2osfc_to_downhill(c) = qflx_h2osfc_surf_to_downhill
                qflx_to_downhill(c) = qflx_to_downhill(c) + qflx_h2osfc_surf_to_downhill
                qflx_h2osfc_surf(c) = qflx_h2osfc_surf(c) - qflx_h2osfc_surf_to_downhill
 

@@ -361,6 +361,7 @@ contains
     real(r8) :: zwt_profile                                  ! water table inferred from post-solve saturation (m)
     real(r8) :: implicit_layer_liq_min, implicit_layer_excess_max
     real(r8) :: liq_deficit, liq_deficit_correction, liq_deficit_from_aquifer
+    real(r8) :: liq_excess, liq_excess_correction, liq_excess_to_aquifer
     real(r8) :: soilwater_store_beg(bounds%begc:bounds%endc)
     real(r8) :: soilwater_store_end
     real(r8) :: soilwater_actual_delta
@@ -892,8 +893,12 @@ contains
          ! The implicit vertical solve can overshoot ice-limited saturated layers
          ! and produce negative liquid water. Keep the correction conservative by
          ! borrowing deficits from deeper layers, then from the aquifer at bedrock.
+         ! Also push excess liquid downward, then to the aquifer at bedrock, so
+         ! an explicit fallback cannot leave any layer above ice-limited capacity.
          liq_deficit_correction = 0._r8
          liq_deficit_from_aquifer = 0._r8
+         liq_excess_correction = 0._r8
+         liq_excess_to_aquifer = 0._r8
          do j = 1, nlevbed-1
             if (h2osoi_liq(c,j) < watmin) then
                liq_deficit = watmin - h2osoi_liq(c,j)
@@ -915,6 +920,31 @@ contains
                  (1._r8 - (1._r8 + 1.e3_r8*zwt(c)/sucsat(c,nlevbed))**(-1._r8/bsw(c,nlevbed)))
             s_y = max(s_y,0.02_r8)
             zwt(c) = zwt(c) + liq_deficit_from_aquifer/1000._r8/s_y
+            zwt(c) = max(0._r8,min(80._r8,zwt(c)))
+         end if
+         do j = 1, nlevbed-1
+            layer_capacity = max(watmin, eff_porosity(c,j)*dzmm(c,j))
+            if (h2osoi_liq(c,j) > layer_capacity) then
+               liq_excess = h2osoi_liq(c,j) - layer_capacity
+               h2osoi_liq(c,j) = h2osoi_liq(c,j) - liq_excess
+               h2osoi_liq(c,j+1) = h2osoi_liq(c,j+1) + liq_excess
+               liq_excess_correction = liq_excess_correction + liq_excess
+            end if
+         end do
+         j = nlevbed
+         layer_capacity = max(watmin, eff_porosity(c,j)*dzmm(c,j))
+         if (h2osoi_liq(c,j) > layer_capacity) then
+            liq_excess = h2osoi_liq(c,j) - layer_capacity
+            h2osoi_liq(c,j) = h2osoi_liq(c,j) - liq_excess
+            wa(c) = wa(c) + liq_excess
+            liq_excess_correction = liq_excess_correction + liq_excess
+            liq_excess_to_aquifer = liq_excess
+         end if
+         if (liq_excess_to_aquifer > 0._r8) then
+            s_y = watsat(c,nlevbed) * &
+                 (1._r8 - (1._r8 + 1.e3_r8*zwt(c)/sucsat(c,nlevbed))**(-1._r8/bsw(c,nlevbed)))
+            s_y = max(s_y,0.02_r8)
+            zwt(c) = zwt(c) - liq_excess_to_aquifer/1000._r8/s_y
             zwt(c) = max(0._r8,min(80._r8,zwt(c)))
          end if
          do j = 1, nlevbed
@@ -996,6 +1026,17 @@ contains
             end if
          end if
 
+         if (soilwater_aquifer_layer_active(c)) then
+            ! The linear solve included the extra aquifer layer. Keep the
+            ! water table classified below the explicit soil column until
+            ! Drainage applies qcharge to WA or the bog perched reservoir.
+            ! Drainage treats exact equality with the bottom interface as
+            ! inside the bottom layer, so keep this strictly below bedrock.
+            zwt(c) = max(zwt(c), zi(c,nlevbed) + 1.e-9_r8)
+            zwtmm(c) = zwt(c)*1.e3_r8
+            jwt(c) = nlevbed
+         end if
+
          layer_liq_min = huge(1._r8)
          layer_excess_max = -huge(1._r8)
          layer_liq_min_j = 1
@@ -1047,6 +1088,8 @@ contains
             write(iulog,*)'qflx_infl d                = ',qflx_infl(c)*dtime
             write(iulog,*)'liq deficit correction     = ',liq_deficit_correction
             write(iulog,*)'liq deficit from aquifer    = ',liq_deficit_from_aquifer
+            write(iulog,*)'liq excess correction      = ',liq_excess_correction
+            write(iulog,*)'liq excess to aquifer      = ',liq_excess_to_aquifer
             write(iulog,*)'h2osoi_liq before          = ',h2osoi_liq_before(c,1:nlevbed)
             write(iulog,*)'h2osoi_liq after implicit  = ',h2osoi_liq_after_implicit(c,1:nlevbed)
             write(iulog,*)'h2osoi_liq after solve     = ',h2osoi_liq_after_solve(c,1:nlevbed)
@@ -1219,6 +1262,10 @@ contains
             write(iulog,*)'qflx_infl d                = ',qflx_infl(c)*dtime
             write(iulog,*)'root sink sum              = ',soilwater_root_sink(c)
             write(iulog,*)'root sink sum d            = ',soilwater_root_sink(c)*dtime
+            write(iulog,*)'liq deficit correction     = ',liq_deficit_correction
+            write(iulog,*)'liq deficit from aquifer    = ',liq_deficit_from_aquifer
+            write(iulog,*)'liq excess correction      = ',liq_excess_correction
+            write(iulog,*)'liq excess to aquifer      = ',liq_excess_to_aquifer
             write(iulog,*)'qcharge                    = ',qcharge(c)
             write(iulog,*)'qcharge d                  = ',qcharge(c)*dtime
             write(iulog,*)'qcharge storage d          = ',soilwater_qcharge_storage_delta

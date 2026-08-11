@@ -5024,8 +5024,8 @@ module VegetationDataType
     type(column_phosphorus_state), intent(inout) :: col_ps
     !
     ! !LOCAL VARIABLES:
-    integer  :: p        ! indices
-    integer  :: fp       ! lake filter indices
+    integer  :: c,p      ! indices
+    integer  :: fc,fp    ! lake filter indices
     !-----------------------------------------------------------------------
     associate( &
      totvegp_patch  => this%totvegp   , &
@@ -5099,6 +5099,12 @@ module VegetationDataType
       call p2c(bounds, num_soilc, filter_soilc, &
            cropseedp_deficit_patch(bounds%begp:bounds%endp) , &
            cropseedp_deficit_col(bounds%begc:bounds%endc) )
+   else
+      ! Non-crop runs still include this column pool in TOTCOLP.
+      do fc = 1,num_soilc
+         c = filter_soilc(fc)
+         cropseedp_deficit_col(c) = 0._r8
+      end do
    endif
    end associate
 
