@@ -1958,7 +1958,6 @@ contains
        end if
     end do
 
-    call seed_bog_perched_soil_water(this, begc, endc, watsat_input)
     this%h2osoi_liq_old(begc:endc,:) = this%h2osoi_liq(begc:endc,:)
     this%h2osoi_ice_old(begc:endc,:) = this%h2osoi_ice(begc:endc,:)
 
@@ -2198,10 +2197,6 @@ contains
        end if
 
     endif   ! end if if-read flag
-
-    if (flag == 'read' .and. is_first_step()) then
-       call seed_bog_perched_soil_water(this, bounds%begc, bounds%endc, watsat_input)
-    endif
 
   end subroutine col_ws_restart
 

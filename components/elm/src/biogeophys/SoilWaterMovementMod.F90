@@ -1029,7 +1029,7 @@ contains
          if (soilwater_aquifer_layer_active(c)) then
             ! The linear solve included the extra aquifer layer. Keep the
             ! water table classified below the explicit soil column until
-            ! Drainage applies qcharge to WA or the bog perched reservoir.
+            ! Drainage applies qcharge to WA.
             ! Drainage treats exact equality with the bottom interface as
             ! inside the bottom layer, so keep this strictly below bedrock.
             zwt(c) = max(zwt(c), zi(c,nlevbed) + 1.e-9_r8)

@@ -1191,14 +1191,9 @@ contains
      real(r8) :: regional_lateral_scale                  ! active connection fraction for regional aquifer exchange
      real(r8) :: receiver_increment                      ! local lateral aquifer inflow into the receiver topounit (mm/s)
      real(r8) :: receiver_scale                          ! area scaling from pair flux to receiver-column flux
-     real(r8) :: receiver_capacity                       ! capacity for positive inflow to a bog regional aquifer (mm/s)
-     real(r8) :: bog_zwt_cap_depth                       ! minimum depth allowed for the bog regional water table (m)
-     real(r8) :: rous_recv                               ! regional aquifer specific yield for a receiver topounit (-)
      real(r8) :: obs_ref_zwt                             ! observed water table referenced to the first topounit in the gridcell
-     real(r8) :: barrier_depth                           ! depth to restrictive till below bog peat (m)
-     real(r8), parameter :: bog_zwt_cap_epsilon = 1.e-3_r8 ! keep bog regional WT just below the peat/till interface (m)
      real(r8), parameter :: min_full_lateral_receiver_frac = 0.10_r8 ! receiver area needed for full aquifer connection
-     integer  :: t_recv,c_recv,nlevbed_recv              ! receiver topounit/column indices for lateral exchange
+     integer  :: t_recv                                  ! receiver topounit index for lateral exchange
      integer  :: natveg_col_top(bounds%begt:bounds%endt) ! natural vegetation hydrology column associated with each topounit
      logical  :: ice_block_top(bounds%begt:bounds%endt)  ! true when ice suppresses HUM_HOL lateral exchange on a topounit
      logical  :: print_infiltration_diag
@@ -1546,15 +1541,10 @@ contains
              if (use_humhol) then
                 ! Compute column-local states first, then aggregate to topounits.
                 ka_col(c) = 0._r8
-                ! Use total hydraulic head for non-bog lateral exchange so
-                ! ponded surface water can affect adjacent topounits. For bog
-                ! peat columns, the regular aquifer is below the restrictive
-                ! till; keep perched/ponded water out of the regional head.
-                ! The cap is a ceiling on regional ZWT, not a source of water.
+                ! Bogs use ordinary ZWT for hummock/hollow groundwater exchange.
+                ! Ponded bog water remains a surface store routed downhill below.
                 if (top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8) then
-                   barrier_depth = min(max(top_pp%peat_depth(t), z(c,1)), zi(c,nlevbed))
-                   bog_zwt_cap_depth = min(max(barrier_depth + bog_zwt_cap_epsilon, z(c,1)), zi(c,nlevbed))
-                   head_depth_lat(c) = max(zwt(c), bog_zwt_cap_depth)
+                   head_depth_lat(c) = zwt(c)
                 else
                    head_depth_lat(c) = zwt(c) - h2osfc(c)/1000._r8
                 endif
@@ -1773,13 +1763,10 @@ contains
                    t_ref = top_pp%regional_target_ti(t)
                    if (t_ref < topi .or. t_ref > topf .or. t_ref == t) cycle
                    if (natveg_col_top(t_ref) == 0 .or. natveg_col_top(t) == 0) cycle
-                   ! Bog peat columns have a perched reservoir above
-                   ! restrictive till and a separate below-till regional
-                   ! aquifer. Regional aquifer exchange is allowed for all
-                   ! adjacent topounits; perched bog microtopography is still
-                   ! handled separately in Drainage. Bog regional receivers
-                   ! are capacity-limited below so lateral inflow cannot fill
-                   ! the below-till aquifer above the peat/till cap.
+                   ! Do not connect bog groundwater to fen/upland groundwater.
+                   ! Bog-bog exchange is still handled here using ordinary ZWT.
+                   if ((top_pp%is_bog(t_ref) .and. top_pp%peat_depth(t_ref) > 0._r8) .neqv. &
+                        (top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8)) cycle
                    ! Temporarily allow lateral exchange through partially frozen topounits.
                    ! if (ice_block_top(t_ref) .or. ice_block_top(t)) cycle
 
@@ -1797,13 +1784,10 @@ contains
                    t_ref = top_pp%regional_target_ti(t)
                    if (t_ref < topi .or. t_ref > topf .or. t_ref == t) cycle
                    if (natveg_col_top(t_ref) == 0 .or. natveg_col_top(t) == 0) cycle
-                   ! Bog peat columns have a perched reservoir above
-                   ! restrictive till and a separate below-till regional
-                   ! aquifer. Regional aquifer exchange is allowed for all
-                   ! adjacent topounits; perched bog microtopography is still
-                   ! handled separately in Drainage. Bog regional receivers
-                   ! are capacity-limited below so lateral inflow cannot fill
-                   ! the below-till aquifer above the peat/till cap.
+                   ! Do not connect bog groundwater to fen/upland groundwater.
+                   ! Bog-bog exchange is still handled here using ordinary ZWT.
+                   if ((top_pp%is_bog(t_ref) .and. top_pp%peat_depth(t_ref) > 0._r8) .neqv. &
+                        (top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8)) cycle
                    ! Temporarily allow lateral exchange through partially frozen topounits.
                    ! if (ice_block_top(t_ref) .or. ice_block_top(t)) cycle
 
@@ -1815,17 +1799,14 @@ contains
 
                    if (flux_pair > 0._r8) then
                       t_recv = t_ref
-                      c_recv = natveg_col_top(t_ref)
                       receiver_scale = sqrt(top_pp%wtgcell(t)/top_pp%wtgcell(t_ref))
                       receiver_increment = flux_pair * receiver_scale
                    else if (flux_pair < 0._r8) then
                       t_recv = t
-                      c_recv = natveg_col_top(t)
                       receiver_scale = sqrt(top_pp%wtgcell(t_ref)/top_pp%wtgcell(t))
                       receiver_increment = -flux_pair * receiver_scale
                    else
                       t_recv = -1
-                      c_recv = 0
                       receiver_scale = 0._r8
                       receiver_increment = 0._r8
                    endif
@@ -1841,33 +1822,6 @@ contains
                            top_pp%wtgcell(t_recv) / min_full_lateral_receiver_frac))
                       flux_pair = flux_pair * regional_lateral_scale
                       receiver_increment = receiver_increment * regional_lateral_scale
-                   endif
-
-                   if (receiver_increment > 0._r8) then
-                      if (top_pp%is_bog(t_recv) .and. top_pp%peat_depth(t_recv) > 0._r8) then
-                         nlevbed_recv = nlev2bed(c_recv)
-                         barrier_depth = min(max(top_pp%peat_depth(t_recv), z(c_recv,1)), zi(c_recv,nlevbed_recv))
-                         bog_zwt_cap_depth = min(max(barrier_depth + 1.e-3_r8, z(c_recv,1)), zi(c_recv,nlevbed_recv))
-
-                         if (zwt(c_recv) > bog_zwt_cap_depth) then
-                            rous_recv = watsat(c_recv,nlevbed_recv) &
-                                 * ( 1. - (1.+1.e3*zwt(c_recv)/sucsat(c_recv,nlevbed_recv)) &
-                                 **(-1./bsw(c_recv,nlevbed_recv)))
-                            rous_recv = max(rous_recv,0.02_r8)
-                            receiver_capacity = (zwt(c_recv) - bog_zwt_cap_depth) * 1000._r8 * rous_recv / dtime
-                         else
-                            receiver_capacity = 0._r8
-                         endif
-                         receiver_capacity = max(0._r8, receiver_capacity - max(0._r8, qflx_lat_aqu_top(t_recv)))
-
-                         if (receiver_increment > receiver_capacity) then
-                            if (receiver_capacity <= 0._r8) then
-                               flux_pair = 0._r8
-                            else if (receiver_scale > 0._r8) then
-                               flux_pair = sign(receiver_capacity/receiver_scale, flux_pair)
-                            endif
-                         endif
-                      endif
                    endif
 
                    qflx_lat_aqu_top(t_ref) = qflx_lat_aqu_top(t_ref) + flux_pair * &
@@ -2098,7 +2052,8 @@ contains
           t = col_pp%topounit(c)
           qcharge_temp = qcharge(c)
 
-          use_bog_perched = use_humhol .and. top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8
+          ! Bogs now use ordinary ZWT; do not divert recharge into a separate perched store.
+          use_bog_perched = .false.
           if (use_bog_perched) then
              barrier_depth = min(max(top_pp%peat_depth(t), z(c,1)), zi(c,nlevbed))
              if (zwt(c) > barrier_depth .and. qcharge(c) > 0._r8) then
@@ -2392,7 +2347,7 @@ contains
           nlevbed = nlev2bed(c)
           g = col_pp%gridcell(c)
           t = col_pp%topounit(c)
-          use_bog_perched = use_humhol .and. top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8
+          use_bog_perched = .false.
           if (use_bog_perched) then
              barrier_depth = min(max(top_pp%peat_depth(t), z(c,1)), zi(c,nlevbed))
           else
@@ -2816,62 +2771,6 @@ contains
        end do
 
        if (use_humhol .and. any(top_pp%peat_depth(bounds%begt:bounds%endt) > 0._r8)) then
-          ! Keep the bog regional aquifer below the peat/till interface.
-          ! This block is a numerical/state cap, not a water source: if the
-          ! regional table or implicit WA storage rises above the cap, excess
-          ! goes to qrgwl; if it is deeper than the cap, other fluxes such as
-          ! qcharge-fed till leakage must fill it.
-          do fc = 1, num_hydrologyc
-             c = filter_hydrologyc(fc)
-             t = col_pp%topounit(c)
-             nlevbed = nlev2bed(c)
-
-             if (.not. (top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8)) cycle
-
-             barrier_depth = min(max(top_pp%peat_depth(t), z(c,1)), zi(c,nlevbed))
-             bog_zwt_cap_depth = min(max(barrier_depth + bog_zwt_cap_epsilon, z(c,1)), zi(c,nlevbed))
-
-             if (zwt(c) < bog_zwt_cap_depth .or. &
-                  (.not. zengdecker_2009_with_var_soil_thick .and. &
-                  abs(wa(c) - aquifer_water_baseline) > aquifer_water_tol)) then
-                rous = watsat(c,nlevbed) &
-                     * ( 1. - (1.+1.e3*zwt(c)/sucsat(c,nlevbed))**(-1./bsw(c,nlevbed)))
-                rous=max(rous,0.02_r8)
-
-                if (zengdecker_2009_with_var_soil_thick) then
-                   zwt(c) = max(zwt(c), bog_zwt_cap_depth)
-                else if (wa(c) < aquifer_water_baseline - aquifer_water_tol) then
-                   zwt(c) = max(zwt(c), &
-                        zi(c,nlevbed) + (aquifer_water_baseline - wa(c))/(1000._r8*rous))
-                else
-                   qflx_bog_zwt_excess_tot = max(0._r8, wa(c) - aquifer_water_baseline)
-                   if (qflx_bog_zwt_excess_tot > 0._r8) then
-                      wa(c) = wa(c) - qflx_bog_zwt_excess_tot
-                      if (h2osfcflag == 1) then
-                         h2osfc(c) = h2osfc(c) + qflx_bog_zwt_excess_tot
-                      else
-                         qflx_qrgwl(c) = qflx_qrgwl(c) + qflx_bog_zwt_excess_tot/dtime
-                      endif
-                   endif
-                   zwt(c) = max(zwt(c), bog_zwt_cap_depth)
-                endif
-
-                jwt(c) = nlevbed
-                do j = 1,nlevbed
-                   if(zwt(c) <= zi(c,j)) then
-                      if (zengdecker_2009_with_var_soil_thick .and. zwt(c) == zi(c,nlevbed)) then
-                         exit
-                      else
-                         jwt(c) = j-1
-                         exit
-                      end if
-                   end if
-                enddo
-             endif
-          enddo
-       endif
-
-       if (use_humhol .and. any(top_pp%peat_depth(bounds%begt:bounds%endt) > 0._r8)) then
           ! Apply the same WA excess export behavior used for bog cap logic to
           ! non-bog peat units (fen/lagg). These columns can receive implicit
           ! aquifer additions from the lower-boundary solve and layer overflow
@@ -2894,7 +2793,9 @@ contains
           enddo
        endif
 
-       if (use_humhol .and. any(top_pp%peat_depth(bounds%begt:bounds%endt) > 0._r8)) then
+       ! Retired bog perched-water exchange. Bog hummocks/hollows now use the
+       ! ordinary ZWT lateral-exchange path in SurfaceRunoff.
+       if (.false. .and. use_humhol .and. any(top_pp%peat_depth(bounds%begt:bounds%endt) > 0._r8)) then
           ! Bog-bog lateral exchange is between perched peat reservoirs, not
           ! below-till regional aquifers. Diagnose the current perched state
           ! before calculating exchange so flow direction matches the state
@@ -3115,7 +3016,7 @@ contains
           enddo
        endif
 
-       if (use_humhol .and. any(top_pp%peat_depth(bounds%begt:bounds%endt) > 0._r8)) then
+       if (.false. .and. use_humhol .and. any(top_pp%peat_depth(bounds%begt:bounds%endt) > 0._r8)) then
           do fc = 1, num_hydrologyc
              c = filter_hydrologyc(fc)
              t = col_pp%topounit(c)
@@ -3165,7 +3066,7 @@ contains
           c = filter_hydrologyc(fc)
           nlevbed = nlev2bed(c)
           t = col_pp%topounit(c)
-          use_bog_perched = use_humhol .and. top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8
+          use_bog_perched = .false.
           if (use_bog_perched) then
              barrier_depth = min(max(top_pp%peat_depth(t), z(c,1)), zi(c,nlevbed))
           else
@@ -4001,7 +3902,7 @@ contains
 	          endif
 
 	          t = col_pp%topounit(c)
-	          use_bog_perched = use_humhol .and. top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8
+	          use_bog_perched = .false.
 	          if (use_bog_perched) then
 	             nlevbed = nlev2bed(c)
 	             barrier_depth = min(max(top_pp%peat_depth(t), z(c,1)), zi(c,nlevbed))
