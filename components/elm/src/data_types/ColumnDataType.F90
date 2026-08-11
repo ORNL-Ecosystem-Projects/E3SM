@@ -512,7 +512,6 @@ module ColumnDataType
     real(r8), pointer :: qflx_h2osfc_to_downhill (:) => null() ! surface water runoff routed to downhill topounit
     real(r8), pointer :: qflx_snow_h2osfc     (:)   => null() ! snow falling on surface water
     real(r8), pointer :: qflx_drain_perched   (:)   => null() ! sub-surface runoff from perched wt (mm H2O /s)
-    real(r8), pointer :: qflx_till_leak       (:)   => null() ! bog perched leakage through till (mm H2O /s)
     real(r8), pointer :: qflx_deficit         (:)   => null() ! water deficit to keep non-negative liquid water content (mm H2O)
     real(r8), pointer :: qflx_floodc          (:)   => null() ! flood water flux at column level
     real(r8), pointer :: qflx_sl_top_soil     (:)   => null() ! liquid water + ice from layer above soil to top soil layer or sent to qflx_qrgwl (mm H2O/s)
@@ -2199,63 +2198,6 @@ contains
     endif   ! end if if-read flag
 
   end subroutine col_ws_restart
-
-  !------------------------------------------------------------------------
-  subroutine seed_bog_perched_soil_water(this, begc, endc, watsat_input)
-    !
-    ! !DESCRIPTION:
-    ! Saturate bog peat below the initialized perched table and above the
-    ! restrictive till barrier so ZWT_PERCH has matching liquid water storage.
-    !
-    ! !ARGUMENTS:
-    class(column_water_state) :: this
-    integer , intent(in)      :: begc,endc
-    real(r8), intent(in)      :: watsat_input(begc:, 1:)
-    !
-    ! !LOCAL VARIABLES:
-    integer  :: c,j,l,t,nlevbed
-    real(r8) :: barrier_depth
-    real(r8) :: perched_depth
-    real(r8) :: layer_top
-    real(r8) :: layer_bot
-    real(r8) :: overlap
-    real(r8) :: layer_frac
-    real(r8) :: target_vol
-    !------------------------------------------------------------------------
-
-    do c = begc,endc
-       l = col_pp%landunit(c)
-       if (.not. (lun_pp%itype(l) == istsoil .or. lun_pp%itype(l) == istcrop)) cycle
-
-       t = col_pp%topounit(c)
-       if (.not. top_pp%active(t)) cycle
-       if (.not. (top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8)) cycle
-
-       nlevbed = col_pp%nlevbed(c)
-       barrier_depth = min(max(top_pp%peat_depth(t), col_pp%z(c,1)), col_pp%zi(c,nlevbed))
-       perched_depth = min(0.05_r8, 0.5_r8 * barrier_depth)
-
-       do j = 1,nlevbed
-          layer_top = max(0._r8, col_pp%zi(c,j-1))
-          layer_bot = col_pp%zi(c,j)
-          overlap = max(0._r8, min(layer_bot, barrier_depth) - max(layer_top, perched_depth))
-          if (overlap <= 0._r8) cycle
-
-          layer_frac = min(1._r8, overlap / col_pp%dz(c,j))
-          target_vol = layer_frac * watsat_input(c,j) + (1._r8 - layer_frac) * this%h2osoi_vol(c,j)
-          this%h2osoi_vol(c,j) = min(watsat_input(c,j), max(this%h2osoi_vol(c,j), target_vol))
-
-          if (col_es%t_soisno(c,j) <= tfrz) then
-             this%h2osoi_ice(c,j) = col_pp%dz(c,j)*denice*this%h2osoi_vol(c,j)
-             this%h2osoi_liq(c,j) = 0._r8
-          else
-             this%h2osoi_ice(c,j) = 0._r8
-             this%h2osoi_liq(c,j) = col_pp%dz(c,j)*denh2o*this%h2osoi_vol(c,j)
-          endif
-       enddo
-    enddo
-
-  end subroutine seed_bog_perched_soil_water
 
   !------------------------------------------------------------------------
   subroutine col_ws_clean(this)
@@ -6024,7 +5966,6 @@ contains
     allocate(this%qflx_h2osfc_to_downhill(begc:endc))             ; this%qflx_h2osfc_to_downhill(:) = spval
     allocate(this%qflx_snow_h2osfc       (begc:endc))             ; this%qflx_snow_h2osfc     (:)   = spval
     allocate(this%qflx_drain_perched     (begc:endc))             ; this%qflx_drain_perched   (:)   = spval
-    allocate(this%qflx_till_leak         (begc:endc))             ; this%qflx_till_leak       (:)   = spval
     allocate(this%qflx_deficit           (begc:endc))             ; this%qflx_deficit         (:)   = spval
     allocate(this%qflx_floodc            (begc:endc))             ; this%qflx_floodc          (:)   = spval
     allocate(this%qflx_sl_top_soil       (begc:endc))             ; this%qflx_sl_top_soil     (:)   = spval
@@ -6194,11 +6135,6 @@ contains
           avgflag='A', long_name='perched wt drainage', &
            ptr_col=this%qflx_drain_perched, c2l_scale_type='urbanf')
 
-    this%qflx_till_leak(begc:endc) = spval
-     call hist_addfld1d (fname='QTILL_LEAK',  units='mm/s',  &
-          avgflag='A', long_name='bog perched water leakage through restrictive till', &
-           ptr_col=this%qflx_till_leak, c2l_scale_type='urbanf')
-
     this%qflx_snow_melt(begc:endc) = spval
      call hist_addfld1d (fname='QSNOMELT',  units='mm/s',  &
           avgflag='A', long_name='snow melt', &
@@ -6314,7 +6250,6 @@ contains
 
     this%qflx_h2osfc_surf(begc:endc) = 0._r8
     this%qflx_h2osfc_to_downhill(begc:endc) = 0._r8
-    this%qflx_till_leak(begc:endc) = 0._r8
     this%qflx_snow_melt  (begc:endc)   = 0._r8
 
     this%dwb(begc:endc) = 0._r8

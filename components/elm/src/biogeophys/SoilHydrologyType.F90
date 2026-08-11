@@ -13,7 +13,6 @@ Module SoilHydrologyType
   use LandunitType          , only : lun_pp                
   use ColumnType            , only : col_pp      
   use GridcellType          , only : grc_pp   
-  use TopounitType          , only : top_pp
   use topounit_varcon       , only : max_topounits
   !
   ! !PUBLIC TYPES:
@@ -25,7 +24,6 @@ Module SoilHydrologyType
   private :: initSoilParVIC    ! Convert default elm soil properties to VIC parameters
   private :: initELMVICMap     ! Initialize map from VIC to elm layers
   private :: linear_interp     ! function for linear interperation
-  private :: InitBogPerchedWaterTable ! Initialize bog perched water table from topounit peat depth
   !
   type, public :: soilhydrology_type
 
@@ -371,8 +369,6 @@ contains
        end do
     end if
 
-    call InitBogPerchedWaterTable(this, bounds)
-
     ! Initialize VIC variables
 
     if (use_vichydro) then
@@ -692,44 +688,9 @@ contains
          interpinic_flag='interp', readvar=readvar, data=this%zwt_perched_col)
     if (flag == 'read' .and. .not. readvar) then
        this%zwt_perched_col(bounds%begc:bounds%endc) = col_pp%zi(bounds%begc:bounds%endc,nlevsoi)
-       call InitBogPerchedWaterTable(this, bounds)
     end if
 
   end subroutine Restart
-
-  !------------------------------------------------------------------------
-  subroutine InitBogPerchedWaterTable(this, bounds)
-    !
-    ! !DESCRIPTION:
-    ! Initialize bog topounits with a shallow perched water table above the
-    ! restrictive till barrier. Restart files that already carry ZWT_PERCH
-    ! are left unchanged.
-    !
-    ! !ARGUMENTS:
-    class(soilhydrology_type) :: this
-    type(bounds_type) , intent(in)    :: bounds
-    !
-    ! !LOCAL VARIABLES:
-    integer  :: c,l,t,nlevbed
-    real(r8) :: barrier_depth
-    real(r8) :: initial_perched_depth
-    !-----------------------------------------------------------------------
-
-    do c = bounds%begc,bounds%endc
-       l = col_pp%landunit(c)
-       if (lun_pp%lakpoi(l) .or. lun_pp%urbpoi(l)) cycle
-
-       t = col_pp%topounit(c)
-       if (.not. top_pp%active(t)) cycle
-       if (.not. (top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8)) cycle
-
-       nlevbed = col_pp%nlevbed(c)
-       barrier_depth = min(max(top_pp%peat_depth(t), col_pp%z(c,1)), col_pp%zi(c,nlevbed))
-       initial_perched_depth = min(0.05_r8, 0.5_r8 * barrier_depth)
-       this%zwt_perched_col(c) = max(0._r8, min(initial_perched_depth, barrier_depth))
-    enddo
-
-  end subroutine InitBogPerchedWaterTable
 
   !-----------------------------------------------------------------------
   subroutine initSoilParVIC(c, claycol, sandcol, om_fraccol, soilhydrology_vars)
