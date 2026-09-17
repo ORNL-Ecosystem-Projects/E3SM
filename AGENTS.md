@@ -273,3 +273,48 @@ Build types tested: sp (single precision), dbg (debug), fpe (floating point exce
 description with markdown formatting.
 2. PR description should use imperative tense and start with a verb like 'Fix' or 'Add'
 
+## ELM-Focused Agent Workflow
+
+Most local development in this checkout is expected to target ELM. Before editing ELM
+code, inspect the relevant files under `components/elm/src` and prefer nearby patterns
+over introducing new abstractions. Treat `components/elm/src/biogeochem`,
+`components/elm/src/biogeophys`, `components/elm/src/main`,
+`components/elm/src/data_types`, `components/elm/src/dyn_subgrid`, and
+`components/elm/src/cpl` as the primary working areas.
+
+When a task mentions phenology, carbon/nitrogen/phosphorus cycling, PFTs, moss,
+peatlands, topounits, restart behavior, surface radiation, or vcmax/acclimation, start
+by searching the ELM source and the top-level local analysis scripts before making a
+plan. Important recurring files include:
+
+- `components/elm/src/biogeochem/PhenologyMod.F90`
+- `components/elm/src/biogeochem/MaintenanceRespMod.F90`
+- `components/elm/src/biogeochem/PhosphorusDynamicsMod.F90`
+- `components/elm/src/biogeophys/SurfaceRadiationMod.F90`
+- `components/elm/src/main/elm_varctl.F90`
+- `components/elm/src/data_types/TopounitDataType.F90`
+- `components/elm/src/data_types/VegetationDataType.F90`
+
+Use bounded local-model workers for mechanical, low-risk work: symbol tracing, call-tree
+summaries, locating repeated patterns, drafting narrow Fortran edits, and summarizing
+diagnostic scripts. Keep high-level reasoning with the frontier model for scientific
+intent, architecture, cross-component effects, restart semantics, conservation checks,
+test strategy, and final code review.
+
+For ELM Fortran edits:
+
+- Preserve existing formatting, naming, module organization, `associate` style, and
+  pointer/array indexing conventions.
+- Avoid changing public state, history fields, namelist behavior, restart variables, or
+  CIME XML unless the task explicitly requires it.
+- Check array bounds and subgrid indexing carefully: gridcell, landunit, column, patch,
+  and topounit dimensions are not interchangeable.
+- For biogeochemistry changes, consider carbon, nitrogen, phosphorus, and water
+  conservation implications before finalizing.
+- For restart-related changes, look for corresponding read/write, initialization, and
+  mismatch-dump behavior.
+
+Fine-tuning or model customization should be evaluated after simpler customization:
+project instructions, retrieval over ELM source/docs, and a small benchmark set of prior
+ELM tasks. Use fine-tuning only when repeated failures remain after those mechanisms are
+working.
