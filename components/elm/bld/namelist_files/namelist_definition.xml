@@ -793,6 +793,13 @@ Toggle to make wild-fires inactive for biogeochemistry=CN mode
 Turn on methane model. Standard part of ELMBGC model.
 </entry>
 
+<entry id="use_microbe_methane" type="logical" category="bgc"
+       group="elm_inparm" valid_values="" value=".false.">
+Select the microbial decomposition and revised methane backend. This requires
+use_lch4=.true. and is a development-only option until the end-to-end
+microbial-methane implementation is complete.
+</entry>
+
 <entry id="use_cn" type="logical" category="bgc"
        group="elm_inparm" valid_values="" value=".false.">
 ELM Biogeochemistry mode : Carbon Nitrogen model (CN)

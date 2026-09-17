@@ -2085,6 +2085,7 @@ sub process_namelist_inline_logic {
   ###############################
   # namelist group: ch4par_in   #
   ###############################
+  setup_logic_microbe_methane($nl);
   setup_logic_methane($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
   setup_logic_c_isotope($nl_flags, $definition, $defaults, $nl);
 
@@ -2983,6 +2984,75 @@ sub setup_logic_hydrology_switches {
   if ( $h2osfcflag == 1 && $subgrid != 1 ) {
     fatal_error("if h2osfcflag is ON, subgridflag can NOT be off!");
   }
+}
+
+#-------------------------------------------------------------------------------
+
+sub setup_logic_microbe_methane {
+  #
+  # Validate the configuration envelope for the microbial decomposition and
+  # revised methane backend. Phase 1 deliberately rejects even a compatible
+  # enabled configuration after these targeted checks: the science path is not
+  # connected yet and must never run as a partially implemented model.
+  #
+  my ($nl) = @_;
+
+  return unless value_is_true($nl->get_value('use_microbe_methane'));
+
+  if (!value_is_true($nl->get_value('use_lch4'))) {
+    fatal_error("use_microbe_methane=.true. requires use_lch4=.true.\n");
+  }
+  if (!value_is_true($nl->get_value('use_cn'))) {
+    fatal_error("use_microbe_methane=.true. requires use_cn=.true.\n");
+  }
+  if (!value_is_true($nl->get_value('use_vertsoilc'))) {
+    fatal_error("use_microbe_methane=.true. requires use_vertsoilc=.true.\n");
+  }
+  if (value_is_true($nl->get_value('use_century_decomp'))) {
+    fatal_error("use_microbe_methane=.true. requires the CTC decomposition cascade (use_century_decomp=.false.).\n");
+  }
+  if (value_is_true($nl->get_value('use_fates'))) {
+    fatal_error("use_microbe_methane=.true. is not compatible with FATES.\n");
+  }
+  if (value_is_true($nl->get_value('use_betr'))) {
+    fatal_error("use_microbe_methane=.true. is not compatible with BeTR/sBeTR.\n");
+  }
+  if (value_is_true($nl->get_value('use_elm_interface')) ||
+      value_is_true($nl->get_value('use_pflotran'))) {
+    fatal_error("use_microbe_methane=.true. requires native ELM BGC; the ELM-PFLOTRAN BGC interface must be disabled.\n");
+  }
+  if (value_is_true($nl->get_value('use_alquimia'))) {
+    fatal_error("use_microbe_methane=.true. is not compatible with Alquimia.\n");
+  }
+  if (value_is_true($nl->get_value('use_crop'))) {
+    fatal_error("use_microbe_methane=.true. does not yet support prognostic crop.\n");
+  }
+  if (value_is_true($nl->get_value('use_c13')) ||
+      value_is_true($nl->get_value('use_c14'))) {
+    fatal_error("use_microbe_methane=.true. does not yet support C13 or C14.\n");
+  }
+
+  my $nu_com = $nl->get_value('nu_com') || 'RD';
+  my $suplnitro = $nl->get_value('suplnitro') || 'NONE';
+  my $suplphos = $nl->get_value('suplphos') || 'NONE';
+  $nu_com = uc(remove_leading_and_trailing_quotes($nu_com));
+  $suplnitro = uc(remove_leading_and_trailing_quotes($suplnitro));
+  $suplphos = uc(remove_leading_and_trailing_quotes($suplphos));
+
+  if ($nu_com ne 'RD') {
+    fatal_error("use_microbe_methane=.true. currently requires nu_com='RD'.\n");
+  }
+  if ($suplnitro ne 'NONE') {
+    fatal_error("use_microbe_methane=.true. currently requires suplnitro='NONE'.\n");
+  }
+  if ($suplphos ne 'NONE') {
+    fatal_error("use_microbe_methane=.true. currently requires suplphos='NONE'.\n");
+  }
+  if (value_is_true($nl->get_value('allowlakeprod'))) {
+    fatal_error("use_microbe_methane=.true. requires allowlakeprod=.false.\n");
+  }
+
+  fatal_error("use_microbe_methane is a Phase 1 development-only option; the microbial decomposition and revised methane timestep path is not implemented yet.\n");
 }
 
 #-------------------------------------------------------------------------------

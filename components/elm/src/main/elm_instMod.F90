@@ -7,6 +7,7 @@ module elm_instMod
   use abortutils                 , only : endrun
   use decompMod                  , only : bounds_type, get_proc_bounds
   use elm_varctl                 , only : use_cn, use_voc, use_c13, use_c14, use_fates, use_betr
+  use elm_varctl                 , only : use_microbe_methane
   use elm_varctl , only : iulog
   !-----------------------------------------
   ! Definition of component types
@@ -14,6 +15,7 @@ module elm_instMod
   use AerosolType                , only : aerosol_type
   use CanopyStateType            , only : canopystate_type
   use CH4Mod                     , only : ch4_type
+  use MicrobeMethaneMod          , only : microbe_methane_type
   use CNCarbonFluxType           , only : carbonflux_type
   use CNCarbonStateType          , only : carbonstate_type
   use CNStateType                , only : cnstate_type
@@ -96,6 +98,7 @@ module elm_instMod
   !-----------------------------------------
   !
   type(ch4_type)                                      :: ch4_vars
+  type(microbe_methane_type)                          :: microbe_methane_vars
   type(carbonstate_type)                              :: carbonstate_vars
   type(carbonstate_type)                              :: c13_carbonstate_vars
   type(carbonstate_type)                              :: c14_carbonstate_vars
@@ -255,6 +258,10 @@ contains
     ! Initialize the Functionaly Assembled Terrestrial Ecosystem Simulator (FATES)
     if (use_fates) then
        call alm_fates%init(bounds_proc, flandusepftdat)
+    end if
+
+    if (use_microbe_methane) then
+       call microbe_methane_vars%Init(bounds_proc)
     end if
 
     call hist_printflds()

@@ -99,7 +99,8 @@ module controlMod
                         fates_regeneration_model, fates_hydro_solver, &
                         fates_radiation_model, fates_electron_transport_model, &
                         fates_history_dimlevel, elm_varctl_set, &
-                        use_nofire, use_lch4, use_vertsoilc, use_extralakelayers, &
+                        use_nofire, use_lch4, use_microbe_methane, &
+                        use_vertsoilc, use_extralakelayers, &
                         use_vichydro, use_century_decomp, use_cn, use_crop, &
                         use_snicar_frc, use_snicar_ad, use_firn_percolation_and_compaction, &
                         use_extrasnowlayers, use_T_rho_dependent_snowthk, &
@@ -114,6 +115,7 @@ module controlMod
   public :: control_setNL ! Set namelist filename
   public :: control_init  ! initial run control information
   public :: control_print ! print run control information
+  private :: validate_microbe_methane_configuration
   
   ! !PRIVATE TYPES:
   character(len=  7) :: runtyp(4)                        ! run type
@@ -349,7 +351,8 @@ contains
     namelist /elm_inparm/ maxpatch_pft
 
     namelist /elm_inparm/ &
-         use_nofire, use_lch4, use_vertsoilc, use_extralakelayers, &
+         use_nofire, use_lch4, use_microbe_methane, &
+         use_vertsoilc, use_extralakelayers, &
          use_vichydro, use_century_decomp, use_cn, use_crop, use_snicar_frc, &
          use_snicar_ad, use_firn_percolation_and_compaction, use_extrasnowlayers,&
          use_T_rho_dependent_snowthk, use_vancouver, use_mexicocity, use_noio
@@ -632,6 +635,8 @@ contains
                    errMsg(__FILE__, __LINE__))
        end if
 
+       call validate_microbe_methane_configuration()
+
        if (use_lnd_rof_two_way) then
           if (lnd_rof_coupling_nstep < 1) then
           call endrun(msg=' ERROR: lnd_rof_coupling_nstep cannot be smaller than 1.'//&
@@ -769,6 +774,68 @@ contains
   end subroutine control_init
 
   !------------------------------------------------------------------------
+  subroutine validate_microbe_methane_configuration()
+    !
+    ! Validate the currently supported configuration envelope for the
+    ! microbial decomposition and revised methane backend. The ch4par_in
+    ! value allowlakeprod is checked later, after CH4conrd has read it.
+    !
+    implicit none
+
+    if (.not. use_microbe_methane) return
+
+    if (.not. use_lch4) then
+       call endrun(msg=' ERROR: use_microbe_methane=.true. requires use_lch4=.true.'//&
+            errMsg(__FILE__, __LINE__))
+    end if
+    if (.not. use_cn) then
+       call endrun(msg=' ERROR: use_microbe_methane=.true. requires use_cn=.true.'//&
+            errMsg(__FILE__, __LINE__))
+    end if
+    if (.not. use_vertsoilc) then
+       call endrun(msg=' ERROR: use_microbe_methane=.true. requires use_vertsoilc=.true.'//&
+            errMsg(__FILE__, __LINE__))
+    end if
+    if (use_century_decomp) then
+       call endrun(msg=' ERROR: use_microbe_methane=.true. requires the CTC decomposition cascade '//&
+            '(use_century_decomp=.false.).'//errMsg(__FILE__, __LINE__))
+    end if
+    if (use_fates) then
+       call endrun(msg=' ERROR: use_microbe_methane=.true. is not compatible with FATES.'//&
+            errMsg(__FILE__, __LINE__))
+    end if
+    if (use_betr) then
+       call endrun(msg=' ERROR: use_microbe_methane=.true. is not compatible with BeTR/sBeTR.'//&
+            errMsg(__FILE__, __LINE__))
+    end if
+    if (use_elm_interface .or. use_pflotran) then
+       call endrun(msg=' ERROR: use_microbe_methane=.true. requires native ELM BGC; '//&
+            'the ELM-PFLOTRAN BGC interface must be disabled.'//errMsg(__FILE__, __LINE__))
+    end if
+    if (trim(nu_com) /= 'RD') then
+       call endrun(msg=' ERROR: use_microbe_methane=.true. currently requires nu_com=''RD''.'//&
+            errMsg(__FILE__, __LINE__))
+    end if
+    if (trim(suplnitro) /= 'NONE') then
+       call endrun(msg=' ERROR: use_microbe_methane=.true. currently requires suplnitro=''NONE''.'//&
+            errMsg(__FILE__, __LINE__))
+    end if
+    if (trim(suplphos) /= 'NONE') then
+       call endrun(msg=' ERROR: use_microbe_methane=.true. currently requires suplphos=''NONE''.'//&
+            errMsg(__FILE__, __LINE__))
+    end if
+    if (use_c13 .or. use_c14) then
+       call endrun(msg=' ERROR: use_microbe_methane=.true. does not yet support C13 or C14.'//&
+            errMsg(__FILE__, __LINE__))
+    end if
+    if (use_crop) then
+       call endrun(msg=' ERROR: use_microbe_methane=.true. does not yet support prognostic crop.'//&
+            errMsg(__FILE__, __LINE__))
+    end if
+
+  end subroutine validate_microbe_methane_configuration
+
+  !------------------------------------------------------------------------
   subroutine control_spmd()
     
     ! !DESCRIPTION:
@@ -800,6 +867,7 @@ contains
 
     call mpi_bcast (use_nofire, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_lch4, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_microbe_methane, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_vertsoilc, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_extralakelayers, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_extrasnowlayers, 1, MPI_LOGICAL, 0, mpicom, ier)
@@ -1160,6 +1228,7 @@ contains
     write(iulog,*) 'process control parameters:'
     write(iulog,*) '    use_nofire = ', use_nofire
     write(iulog,*) '    use_lch4 = ', use_lch4
+    write(iulog,*) '    use_microbe_methane = ', use_microbe_methane
     write(iulog,*) '    use_vertsoilc = ', use_vertsoilc
     write(iulog,*) '    use_var_soil_thick = ', use_var_soil_thick
     write(iulog,*) '    use_lake_wat_storage = ', use_lake_wat_storage
