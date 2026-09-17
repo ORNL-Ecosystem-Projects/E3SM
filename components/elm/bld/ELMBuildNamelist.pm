@@ -2990,17 +2990,18 @@ sub setup_logic_hydrology_switches {
 
 sub setup_logic_microbe_methane {
   #
-  # Validate the configuration envelope for the microbial decomposition and
-  # revised methane backend. Phase 1 deliberately rejects even a compatible
-  # enabled configuration after these targeted checks: the science path is not
-  # connected yet and must never run as a partially implemented model.
+  # Validate the configuration envelope for microbial decomposition and the
+  # revised methane backend. Phase 2 keeps the established methane model
+  # active so its oxygen state and nitrification/denitrification coupling are
+  # available while the microbial decomposition cascade is tested. Phase 3
+  # will replace that temporary bridge with the revised methane backend.
   #
   my ($nl) = @_;
 
   return unless value_is_true($nl->get_value('use_microbe_methane'));
 
   if (!value_is_true($nl->get_value('use_lch4'))) {
-    fatal_error("use_microbe_methane=.true. requires use_lch4=.true.\n");
+    fatal_error("Phase 2 microbial decomposition requires use_lch4=.true. so the established methane oxygen and nitrification/denitrification coupling remains active.\n");
   }
   if (!value_is_true($nl->get_value('use_cn'))) {
     fatal_error("use_microbe_methane=.true. requires use_cn=.true.\n");
@@ -3042,17 +3043,6 @@ sub setup_logic_microbe_methane {
   if ($nu_com ne 'RD') {
     fatal_error("use_microbe_methane=.true. currently requires nu_com='RD'.\n");
   }
-  if ($suplnitro ne 'NONE') {
-    fatal_error("use_microbe_methane=.true. currently requires suplnitro='NONE'.\n");
-  }
-  if ($suplphos ne 'NONE') {
-    fatal_error("use_microbe_methane=.true. currently requires suplphos='NONE'.\n");
-  }
-  if (value_is_true($nl->get_value('allowlakeprod'))) {
-    fatal_error("use_microbe_methane=.true. requires allowlakeprod=.false.\n");
-  }
-
-  fatal_error("use_microbe_methane is a Phase 1 development-only option; the microbial decomposition and revised methane timestep path is not implemented yet.\n");
 }
 
 #-------------------------------------------------------------------------------

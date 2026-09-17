@@ -795,9 +795,10 @@ Turn on methane model. Standard part of ELMBGC model.
 
 <entry id="use_microbe_methane" type="logical" category="bgc"
        group="elm_inparm" valid_values="" value=".false.">
-Select the microbial decomposition and revised methane backend. This requires
-use_lch4=.true. and is a development-only option until the end-to-end
-microbial-methane implementation is complete.
+Select the microbial decomposition and revised methane development path.
+Phase 2 requires use_lch4=.true. and temporarily retains the established
+methane backend so its oxygen and nitrification/denitrification coupling remain
+active. Phase 3 replaces that bridge with revised methane.
 </entry>
 
 <entry id="use_cn" type="logical" category="bgc"

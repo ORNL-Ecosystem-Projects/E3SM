@@ -177,8 +177,8 @@ namelist.
 | --- | --- | --- |
 | false | false | Current no-methane behavior, unchanged |
 | true | false | Current `CH4Mod` behavior, unchanged |
-| false | true | Configuration error with an actionable message |
-| true | true | Microbial decomposition plus revised methane backend |
+| false | true | Configuration error; Phase 2 requires established methane oxygen/anoxia coupling |
+| true | true | Phase 2: microbial decomposition plus established methane bridge; Phase 3 target: revised methane backend |
 
 A string-valued `methane_model='legacy|microbial'` was considered but rejected
 for this port. Adding a default-false boolean makes the backward-compatibility
@@ -375,12 +375,27 @@ the equations, not merely forced to sum to one. The old cascade uses both path
 fractions and pathway respiration/CUE, so a naive sum check can double-count the
 respired part. Unit tests will encode the actual donor mass equation.
 
+CLM-SPRUCE assigns a respiration fraction of one to the seven litter/SOM-to-DOM
+solubilization paths. Under current ELM cascade semantics that would respire all
+of their carbon and deliver none to DOM, contradicting the named receivers and
+the documented solubilization fractions. Phase 2 therefore treats these as
+conservative transfers (`rf=0`). This intentional semantic repair must remain
+flagged in golden-vector comparisons rather than being mistaken for exact
+source parity.
+
 ### 8.3 C-N-P behavior
 
 - DOM, bacteria, and fungi use the standard vertically resolved C/N/P decomp
   arrays as their only bulk state.
+- P in the DOM decomp pool is dissolved organic phosphorus (DOP). It is distinct
+  from `solutionp_vr`, which is dissolved inorganic soil-solution phosphate;
+  neither state aliases or duplicates the other.
 - Transfer C, N, and P through standard cascade flux arrays and state-update
   infrastructure wherever possible.
+- Cascade mineralization and immobilization provide the explicit exchange
+  between DOM-P and solution phosphate required by donor/receiver C:P ratios.
+  DOM transport carries its organic P with DOM, while solution phosphate keeps
+  ELM's existing mineral-P transport, sorption, and leaching behavior.
 - Bacterial/fungal C:N and C:P ratios and DOM C:N and C:P behavior are explicit
   named parameters.
 - When methane chemistry consumes DOM-C, associated DOM-N and DOM-P changes are
@@ -517,7 +532,7 @@ ELM PFT dimension.
 | `k_dom` | PFT | DOM daily turnover probability/rate |
 | `k_bacteria` | PFT | Bacterial biomass daily turnover probability/rate |
 | `k_fungi` | PFT | Fungal biomass daily turnover probability/rate |
-| `m_rf_s1m`, `m_rf_s2m`, `m_rf_s3m`, `m_rf_s4m` | PFT | SOM1-SOM4 fractions routed to microbial uptake |
+| `m_rf_s1m`, `m_rf_s2m`, `m_rf_s3m`, `m_rf_s4m` | PFT | SOM1-SOM4 microbial carbon-use efficiencies (the retained fraction after pathway respiration) |
 | `m_batm_f`, `m_fatm_f` | PFT | Bacterial and fungal turnover fractions respired to atmosphere |
 | `m_bdom_f`, `m_fdom_f` | PFT | Bacterial and fungal lysis fractions routed to DOM |
 | `m_bs1_f`, `m_bs2_f`, `m_bs3_f` | PFT | Bacterial residue fractions routed to SOM1-SOM3 |
@@ -532,6 +547,14 @@ ELM PFT dimension.
 | `microbe_allocation_cn_exponent` | Scalar, new name | Bacteria/fungi allocation exponent; literal 0.6 in CLM-SPRUCE |
 | `bacteria_initial_c`, `fungi_initial_c`, `dom_initial_c` | Scalar, new names | Cold-start C stocks; source literals are `1e-5`, `1e-5`, and 0 `g C m-3 soil` |
 | `cp_bacteria`, `cp_fungi`, `cp_dom` | PFT or scalar, new names | Required C:P ratios for the target ELM CNP model; absent from CLM-SPRUCE and requiring science-owner values |
+| `dom_som_diffusion_multiplier` | Scalar, new name | Multiplier on SOM-solver diffusivity for DOM; literal 10 in `CNSoilLittVertTranspMod.F90` |
+| `microbe_som2_q10`, `microbe_som3_q10`, `microbe_som4_q10` | Scalar, new names | Pool-specific temperature responses; CLM-SPRUCE literals 1.5, 2.0, and 2.5 |
+| `microbe_dom_q10` | Scalar, new name | DOM temperature response; CLM-SPRUCE literal 1.25 |
+
+These four Q10 parameters use ELM's existing 25 degrees C reference and 10 K
+temperature interval conventions; those shared mathematical constants are not
+duplicated in the microbial parameter namespace. Litter, SOM1, bacteria, and
+fungi continue to use ELM's existing `Q10_hr` and `froz_q10` parameters.
 
 The following active cascade fractions are literals in CLM-SPRUCE and must be
 promoted into the standard ELM parameter file rather than copied as literals:
@@ -547,6 +570,14 @@ promoted into the standard ELM parameter file rather than copied as literals:
 computed respectively from the bacterial, fungal, and DOM path fractions. The
 reader must reject a negative residual; the source's `max(0, residual)` behavior
 silently loses the donor-fraction closure and will not be reproduced.
+
+The Phase 2 test manifest records provenance per variable. Turnover and routing
+values copied from `microbepar_in` remain explicitly *unverified* because the
+legacy positional reader did not populate the correspondingly named PFT arrays.
+The bacterial and fungal PFT C:N test values repeat the source pool literals,
+while all three C:P values are new CNP test assumptions. None of those groups is
+a production calibration until an archived successful-run parameter file or a
+science-owner decision resolves it.
 
 ### 10.2 Revised methane reaction and isotope parameters
 
@@ -653,6 +684,14 @@ implementation, but must not be copied into a second microbial namespace.
 Similarly, `ch4offline`, `allowlakeprod`, history controls, and
 `use_microbe_methane` are runtime controls, not scientific parameter-file
 variables.
+
+The inspected CLM-SPRUCE branch also hard-codes a 1.35 above-freezing base Q10,
+a 0.3 moisture-response floor, and a 0.5 moisture exponent outside its
+`MICROBE` conditional. Those are branch-wide SPRUCE tuning changes, not
+microbial-module parameters, and are not imported by this option. Current ELM
+temperature and moisture controls remain authoritative for litter, SOM1,
+bacteria, and fungi. The SOM2-SOM4 and DOM Q10 literals that occur inside the
+`MICROBE` path are migrated explicitly in section 10.1.
 
 ### 10.5 Declared or supplied legacy values not active in the inspected path
 
@@ -833,9 +872,11 @@ is ultimately needed.
 
 ## 14. Implementation sequence and gates
 
-Do not expose `use_microbe_methane=.true.` as usable until the end-to-end path
-passes its gate. Intermediate branches may contain the option, but must fail
-early with a development-only message rather than run a half-connected model.
+Do not claim the combined revised microbial-methane backend until the
+end-to-end path passes its gate. Phase 2 site tests run the microbial cascade
+with the established methane backend fully initialized so oxygen limitation
+and nitrification/denitrification remain active. This is an explicitly
+temporary integration bridge, not the Phase 3 methane implementation.
 
 ### Phase 0: freeze references
 
@@ -864,10 +905,25 @@ Gate: all disabled-mode comparisons are exact and invalid combinations fail.
 - Implement 11 pools and 47 transitions with named parameters.
 - Route C, N, and P and audit fire, transport, erosion, subgrid, spinup, and
   restart assumptions.
+- Preserve CLM-SPRUCE's 10x DOM diffusivity in the ordinary SOM vertical
+  transport solver as a named parameter. Defer saturated/unsaturated
+  water-phase DOM partitioning and the separate `dom_diffus` coefficient to
+  Phase 3, where they can share one hydrologically consistent transport path
+  with acetate and dissolved gases.
 - Validate the cascade independently of revised methane reactions.
 
 Gate: closed decomp tests conserve C/N/P, all pools stay nonnegative, and the
 target CNP site case completes with balance checks enabled.
+
+Implementation status: the Phase 2 branch contains the conditional topology,
+rates, named parameter reader/injector, pool-role policies, and independent
+closed-box tests. For site integration, the established methane backend is
+fully initialized and continues to own its state, history, restart, gas
+transport, and oxygen/anoxia coupling while the microbial cascade supplies the
+generic decomposition respiration inputs. Phase 3 replaces this bridge with
+the revised backend. Site runs with the test parameter manifest are integration
+evidence only; unverified PFT values and CNP-only assumptions still require
+recovery or science-owner approval before production use.
 
 ### Phase 3: bulk revised methane
 

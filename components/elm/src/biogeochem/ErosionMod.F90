@@ -148,7 +148,7 @@ contains
             do j = 1, nlevdecomp
                ctot = 0._r8
                do l = 1, ndecomp_pools
-                  if ( decomp_cascade_con%is_soil(l) .and. all(decomp_cpools_vr(c,:,l)>=0) ) then
+                  if ( is_erodible_pool(l) .and. all(decomp_cpools_vr(c,:,l)>=0) ) then
                      ctot = ctot + decomp_cpools_vr(c,j,l)
                   end if
                end do
@@ -186,7 +186,7 @@ contains
             do j = 1, nlevdecomp
                ntot = 0._r8
                do l = 1, ndecomp_pools
-                  if ( decomp_cascade_con%is_soil(l) .and. all(decomp_npools_vr(c,:,l)>=0._r8) ) then
+                  if ( is_erodible_pool(l) .and. all(decomp_npools_vr(c,:,l)>=0._r8) ) then
                      ntot = ntot + decomp_npools_vr(c,j,l)
                   end if
                end do
@@ -205,7 +205,7 @@ contains
             do j = 1, nlevdecomp
                ptot = 0._r8
                do l = 1, ndecomp_pools
-                  if ( decomp_cascade_con%is_soil(l) .and. all(decomp_ppools_vr(c,:,l)>=0._r8) ) then
+                  if ( is_erodible_pool(l) .and. all(decomp_ppools_vr(c,:,l)>=0._r8) ) then
                      ptot = ptot + decomp_ppools_vr(c,j,l)
                   end if
                end do
@@ -271,7 +271,7 @@ contains
                      end do
                   end if
                   do l = 1, ndecomp_pools
-                     if ( decomp_cascade_con%is_soil(l) ) then
+                     if ( is_erodible_pool(l) ) then
                         cpools_yield_vr(c,j,l) = (decomp_cpools_vr(c,j,l)-decomp_cpools_vr_new(l))/dt
                         cpools_erode(c,l) = cpools_erode(c,l) + cpools_yield_vr(c,j,l)* &
                            dzsoi_decomp(j)*dm_ero/dm_yld
@@ -324,7 +324,7 @@ contains
                      end do
                   end if
                   do l = 1, ndecomp_pools
-                     if ( decomp_cascade_con%is_soil(l) ) then
+                     if ( is_erodible_pool(l) ) then
                         npools_yield_vr(c,j,l) = (decomp_npools_vr(c,j,l)-decomp_npools_vr_new(l))/dt
                         npools_erode(c,l) = npools_erode(c,l) + npools_yield_vr(c,j,l)* &
                            dzsoi_decomp(j)*dm_ero/dm_yld
@@ -454,7 +454,7 @@ contains
                      end if
                   end if
                   do l = 1, ndecomp_pools
-                     if ( decomp_cascade_con%is_soil(l) ) then
+                     if ( is_erodible_pool(l) ) then
                         ppools_yield_vr(c,j,l) = (decomp_ppools_vr(c,j,l)-decomp_ppools_vr_new(l))/dt
                         ppools_erode(c,l) = ppools_erode(c,l) + ppools_yield_vr(c,j,l)* &
                            dzsoi_decomp(j)*dm_ero/dm_yld
@@ -495,5 +495,18 @@ contains
     end associate
 
   end subroutine ErosionFluxes
+
+  !-----------------------------------------------------------------------
+  logical function is_erodible_pool(pool)
+    !$acc routine seq
+    integer, intent(in) :: pool
+
+    ! Erosion is a particulate export. Dissolved organic matter and living
+    ! microbial biomass remain outside this pathway; both roles still count
+    ! as soil organic matter in ecosystem summaries and balance checks.
+    is_erodible_pool = decomp_cascade_con%is_soil(pool) .and. &
+         .not. decomp_cascade_con%is_dissolved(pool) .and. &
+         .not. decomp_cascade_con%is_microbial_biomass(pool)
+  end function is_erodible_pool
 
 end module ErosionMod

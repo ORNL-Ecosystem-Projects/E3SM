@@ -1,0 +1,98 @@
+{
+  "schema": "elm-microbial-decomposition-phase2-test-v1",
+  "source_revision": "CLM-SPRUCE a85800bad2c2a57abff77af36ccec319b202166a",
+  "warning": "Testing values only. cp_bacteria, cp_fungi, and cp_dom require science-owner approval before production use.",
+  "provenance": {
+    "clm_spruce_source_literal": {
+      "description": "Value appears as an active literal or named constant in the inspected CLM-SPRUCE source.",
+      "parameters": [
+        "cn_dom", "bacteria_pool_cn", "fungi_pool_cn", "CUEmax",
+        "microbe_cue_cn_target", "microbe_allocation_cn_exponent",
+        "bacteria_initial_c", "fungi_initial_c", "dom_initial_c",
+        "dom_som_diffusion_multiplier",
+        "microbe_som2_q10", "microbe_som3_q10", "microbe_som4_q10",
+        "microbe_dom_q10",
+        "l1dom_f", "l2dom_f", "l3dom_f", "s1dom_f", "s2dom_f",
+        "s3dom_f", "s4dom_f", "l1s1_f", "l2s2_f", "l3s3_f",
+        "s1s2_f", "s2s3_f", "s3s4_f"
+      ]
+    },
+    "clm_spruce_unverified_text_value": {
+      "description": "Value is named in the checked-in microbepar_in, but the positional reader and PFT NetCDF do not establish that a historical executable used it.",
+      "parameters": [
+        "k_dom", "k_bacteria", "k_fungi",
+        "m_rf_s1m", "m_rf_s2m", "m_rf_s3m", "m_rf_s4m",
+        "m_batm_f", "m_fatm_f", "m_bdom_f", "m_fdom_f",
+        "m_bs1_f", "m_bs2_f", "m_bs3_f", "m_fs1_f", "m_fs2_f",
+        "m_fs3_f", "m_domb_f", "m_domf_f", "m_doms1_f",
+        "m_doms2_f", "m_doms3_f"
+      ]
+    },
+    "test_assumption_from_pool_cn_literal": {
+      "description": "Missing PFT input; the test repeats CLM-SPRUCE's fixed bacterial or fungal pool C:N literal.",
+      "parameters": ["cn_bacteria", "cn_fungi"]
+    },
+    "new_cnp_test_assumption": {
+      "description": "No CLM-SPRUCE phosphorus analogue exists; value is only for exercising ELM CNP conservation and requires science-owner approval.",
+      "parameters": ["cp_bacteria", "cp_fungi", "cp_dom"]
+    }
+  },
+  "pft": {
+    "k_dom": {"value": 0.007, "units": "day-1 probability", "long_name": "DOM daily turnover probability"},
+    "k_bacteria": {"value": 0.22, "units": "day-1 probability", "long_name": "bacterial biomass daily turnover probability"},
+    "k_fungi": {"value": 0.22, "units": "day-1 probability", "long_name": "fungal biomass daily turnover probability"},
+    "m_rf_s1m": {"value": 0.28, "units": "1", "long_name": "SOM1 microbial carbon-use efficiency"},
+    "m_rf_s2m": {"value": 0.46, "units": "1", "long_name": "SOM2 microbial carbon-use efficiency"},
+    "m_rf_s3m": {"value": 0.55, "units": "1", "long_name": "SOM3 microbial carbon-use efficiency"},
+    "m_rf_s4m": {"value": 0.75, "units": "1", "long_name": "SOM4 microbial carbon-use efficiency"},
+    "m_batm_f": {"value": 0.2, "units": "1", "long_name": "bacterial turnover fraction respired"},
+    "m_fatm_f": {"value": 0.2, "units": "1", "long_name": "fungal turnover fraction respired"},
+    "m_bdom_f": {"value": 0.1, "units": "1", "long_name": "bacterial turnover fraction routed to DOM"},
+    "m_fdom_f": {"value": 0.1, "units": "1", "long_name": "fungal turnover fraction routed to DOM"},
+    "m_bs1_f": {"value": 0.1, "units": "1", "long_name": "bacterial turnover fraction routed to SOM1"},
+    "m_bs2_f": {"value": 0.12, "units": "1", "long_name": "bacterial turnover fraction routed to SOM2"},
+    "m_bs3_f": {"value": 0.18, "units": "1", "long_name": "bacterial turnover fraction routed to SOM3"},
+    "m_fs1_f": {"value": 0.1, "units": "1", "long_name": "fungal turnover fraction routed to SOM1"},
+    "m_fs2_f": {"value": 0.12, "units": "1", "long_name": "fungal turnover fraction routed to SOM2"},
+    "m_fs3_f": {"value": 0.18, "units": "1", "long_name": "fungal turnover fraction routed to SOM3"},
+    "m_domb_f": {"value": 0.3, "units": "1", "long_name": "DOM turnover fraction routed to bacteria"},
+    "m_domf_f": {"value": 0.3, "units": "1", "long_name": "DOM turnover fraction routed to fungi"},
+    "m_doms1_f": {"value": 0.2, "units": "1", "long_name": "DOM turnover fraction routed to SOM1"},
+    "m_doms2_f": {"value": 0.15, "units": "1", "long_name": "DOM turnover fraction routed to SOM2"},
+    "m_doms3_f": {"value": 0.05, "units": "1", "long_name": "DOM turnover fraction routed to SOM3"},
+    "cn_bacteria": {"value": 5.0, "units": "gC gN-1", "long_name": "bacterial allocation C to N ratio"},
+    "cn_fungi": {"value": 15.0, "units": "gC gN-1", "long_name": "fungal allocation C to N ratio"}
+  },
+  "scalar": {
+    "cn_dom": {"value": 10.0, "units": "gC gN-1", "long_name": "DOM C to N ratio"},
+    "bacteria_pool_cn": {"value": 5.0, "units": "gC gN-1", "long_name": "bacterial pool C to N ratio"},
+    "fungi_pool_cn": {"value": 15.0, "units": "gC gN-1", "long_name": "fungal pool C to N ratio"},
+    "cp_bacteria": {"value": 150.0, "units": "gC gP-1", "long_name": "bacterial pool C to P ratio; Phase 2 test value"},
+    "cp_fungi": {"value": 450.0, "units": "gC gP-1", "long_name": "fungal pool C to P ratio; Phase 2 test value"},
+    "cp_dom": {"value": 300.0, "units": "gC gP-1", "long_name": "DOM C to P ratio; Phase 2 test value"},
+    "CUEmax": {"value": 0.8, "units": "1", "long_name": "maximum litter microbial carbon-use efficiency"},
+    "microbe_cue_cn_target": {"value": 8.0, "units": "gC gN-1", "long_name": "C to N target in the litter CUE equation"},
+    "microbe_allocation_cn_exponent": {"value": 0.6, "units": "1", "long_name": "C to N exponent for bacteria and fungi allocation"},
+    "bacteria_initial_c": {"value": 1e-5, "units": "gC m-3 soil", "long_name": "cold-start bacterial biomass C"},
+    "fungi_initial_c": {"value": 1e-5, "units": "gC m-3 soil", "long_name": "cold-start fungal biomass C"},
+    "dom_initial_c": {"value": 0.0, "units": "gC m-3 soil", "long_name": "cold-start DOM C"},
+    "dom_som_diffusion_multiplier": {"value": 10.0, "units": "1", "long_name": "DOM diffusivity multiplier in the SOM vertical transport solver"},
+    "microbe_som2_q10": {"value": 1.5, "units": "1", "long_name": "SOM2 Q10 when the microbial decomposition cascade is enabled"},
+    "microbe_som3_q10": {"value": 2.0, "units": "1", "long_name": "SOM3 Q10 when the microbial decomposition cascade is enabled"},
+    "microbe_som4_q10": {"value": 2.5, "units": "1", "long_name": "SOM4 Q10 when the microbial decomposition cascade is enabled"},
+    "microbe_dom_q10": {"value": 1.25, "units": "1", "long_name": "DOM Q10 when the microbial decomposition cascade is enabled"},
+    "l1dom_f": {"value": 0.10, "units": "1", "long_name": "LITR1 solubilization fraction to DOM"},
+    "l2dom_f": {"value": 0.08, "units": "1", "long_name": "LITR2 solubilization fraction to DOM"},
+    "l3dom_f": {"value": 0.06, "units": "1", "long_name": "LITR3 solubilization fraction to DOM"},
+    "s1dom_f": {"value": 0.18, "units": "1", "long_name": "SOM1 solubilization fraction to DOM"},
+    "s2dom_f": {"value": 0.14, "units": "1", "long_name": "SOM2 solubilization fraction to DOM"},
+    "s3dom_f": {"value": 0.10, "units": "1", "long_name": "SOM3 solubilization fraction to DOM"},
+    "s4dom_f": {"value": 0.06, "units": "1", "long_name": "SOM4 solubilization fraction to DOM"},
+    "l1s1_f": {"value": 0.19, "units": "1", "long_name": "direct LITR1 to SOM1 stabilization fraction"},
+    "l2s2_f": {"value": 0.21, "units": "1", "long_name": "direct LITR2 to SOM2 stabilization fraction"},
+    "l3s3_f": {"value": 0.23, "units": "1", "long_name": "direct LITR3 to SOM3 stabilization fraction"},
+    "s1s2_f": {"value": 0.14, "units": "1", "long_name": "direct SOM1 to SOM2 stabilization fraction"},
+    "s2s3_f": {"value": 0.23, "units": "1", "long_name": "direct SOM2 to SOM3 stabilization fraction"},
+    "s3s4_f": {"value": 0.27, "units": "1", "long_name": "direct SOM3 to SOM4 stabilization fraction"}
+  }
+}

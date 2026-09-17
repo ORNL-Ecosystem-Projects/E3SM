@@ -33,6 +33,8 @@ module CNDecompCascadeConType
      logical           , pointer  :: is_litter(:)                      ! TRUE => pool is a litter pool
      logical           , pointer  :: is_soil(:)                        ! TRUE => pool is a soil pool
      logical           , pointer  :: is_cwd(:)                         ! TRUE => pool is a cwd pool
+     logical           , pointer  :: is_dissolved(:)                   ! TRUE => pool is dissolved organic matter
+     logical           , pointer  :: is_microbial_biomass(:)          ! TRUE => pool is living microbial biomass
      real(r8)          , pointer  :: initial_cn_ratio(:)               ! c:n ratio for initialization of pools
      real(r8)          , pointer  :: initial_cp_ratio(:)               ! c:n ratio for initialization of pools
      real(r8)          , pointer  :: initial_stock(:)                  ! initial concentration for seeding at spinup
@@ -70,6 +72,8 @@ contains
     allocate(decomp_cascade_con%is_litter(0:ndecomp_pools))
     allocate(decomp_cascade_con%is_soil(0:ndecomp_pools))
     allocate(decomp_cascade_con%is_cwd(0:ndecomp_pools))
+    allocate(decomp_cascade_con%is_dissolved(0:ndecomp_pools))
+    allocate(decomp_cascade_con%is_microbial_biomass(0:ndecomp_pools))
     allocate(decomp_cascade_con%initial_cn_ratio(0:ndecomp_pools))
     allocate(decomp_cascade_con%initial_cp_ratio(0:ndecomp_pools))
     allocate(decomp_cascade_con%initial_stock(0:ndecomp_pools))
@@ -94,6 +98,8 @@ contains
     decomp_cascade_con%is_litter(0:ndecomp_pools)                      = .false.
     decomp_cascade_con%is_soil(0:ndecomp_pools)                        = .false.
     decomp_cascade_con%is_cwd(0:ndecomp_pools)                         = .false.
+    decomp_cascade_con%is_dissolved(0:ndecomp_pools)                   = .false.
+    decomp_cascade_con%is_microbial_biomass(0:ndecomp_pools)          = .false.
     decomp_cascade_con%initial_cn_ratio(0:ndecomp_pools)               = nan
     decomp_cascade_con%initial_cp_ratio(0:ndecomp_pools)               = nan
     decomp_cascade_con%initial_stock(0:ndecomp_pools)                  = nan

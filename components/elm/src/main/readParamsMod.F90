@@ -80,6 +80,7 @@ contains
     use SoilLittDecompMod              , only : readSoilLittDecompParams
     use DecompCascadeBGCMod    , only : readDecompBGCParams
     use DecompCascadeCNMod     , only : readDecompCNParams
+    use MicrobeDecompMod       , only : readMicrobeDecompParams
     use PhenologyMod             , only : readPhenolParams
     use CNPhenologyBeTRMod       , only : readCNPhenolBeTRParams
     use MaintenanceRespMod               , only : readMaintenanceRespParams
@@ -137,13 +138,16 @@ contains
             call readDecompBGCParams(ncid)
          else
             call readDecompCNParams(ncid)
+            if (use_microbe_methane) then
+               call readMicrobeDecompParams(ncid)
+            end if
          end if
        
          call readNitrifDenitrifParams(ncid)
 
          call readSoilLittVertTranspParams(ncid)
        
-         if (use_lch4 .and. .not. use_microbe_methane) then
+         if (use_lch4) then
             call readCH4Params (ncid)
          end if
       endif

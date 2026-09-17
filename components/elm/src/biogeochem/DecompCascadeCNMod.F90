@@ -11,12 +11,17 @@ module DecompCascadeCNMod
   use shr_log_mod            , only : errMsg => shr_log_errMsg
   use elm_varpar             , only : nlevsoi, nlevgrnd, nlevdecomp, ndecomp_cascade_transitions, ndecomp_pools
   use elm_varpar             , only : i_met_lit, i_cel_lit, i_lig_lit, i_cwd
+  use elm_varpar             , only : i_bacteria, i_fungi, i_dom
   use elm_varctl             , only : iulog, spinup_state, anoxia, use_lch4, use_vertsoilc
+  use elm_varctl             , only : use_microbe_methane
   use elm_varcon             , only : zsoi, spval
   use decompMod              , only : bounds_type
   use abortutils             , only : endrun
   use SharedParamsMod        , only : ParamsShareInst, anoxia_wtsat, nlev_soildecomp_standard
   use CNDecompCascadeConType , only : decomp_cascade_con
+  use MicrobeDecompMod       , only : initMicrobeDecompCascade
+  use MicrobeDecompMod       , only : getMicrobeDecompTimestepRates
+  use MicrobeDecompMod       , only : MicrobeDecompParamsInst
   use CNStateType            , only : cnstate_type
   use SoilStateType          , only : soilstate_type
   use CanopyStateType        , only : canopystate_type
@@ -390,6 +395,13 @@ contains
       cwd_fcel=DecompCNParamsInst%cwd_fcel_cn
       cwd_flig=DecompCNParamsInst%cwd_flig_cn
 
+      if (use_microbe_methane) then
+         call initMicrobeDecompCascade(bounds, cnstate_vars, cn_s1, cn_s2, cn_s3, cn_s4, &
+              cn_s1*np_s1_new, cn_s2*np_s2_new, cn_s3*np_s3_new, cn_s4*np_s4_new, &
+              cwd_fcel, cwd_flig, DecompCNParamsInst%spinup_vector)
+         return
+      end if
+
       !-------------------  list of pools and their attributes  ------------
 
       i_litr1 = i_met_lit
@@ -673,6 +685,9 @@ contains
      real(r8):: ck_s3                        ! corrected decomposition rate constant SOM 3
      real(r8):: ck_s4                        ! corrected decomposition rate constant SOM 4
      real(r8):: ck_frag                      ! corrected fragmentation rate constant CWD
+     real(r8):: k_dom_col(bounds%begc:bounds%endc)      ! DOM loss fraction per timestep
+     real(r8):: k_bacteria_col(bounds%begc:bounds%endc) ! bacterial loss fraction per timestep
+     real(r8):: k_fungi_col(bounds%begc:bounds%endc)    ! fungal loss fraction per timestep
      real(r8):: cwdc_loss                    ! fragmentation rate for CWD carbon (gC/m2/s)
      real(r8):: cwdn_loss                    ! fragmentation rate for CWD nitrogen (gN/m2/s)
      integer :: i_litr1
@@ -688,6 +703,10 @@ contains
      real(r8):: decomp_depth_efolding        ! (meters) e-folding depth for reduction in decomposition [
      real(r8):: depth_scalar(bounds%begc:bounds%endc,1:nlevdecomp)
      real(r8) :: mino2lim                    ! minimum anaerobic decomposition rate as a
+     real(r8) :: som2_t_scalar                ! microbial-cascade SOM2 temperature response
+     real(r8) :: som3_t_scalar                ! microbial-cascade SOM3 temperature response
+     real(r8) :: som4_t_scalar                ! microbial-cascade SOM4 temperature response
+     real(r8) :: dom_t_scalar                 ! DOM temperature response
      !-----------------------------------------------------------------------
 
      associate(                                             &
@@ -745,6 +764,17 @@ contains
        k_s3 = 1.0_r8-exp(-k_s3*dtd)
        k_s4 = 1.0_r8-exp(-k_s4*dtd)
        k_frag = 1.0_r8-exp(-k_frag*dtd)
+
+       if (use_microbe_methane) then
+          k_dom_col(:) = 0._r8
+          k_bacteria_col(:) = 0._r8
+          k_fungi_col(:) = 0._r8
+          do fc = 1, num_soilc
+             c = filter_soilc(fc)
+             call getMicrobeDecompTimestepRates(c, dtd, k_dom_col(c), &
+                  k_bacteria_col(c), k_fungi_col(c))
+          end do
+       end if
        minpsi=DecompCNParamsInst%minpsi_cn
        Q10 = ParamsShareInst%Q10_hr
        ! set "froz_q10" parameter
@@ -771,6 +801,18 @@ contains
        decomp_k_pools(i_soil2) = k_s2 / dt
        decomp_k_pools(i_soil3) = k_s3 / dt
        decomp_k_pools(i_soil4) = k_s4 / dt
+       if (use_microbe_methane) then
+          if (num_soilc > 0) then
+             c = filter_soilc(1)
+             decomp_k_pools(i_bacteria) = k_bacteria_col(c) / dt
+             decomp_k_pools(i_fungi) = k_fungi_col(c) / dt
+             decomp_k_pools(i_dom) = k_dom_col(c) / dt
+          else
+             decomp_k_pools(i_bacteria) = 0._r8
+             decomp_k_pools(i_fungi) = 0._r8
+             decomp_k_pools(i_dom) = 0._r8
+          end if
+       end if
        ! pflotran:end
 
        ! The following code implements the acceleration part of the AD spinup
@@ -1018,6 +1060,29 @@ contains
                 decomp_k(c,j,i_soil3) = k_s3 * t_scalar(c,j) * w_scalar(c,j) * depth_scalar(c,j) * o_scalar(c,j) / dt
                 decomp_k(c,j,i_soil4) = k_s4 * t_scalar(c,j) * w_scalar(c,j) * depth_scalar(c,j) * o_scalar(c,j) / dt
 
+                if (use_microbe_methane) then
+                   som2_t_scalar = MicrobeDecompParamsInst%microbe_som2_q10 ** &
+                        ((t_soisno(c,j) - (SHR_CONST_TKFRZ + 25._r8)) / 10._r8)
+                   som3_t_scalar = MicrobeDecompParamsInst%microbe_som3_q10 ** &
+                        ((t_soisno(c,j) - (SHR_CONST_TKFRZ + 25._r8)) / 10._r8)
+                   som4_t_scalar = MicrobeDecompParamsInst%microbe_som4_q10 ** &
+                        ((t_soisno(c,j) - (SHR_CONST_TKFRZ + 25._r8)) / 10._r8)
+                   dom_t_scalar = MicrobeDecompParamsInst%microbe_dom_q10 ** &
+                        ((t_soisno(c,j) - (SHR_CONST_TKFRZ + 25._r8)) / 10._r8)
+                   decomp_k(c,j,i_soil2) = k_s2 * som2_t_scalar * w_scalar(c,j) * &
+                        depth_scalar(c,j) * o_scalar(c,j) / dt
+                   decomp_k(c,j,i_soil3) = k_s3 * som3_t_scalar * w_scalar(c,j) * &
+                        depth_scalar(c,j) * o_scalar(c,j) / dt
+                   decomp_k(c,j,i_soil4) = k_s4 * som4_t_scalar * w_scalar(c,j) * &
+                        depth_scalar(c,j) * o_scalar(c,j) / dt
+                   decomp_k(c,j,i_bacteria) = k_bacteria_col(c) * t_scalar(c,j) * w_scalar(c,j) * &
+                        depth_scalar(c,j) * o_scalar(c,j) / dt
+                   decomp_k(c,j,i_fungi) = k_fungi_col(c) * t_scalar(c,j) * w_scalar(c,j) * &
+                        depth_scalar(c,j) * o_scalar(c,j) / dt
+                   decomp_k(c,j,i_dom) = k_dom_col(c) * dom_t_scalar * w_scalar(c,j) * &
+                        depth_scalar(c,j) * o_scalar(c,j) / dt
+                end if
+
 
              end do
           end do
@@ -1038,6 +1103,28 @@ contains
                 decomp_k(c,j,i_soil2) = k_s2 * t_scalar(c,j) * w_scalar(c,j) * o_scalar(c,j) / dt
                 decomp_k(c,j,i_soil3) = k_s3 * t_scalar(c,j) * w_scalar(c,j) * o_scalar(c,j) / dt
                 decomp_k(c,j,i_soil4) = k_s4 * t_scalar(c,j) * w_scalar(c,j) * o_scalar(c,j) / dt
+                if (use_microbe_methane) then
+                   som2_t_scalar = MicrobeDecompParamsInst%microbe_som2_q10 ** &
+                        ((t_soisno(c,j) - (SHR_CONST_TKFRZ + 25._r8)) / 10._r8)
+                   som3_t_scalar = MicrobeDecompParamsInst%microbe_som3_q10 ** &
+                        ((t_soisno(c,j) - (SHR_CONST_TKFRZ + 25._r8)) / 10._r8)
+                   som4_t_scalar = MicrobeDecompParamsInst%microbe_som4_q10 ** &
+                        ((t_soisno(c,j) - (SHR_CONST_TKFRZ + 25._r8)) / 10._r8)
+                   dom_t_scalar = MicrobeDecompParamsInst%microbe_dom_q10 ** &
+                        ((t_soisno(c,j) - (SHR_CONST_TKFRZ + 25._r8)) / 10._r8)
+                   decomp_k(c,j,i_soil2) = k_s2 * som2_t_scalar * w_scalar(c,j) * &
+                        o_scalar(c,j) / dt
+                   decomp_k(c,j,i_soil3) = k_s3 * som3_t_scalar * w_scalar(c,j) * &
+                        o_scalar(c,j) / dt
+                   decomp_k(c,j,i_soil4) = k_s4 * som4_t_scalar * w_scalar(c,j) * &
+                        o_scalar(c,j) / dt
+                   decomp_k(c,j,i_bacteria) = k_bacteria_col(c) * t_scalar(c,j) * w_scalar(c,j) * &
+                        o_scalar(c,j) / dt
+                   decomp_k(c,j,i_fungi) = k_fungi_col(c) * t_scalar(c,j) * w_scalar(c,j) * &
+                        o_scalar(c,j) / dt
+                   decomp_k(c,j,i_dom) = k_dom_col(c) * dom_t_scalar * w_scalar(c,j) * &
+                        o_scalar(c,j) / dt
+                end if
              end do
           end do
           do j = 1,nlevdecomp

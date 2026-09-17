@@ -40,7 +40,7 @@ module ColumnDataType
   use elm_time_manager, only : is_first_step, get_step_size, is_first_restart_step
   use landunit_varcon , only : istice, istwet, istsoil, istdlak, istcrop, istice_mec, istlowcenpoly, isthighcenpoly
   use column_varcon   , only : icol_road_perv, icol_road_imperv, icol_roof, icol_sunwall, icol_shadewall
-  use histFileMod     , only : hist_addfld1d, hist_addfld2d, no_snow_normal
+  use histFileMod     , only : hist_addfld1d, hist_addfld2d, no_snow_normal, max_namlen
   use histFileMod     , only : hist_addfld_decomp
   use ncdio_pio       , only : file_desc_t, ncd_io, ncd_double, ncd_int, ncd_inqvdlen
   use decompMod       , only : bounds_type
@@ -2137,7 +2137,7 @@ contains
     !
     ! !LOCAL VARIABLES:
     integer           :: c,l,j,k
-    character(24)     :: fieldname
+    character(max_namlen) :: fieldname
     character(100)    :: longname
     real(r8), pointer :: data1dptr(:)   ! temp. pointer for slicing larger arrays
     real(r8), pointer :: data2dptr(:,:) ! temp. pointer for slicing larger arrays
@@ -3338,7 +3338,7 @@ contains
     integer           :: c,l,j,k,fc
     integer           :: num_special_col           ! number of good values in special_col filter
     integer           :: special_col (endc-begc+1) ! special landunit filter - columns
-    character(24)     :: fieldname
+    character(max_namlen) :: fieldname
     character(100)    :: longname
     character(8)      :: vr_suffix
     real(r8), pointer :: data1dptr(:)   ! temp. pointer for slicing larger arrays
@@ -4609,7 +4609,7 @@ contains
     integer           :: num_special_col          ! number of good values in special_col filter
     integer           :: special_col(endc-begc+1) ! special landunit filter - columns
     character(8)      :: vr_suffix
-    character(24)     :: fieldname
+    character(max_namlen) :: fieldname
     character(100)    :: longname
     real(r8), pointer :: data1dptr(:)             ! temp. pointer for slicing larger arrays
     real(r8), pointer :: data2dptr(:,:)           ! temp. pointer for slicing larger arrays
@@ -6198,7 +6198,7 @@ contains
     integer           :: k,l,ii,jj
     character(8)      :: vr_suffix = ""
     character(10)     :: active  = ""
-    character(24)     :: fieldname = ""
+    character(max_namlen) :: fieldname = ""
     character(100)    :: longname = ""
     real(r8), pointer :: data1dptr(:)   ! temp. pointer for slicing larger arrays
     real(r8), pointer :: data2dptr(:,:) ! temp. pointer for slicing larger arrays
@@ -8356,7 +8356,7 @@ contains
     ! !LOCAL VARIABLES:
     integer        :: k,l
     character(10)  :: active
-    character(24)  :: fieldname
+    character(max_namlen) :: fieldname
     character(100) :: longname
     character(8)   :: vr_suffix
     real(r8), pointer :: data2dptr(:,:), data1dptr(:) ! temp. pointers for slicing larger arrays
@@ -10286,10 +10286,10 @@ contains
     !
     ! !LOCAL VARIABLES:
     integer           :: k,l
-    character(24)     :: fieldname
+    character(max_namlen) :: fieldname
     character(100)    :: longname
     character(8)      :: vr_suffix
-    character(1)      :: aa
+    character(8)      :: aa
     real(r8), pointer :: data2dptr(:,:), data1dptr(:) ! temp. pointers for slicing larger arrays
     integer           :: c
     integer           :: fc                           ! filter indices
@@ -10468,9 +10468,9 @@ contains
           if ( nlevdecomp_full > 1 ) then
              this%biochem_pmin_ppools_vr(begc:endc,:,k) = spval
              data2dptr => this%biochem_pmin_ppools_vr(:,:,k)
-              write(aa,'(i1)') k
-             fieldname = 'BIOCHEM_PMIN_PPOOL'//aa//trim(vr_suffix)
-             longname  = 'Biochemical mineralization of ppool'//aa
+             write(aa,'(i0)') k
+             fieldname = 'BIOCHEM_PMIN_PPOOL'//trim(aa)//trim(vr_suffix)
+             longname  = 'Biochemical mineralization of ppool'//trim(aa)
               call hist_addfld_decomp (fname=fieldname, units='gP/m^2/s',type2d='levdcmp', &
                    avgflag='A', long_name=longname, &
                     ptr_col=data2dptr, default='inactive')

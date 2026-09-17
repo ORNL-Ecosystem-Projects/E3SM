@@ -10,7 +10,7 @@ module elm_varpar
   use elm_varctl   , only: use_century_decomp, use_c13, use_c14, use_fates
   use elm_varctl   , only: iulog, create_crop_landunit, irrigate
   use elm_varctl   , only: use_vichydro
-  use elm_varctl   , only: use_extrasnowlayers, iac_present
+  use elm_varctl   , only: use_extrasnowlayers, iac_present, use_microbe_methane
 
   !
   ! !PUBLIC TYPES:
@@ -91,6 +91,9 @@ module elm_varpar
   integer :: i_cel_lit 
   integer :: i_lig_lit 
   integer :: i_cwd 
+  integer :: i_bacteria
+  integer :: i_fungi
+  integer :: i_dom
 
   integer :: ndecomp_pools
   integer :: ndecomp_cascade_transitions
@@ -249,6 +252,10 @@ contains
        nlevlak     =  25     ! number of lake layers (Yields better results for site simulations)
     end if
 
+    i_bacteria = -1
+    i_fungi = -1
+    i_dom = -1
+
     if (use_century_decomp) then
        ndecomp_pools = 7
        ndecomp_cascade_transitions = 10
@@ -256,6 +263,16 @@ contains
        i_cel_lit = 2
        i_lig_lit = 3
        i_cwd = 4
+    else if (use_microbe_methane) then
+       ndecomp_pools = 11
+       ndecomp_cascade_transitions = 47
+       i_met_lit = 1
+       i_cel_lit = 2
+       i_lig_lit = 3
+       i_cwd = 4
+       i_bacteria = 9
+       i_fungi = 10
+       i_dom = 11
     else
        ndecomp_pools = 8
        ndecomp_cascade_transitions = 9

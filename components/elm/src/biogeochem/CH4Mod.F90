@@ -17,7 +17,7 @@ module CH4Mod
   use elm_varcon         , only : catomw, s_con, d_con_w, d_con_g, c_h_inv, kh_theta, kh_tbase
   use landunit_varcon    , only : istdlak
   use elm_time_manager   , only : get_step_size, get_nstep
-  use elm_varctl         , only : iulog, use_cn, use_lch4, use_fates, use_microbe_methane
+  use elm_varctl         , only : iulog, use_cn, use_lch4, use_fates
   use abortutils         , only : endrun
   use decompMod          , only : bounds_type
   use SharedParamsMod    , only : ParamsShareInst
@@ -209,7 +209,7 @@ contains
     real(r8)         , intent(in) :: cellorg_col (bounds%begc:, 1:)
 
     call this%InitAllocate (bounds)
-    if (use_lch4 .and. .not. use_microbe_methane) then
+    if (use_lch4) then
         call this%InitHistory (bounds)
         call this%InitCold (bounds, cellorg_col)
     end if

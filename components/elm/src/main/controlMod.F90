@@ -776,16 +776,18 @@ contains
   !------------------------------------------------------------------------
   subroutine validate_microbe_methane_configuration()
     !
-    ! Validate the currently supported configuration envelope for the
-    ! microbial decomposition and revised methane backend. The ch4par_in
-    ! value allowlakeprod is checked later, after CH4conrd has read it.
+    ! Validate the currently supported configuration envelope. Phase 2 keeps
+    ! the established methane model active for its oxygen state and
+    ! nitrification/denitrification coupling. Phase 3 will replace this
+    ! temporary bridge with the revised methane backend.
     !
     implicit none
 
     if (.not. use_microbe_methane) return
 
     if (.not. use_lch4) then
-       call endrun(msg=' ERROR: use_microbe_methane=.true. requires use_lch4=.true.'//&
+       call endrun(msg=' ERROR: Phase 2 microbial decomposition requires use_lch4=.true. '//&
+            'to retain methane oxygen and nitrification/denitrification coupling.'//&
             errMsg(__FILE__, __LINE__))
     end if
     if (.not. use_cn) then
@@ -814,14 +816,6 @@ contains
     end if
     if (trim(nu_com) /= 'RD') then
        call endrun(msg=' ERROR: use_microbe_methane=.true. currently requires nu_com=''RD''.'//&
-            errMsg(__FILE__, __LINE__))
-    end if
-    if (trim(suplnitro) /= 'NONE') then
-       call endrun(msg=' ERROR: use_microbe_methane=.true. currently requires suplnitro=''NONE''.'//&
-            errMsg(__FILE__, __LINE__))
-    end if
-    if (trim(suplphos) /= 'NONE') then
-       call endrun(msg=' ERROR: use_microbe_methane=.true. currently requires suplphos=''NONE''.'//&
             errMsg(__FILE__, __LINE__))
     end if
     if (use_c13 .or. use_c14) then

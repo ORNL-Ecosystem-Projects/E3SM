@@ -6,11 +6,13 @@ module SoilLittVertTranspMod
   use shr_kind_mod           , only : r8 => shr_kind_r8
   use shr_log_mod            , only : errMsg => shr_log_errMsg
   use elm_varctl             , only : iulog, use_c13, use_c14, spinup_state, use_vertsoilc
+  use elm_varctl             , only : use_microbe_methane
   use elm_varctl             , only : use_peatland_vertical_transport
   use elm_varcon             , only : secspday
   use decompMod              , only : bounds_type
   use abortutils             , only : endrun
   use CNDecompCascadeConType , only : decomp_cascade_con
+  use MicrobeDecompMod       , only : MicrobeDecompParamsInst
   use CanopyStateType        , only : canopystate_type
   use CNStateType            , only : cnstate_type
   use elm_varctl             , only : nu_com
@@ -239,6 +241,7 @@ contains
     real(r8) :: bet
     real(r8) :: gam(0:nlevdecomp+1)
     real(r8) :: peat_depth_factor
+    real(r8) :: dom_diffusion_multiplier
     !-----------------------------------------------------------------------
 
 
@@ -247,6 +250,8 @@ contains
     ! Set statement functions
     associate(                                                      &
          is_cwd           => decomp_cascade_con%is_cwd            , & ! Input:  [logical (:)    ]  TRUE => pool is a cwd pool
+         is_dissolved     => decomp_cascade_con%is_dissolved      , &
+         is_microbial     => decomp_cascade_con%is_microbial_biomass, &
          spinup_factor    => decomp_cascade_con%spinup_factor     , & ! Input:  [real(r8) (:)   ]  spinup accelerated decomposition factor, used to accelerate transport as well
 
          altmax           => canopystate_vars%altmax_col          , & ! Input:  [real(r8) (:)   ]  maximum annual depth of thaw
@@ -260,6 +265,12 @@ contains
           max_altdepth_cryoturbation => SoilLittVertTranspParamsInst%max_altdepth_cryoturbation &
          )
       
+      dom_diffusion_multiplier = 1._r8
+      if (use_microbe_methane) then
+         dom_diffusion_multiplier = MicrobeDecompParamsInst%dom_som_diffusion_multiplier
+      end if
+
+      !$acc enter data copyin(dom_diffusion_multiplier)
       !$acc enter data create(a_tri(:,:,:),b_tri(:,:,:),&
       !$acc     c_tri(:,:,:),r_tri(:,:,:), &
       !$acc     conc_trcr(:,:,:), gam(:) )
@@ -355,7 +366,7 @@ contains
 
             !$acc parallel loop independent gang default(present)
             do s = 1, ndecomp_pools
-               if ( .not. is_cwd(s) ) then
+               if ( .not. is_cwd(s) .and. .not. is_microbial(s) ) then
                   !$acc loop independent worker vector private(c)
                   do fc = 1, num_soilc ! dummy terms here
                      c = filter_soilc (fc)
@@ -381,7 +392,7 @@ contains
                do j = 1,nlevdecomp
                   do fc = 1, num_soilc
                      c = filter_soilc (fc)
-                     if(.not. is_cwd(s)) then
+                     if(.not. is_cwd(s) .and. .not. is_microbial(s)) then
 
                         if ( spinup_state .eq. 1 ) then
                            ! increase transport (both advection and diffusion) by the same factor as accelerated decomposition for a given pool
@@ -394,11 +405,13 @@ contains
                         ! dz_node_tracer is difference between cell centers
                         call calc_diffus_advflux(spinup_term,year_curr, som_diffus_coef(c,j), som_adv_coef(c,j), &
                                                  cnstate_vars%scalaravg_col(c,j),adv_flux_j, diffus_j)
+                        if (is_dissolved(s)) diffus_j = diffus_j * dom_diffusion_multiplier
 
                         ! Calculate the D and F terms in the Patankar algorithm
                         if (j == 1) then
                           call calc_diffus_advflux(spinup_term,year_curr, som_diffus_coef(c,j+1), som_adv_coef(c,j+1), &
                                                    cnstate_vars%scalaravg_col(c,j+1),adv_flux_jp1, diffus_jp1)
+                           if (is_dissolved(s)) diffus_jp1 = diffus_jp1 * dom_diffusion_multiplier
                            dz_nodep1 =  zsoi(j+1) - zsoi(j)
                            d_m1_zm1 = 0._r8
                            w_p1 = (zsoi(j+1) - zisoi(j)) / dz_nodep1
@@ -421,9 +434,11 @@ contains
                           ! Use distance from j-1 node to interface with j divided by distance between nodes
                           call calc_diffus_advflux(spinup_term,year_curr, som_diffus_coef(c,j-1), som_adv_coef(c,j-1), &
                                                    cnstate_vars%scalaravg_col(c,j-1),adv_flux_jm1, diffus_jm1)
+                          if (is_dissolved(s)) diffus_jm1 = diffus_jm1 * dom_diffusion_multiplier
 
                           call calc_diffus_advflux(spinup_term,year_curr, som_diffus_coef(c,j+1), som_adv_coef(c,j+1), &
                                                    cnstate_vars%scalaravg_col(c,j+1),adv_flux_jp1, diffus_jp1)
+                          if (is_dissolved(s)) diffus_jp1 = diffus_jp1 * dom_diffusion_multiplier
                            ! Use distance from j-1 node to interface with j divided by distance between nodes
                            dz_node = zsoi(j) - zsoi(j-1)
                            w_m1 = (zisoi(j-1) - zsoi(j-1)) / dz_node
@@ -464,7 +479,7 @@ contains
                do j = 1, nlevdecomp
                   do fc = 1, num_soilc
                      c = filter_soilc (fc)
-                     if(.not. is_cwd(s)) then
+                     if(.not. is_cwd(s) .and. .not. is_microbial(s)) then
                         transport_ptr_list(i_type)%trcr_tend_ptr(c,j,s) = 0._r8 - (conc_trcr(fc,j,s) + transport_ptr_list(i_type)%src_ptr(c,j,s))
                      end if
                   end do
@@ -476,7 +491,7 @@ contains
             !$acc parallel loop independent gang worker vector collapse(2) default(present) private(bet, gam(0:nlevdecomp+1))
             do s = 1, ndecomp_pools
                do fc = 1,num_soilc
-                  if(.not. is_cwd(s)) then
+                  if(.not. is_cwd(s) .and. .not. is_microbial(s)) then
                      bet = b_tri(fc,0,s)
 
                      !$acc loop seq
@@ -502,7 +517,7 @@ contains
             !$acc parallel loop independent gang collapse(2) default(present)
             do s = 1, ndecomp_pools
                do j = 1, nlevdecomp
-                  if(.not. is_cwd(s)) then
+                  if(.not. is_cwd(s) .and. .not. is_microbial(s)) then
                      !$acc loop vector independent private(c)
                      do fc = 1, num_soilc
                         c = filter_soilc (fc)
@@ -513,15 +528,18 @@ contains
                end do
             end do
 
-            ! for CWD pools, just add
+            ! CWD and living microbial biomass remain in their source layers.
             !$acc parallel loop independent gang default(present)
             do s = 1, ndecomp_pools
-               if(is_cwd(s)) then
+               if(is_cwd(s) .or. is_microbial(s)) then
                   !$acc loop worker vector collapse(2) independent private(c)
                   do j = 1,nlevdecomp
                      do fc = 1, num_soilc
                         c = filter_soilc (fc)
                         conc_trcr(fc,j,s) = transport_ptr_list(i_type)%conc_ptr(c,j,s) + transport_ptr_list(i_type)%src_ptr(c,j,s)
+                        if (is_microbial(s)) then
+                           transport_ptr_list(i_type)%trcr_tend_ptr(c,j,s) = 0._r8
+                        end if
                      end do
                   end do
                end if
@@ -562,7 +580,7 @@ contains
    
       !$acc exit data delete(a_tri(:,:,:),b_tri(:,:,:),&
       !$acc     c_tri(:,:,:),r_tri(:,:,:), gam(:), &
-      !$acc     conc_trcr(:,:,:), spinup_term, i_type)
+      !$acc     conc_trcr(:,:,:), spinup_term, i_type, dom_diffusion_multiplier)
     end associate
 
   end subroutine SoilLittVertTransp

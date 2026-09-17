@@ -8,12 +8,9 @@ module MicrobeMethaneMod
   ! standard parameter file.
   !-----------------------------------------------------------------------
 
-  use abortutils  , only : endrun
-  use CH4varcon   , only : allowlakeprod
   use decompMod   , only : bounds_type
   use elm_varctl  , only : use_microbe_methane
   use pio         , only : file_desc_t
-  use shr_log_mod , only : errMsg => shr_log_errMsg
 
   implicit none
   private
@@ -38,20 +35,8 @@ contains
 
     if (.not. use_microbe_methane) return
 
-    if (allowlakeprod) then
-       call endrun(msg=' ERROR: use_microbe_methane=.true. requires allowlakeprod=.false.'//&
-            errMsg(__FILE__, __LINE__))
-    end if
-
-    call this%InitAllocate(bounds)
-    call this%ReadParams()
-    call this%InitHistory(bounds)
-    call this%InitCold(bounds)
-
-    ! ReadParams is a deliberate Phase 1 stop. Retain this second guard so
-    ! later work cannot expose a half-connected timestep path accidentally.
-    call endrun(msg=' ERROR: use_microbe_methane is not ready for timestepping.'//&
-         errMsg(__FILE__, __LINE__))
+    ! Phase 2 keeps the established CH4 type active and owns no revised
+    ! methane state. These lifecycle calls are connected in Phase 3.
 
   end subroutine Init
 
@@ -68,11 +53,8 @@ contains
   subroutine ReadParams(this)
     class(microbe_methane_type) :: this
 
-    ! All scientific parameters will be added to and read from ELM's standard
-    ! parameter NetCDF in later phases. Do not add a module-specific file.
-    call endrun(msg=' ERROR: use_microbe_methane is a Phase 1 development-only option; '//&
-         'microbial parameters and timestep coupling are not implemented yet.'//&
-         errMsg(__FILE__, __LINE__))
+    ! Revised methane parameters will be read from ELM's standard parameter
+    ! NetCDF in Phase 3. Do not add a module-specific file.
 
   end subroutine ReadParams
 
@@ -101,10 +83,8 @@ contains
     type(file_desc_t), intent(inout) :: ncid
     character(len=*), intent(in)    :: flag
 
-    if (use_microbe_methane) then
-       call endrun(msg=' ERROR: microbial-methane restart state is not implemented in Phase 1.'//&
-            errMsg(__FILE__, __LINE__))
-    end if
+    ! No revised methane restart state exists in Phase 2. The established CH4
+    ! type owns restart state until the Phase 3 backend is connected.
 
   end subroutine Restart
 
