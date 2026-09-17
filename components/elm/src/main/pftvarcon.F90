@@ -1143,7 +1143,7 @@ contains
     call ncd_io('hum_frac', hum_frac, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if ( .not. readv) hum_frac = 0.5_r8
     call ncd_io('qflx_h2osfc_surfrate', qflx_h2osfc_surfrate, 'read', ncid, readvar=readv, posNOTonfile=.true.)
-    if ( .not. readv) qflx_h2osfc_surfrate = 1.0e-7_r8
+    if ( .not. readv) qflx_h2osfc_surfrate = 8.9192395533995e-8_r8
     call ncd_io('vpd_max_moss', vpd_max_moss, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if ( .not. readv) vpd_max_moss = 1500.0_r8
     call ncd_io('vpd_min_moss', vpd_min_moss, 'read', ncid, readvar=readv, posNOTonfile=.true.) 
