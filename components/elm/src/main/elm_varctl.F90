@@ -380,6 +380,7 @@ module elm_varctl
   !----------------------------------------------------------
 
   logical, public :: use_nofire          = .false.
+  logical, public :: use_deforestation_fire = .false.
   logical, public :: use_lch4            = .false.
   logical, public :: use_vertsoilc       = .false.
   logical, public :: use_extralakelayers = .false.
@@ -561,6 +562,7 @@ module elm_varctl
   !$acc declare copyin(use_c14)
   !$acc declare copyin(glcmec_downscale_longwave, subgridflag)
   !$acc declare copyin(use_nofire         )
+  !$acc declare copyin(use_deforestation_fire)
   !$acc declare copyin(use_lch4           )
   !$acc declare copyin(use_nitrif_denitrif)
   !$acc declare copyin(use_vertsoilc      )
