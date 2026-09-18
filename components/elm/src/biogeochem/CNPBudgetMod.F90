@@ -570,7 +570,8 @@ contains
   end subroutine Accum
 
   !-----------------------------------------------------------------------
-  subroutine CNPBudget_Run(bounds, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf)
+  subroutine CNPBudget_Run(bounds, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf, &
+       surface_carbon_flux_col)
     !
     ! !DESCRIPTION:
     !
@@ -584,18 +585,27 @@ contains
     type(lnd2atm_type)          , intent(in) :: lnd2atm_vars
     type(gridcell_carbon_state) , intent(in) :: grc_cs
     type(gridcell_carbon_flux)  , intent(in) :: grc_cf
+    real(r8), optional          , intent(in) :: surface_carbon_flux_col(bounds%begc:)
 
-    call CBudget_Run(bounds, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf, c_budg_fluxL, c_budg_stateL)
+    if (present(surface_carbon_flux_col)) then
+       call CBudget_Run(bounds, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf, &
+            c_budg_fluxL, c_budg_stateL, surface_carbon_flux_col)
+    else
+       call CBudget_Run(bounds, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf, &
+            c_budg_fluxL, c_budg_stateL)
+    end if
 
   end subroutine CNPBudget_Run
     
   !-----------------------------------------------------------------------
-  subroutine CBudget_Run(bounds, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf, budg_fluxL, budg_stateL)
+  subroutine CBudget_Run(bounds, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf, budg_fluxL, &
+       budg_stateL, surface_carbon_flux_col)
     !
     ! !DESCRIPTION:
     !
     use domainMod, only : ldomain
     use elm_varcon, only : re
+    use subgridAveMod, only : c2g
     !
     implicit none
 
@@ -605,10 +615,17 @@ contains
     type(gridcell_carbon_state) , intent(in)    :: grc_cs
     type(gridcell_carbon_flux)  , intent(in)    :: grc_cf
     real(r8)                    , intent(inout) :: budg_fluxL(:,:), budg_stateL(:,:)
+    real(r8), optional          , intent(in)    :: surface_carbon_flux_col(bounds%begc:)
     !
     ! !LOCAL VARIABLES:
     integer  :: g, nf, ns, ip
     real(r8) :: af, one_over_re2
+    real(r8) :: surface_carbon_flux_grc(bounds%begg:bounds%endg)
+
+    if (present(surface_carbon_flux_col)) then
+       call c2g(bounds, surface_carbon_flux_col(bounds%begc:bounds%endc), &
+            surface_carbon_flux_grc, c2l_scale_type='unity', l2g_scale_type='unity')
+    end if
 
     associate(                                                       &
          beg_totc                  => grc_cs%beg_totc              , & ! Input: [real(r8) (:)] (gC/m2) total column carbon, incl veg and cpool
@@ -663,6 +680,12 @@ contains
          nf = f_dwt_conv_cflux        ; budg_fluxL(nf,ip) = budg_fluxL(nf,ip) - grc_dwt_conv_cflux(g)        *af
          nf = f_dwt_seedc_to_leaf     ; budg_fluxL(nf,ip) = budg_fluxL(nf,ip) + grc_dwt_seedc_to_leaf(g)     *af
          nf = f_dwt_seedc_to_deadstem ; budg_fluxL(nf,ip) = budg_fluxL(nf,ip) + grc_dwt_seedc_to_deadstem(g) *af
+         if (present(surface_carbon_flux_col)) then
+            ! Revised-methane CH4-C plus CO2-C is one signed external carbon
+            ! exchange. Keep it in the respiration category until a dedicated
+            ! printed budget category is added.
+            nf = f_er ; budg_fluxL(nf,ip) = budg_fluxL(nf,ip) - surface_carbon_flux_grc(g) * af
+         end if
 
          ! states
          ns = s_totc_beg              ; budg_stateL(ns,ip) = budg_stateL(ns,ip) + beg_totc(g)              *af

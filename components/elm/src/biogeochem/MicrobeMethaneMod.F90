@@ -37,6 +37,13 @@ module MicrobeMethaneMod
 
      ! Future conservative partition remapping uses this prior-step fraction.
      real(r8), pointer :: sat_fraction_previous_col(:) => null()
+
+     ! Adapter-owned accounting fields. DOM is deliberately excluded from
+     ! additional_carbon_col because it is already in ELM's decomp pools.
+     real(r8), pointer :: additional_carbon_col(:) => null()
+     real(r8), pointer :: surface_carbon_flux_col(:) => null()
+     real(r8), pointer :: surface_ch4_flux_col(:) => null()
+     real(r8), pointer :: surface_co2_flux_col(:) => null()
    contains
      procedure, public  :: Init
      procedure, private :: InitAllocate
@@ -44,6 +51,8 @@ module MicrobeMethaneMod
      procedure, private :: InitHistory
      procedure, private :: ReadParams
      procedure, public  :: Repartition
+     procedure, public  :: Advance
+     procedure, private :: UpdateAdditionalCarbon
      procedure, public  :: Restart
   end type microbe_methane_type
 
@@ -95,6 +104,10 @@ contains
     allocate(this%conc_h2_unsat_col(begc:endc,1:nlevdecomp_full)); this%conc_h2_unsat_col = nan
     allocate(this%conc_h2_sat_col(begc:endc,1:nlevdecomp_full)); this%conc_h2_sat_col = nan
     allocate(this%sat_fraction_previous_col(begc:endc)); this%sat_fraction_previous_col = nan
+    allocate(this%additional_carbon_col(begc:endc)); this%additional_carbon_col = nan
+    allocate(this%surface_carbon_flux_col(begc:endc)); this%surface_carbon_flux_col = nan
+    allocate(this%surface_ch4_flux_col(begc:endc)); this%surface_ch4_flux_col = nan
+    allocate(this%surface_co2_flux_col(begc:endc)); this%surface_co2_flux_col = nan
   end subroutine InitAllocate
 
   subroutine ReadParams(this)
@@ -134,6 +147,10 @@ contains
     this%conc_h2_unsat_col = spval
     this%conc_h2_sat_col = spval
     this%sat_fraction_previous_col = spval
+    this%additional_carbon_col = spval
+    this%surface_carbon_flux_col = spval
+    this%surface_ch4_flux_col = spval
+    this%surface_co2_flux_col = spval
 
     do c = bounds%begc, bounds%endc
        if (col_pp%is_soil(c) .or. col_pp%is_crop(c)) then
@@ -156,12 +173,17 @@ contains
           this%conc_h2_unsat_col(c,1:nlevdecomp) = 0._r8
           this%conc_h2_sat_col(c,1:nlevdecomp) = 0._r8
           this%sat_fraction_previous_col(c) = 0._r8
+          this%additional_carbon_col(c) = 0._r8
+          this%surface_carbon_flux_col(c) = 0._r8
+          this%surface_ch4_flux_col(c) = 0._r8
+          this%surface_co2_flux_col(c) = 0._r8
        end if
     end do
+    call this%UpdateAdditionalCarbon(bounds)
   end subroutine InitCold
 
   subroutine InitHistory(this, bounds)
-    use histFileMod, only : hist_addfld_decomp
+    use histFileMod, only : hist_addfld_decomp, hist_addfld1d
 
     class(microbe_methane_type) :: this
     type(bounds_type), intent(in) :: bounds
@@ -210,6 +232,18 @@ contains
          'dissolved hydrogen concentration in unsaturated subarea', this%conc_h2_unsat_col)
     call add_state('MM_CONC_H2_SAT', 'mol/m^3', &
          'dissolved hydrogen concentration in saturated subarea', this%conc_h2_sat_col)
+    call hist_addfld1d(fname='MM_ADDITIONAL_C', units='gC/m^2', avgflag='A', &
+         long_name='revised methane carbon storage excluding authoritative DOM', &
+         ptr_col=this%additional_carbon_col, default='inactive')
+    call hist_addfld1d(fname='MM_SURFACE_C_FLUX', units='gC/m^2/s', avgflag='A', &
+         long_name='net revised methane CH4 plus CO2 carbon flux; positive to atmosphere', &
+         ptr_col=this%surface_carbon_flux_col, default='inactive')
+    call hist_addfld1d(fname='MM_SURFACE_CH4_FLUX', units='kgC/m^2/s', avgflag='A', &
+         long_name='net revised methane CH4 carbon flux; positive to atmosphere', &
+         ptr_col=this%surface_ch4_flux_col, default='inactive')
+    call hist_addfld1d(fname='MM_SURFACE_CO2_FLUX', units='gC/m^2/s', avgflag='A', &
+         long_name='net revised methane CO2 carbon flux; positive to atmosphere', &
+         ptr_col=this%surface_co2_flux_col, default='inactive')
 
   contains
     subroutine add_state(name, units, long_name, field)
@@ -269,6 +303,622 @@ contains
     end subroutine repartition_pair
   end subroutine Repartition
 
+  subroutine Advance(this, bounds, num_soilc, filter_soilc, dt, atm2lnd_vars, &
+       col_es, col_ws, chemstate_vars, soilstate_vars, soilhydrology_vars, &
+       ground_conductance_patch, col_cs, col_ns, col_ps)
+    ! Mutable ELM boundary for the pure revised-methane kernels. Every update
+    ! for one column is staged locally, checked, and then committed once.
+    use abortutils, only : endrun
+    use shr_log_mod, only : errMsg => shr_log_errMsg
+    use elm_varpar, only : nlevdecomp, i_dom
+    use elm_varcon, only : denh2o, denice, tfrz, d_con_w, d_con_g
+    use elm_varcon, only : c_h_inv, kh_theta, kh_tbase
+    use ColumnType, only : col_pp
+    use ColumnDataType, only : column_energy_state, column_water_state
+    use ColumnDataType, only : column_carbon_state, column_nitrogen_state
+    use ColumnDataType, only : column_phosphorus_state
+    use atm2lndType, only : atm2lnd_type
+    use ChemStateType, only : chemstate_type
+    use SoilStateType, only : soilstate_type
+    use SoilHydrologyType, only : soilhydrology_type
+    use subgridAveMod, only : p2c
+    use MicrobeDecompMod, only : MicrobeDecompParamsInst
+    use MicrobeMethaneParamsMod, only : MicrobeMethaneParamsInst
+    use MicrobeMethaneReactionMod, only : microbe_methane_reaction_state_type
+    use MicrobeMethaneReactionMod, only : microbe_methane_reaction_environment_type
+    use MicrobeMethaneStateUpdateMod, only : microbe_methane_reaction_transaction_type
+    use MicrobeMethaneStateUpdateMod, only : advanceMicrobeMethaneReactionLayer
+    use MicrobeMethaneStateUpdateMod, only : advanceMicrobeMethaneAcetateTransport
+    use MicrobeMethaneStateUpdateMod, only : advanceMicrobeMethaneGasTransport
+    use MicrobeMethaneStateUpdateMod, only : microbeMethaneColumnAdditionalCarbon
+    use MicrobeMethaneStateUpdateMod, only : microbeMethaneSurfaceCarbonFlux
+    use MicrobeMethaneStateUpdateMod, only : microbeMethaneCH4SurfaceFluxKgC
+    use MicrobeMethaneStateUpdateMod, only : microbeMethaneCO2Correction
+    use MicrobeGasTransportMod, only : repartitionMicrobeMethaneScalar
+    use MicrobeGasTransportMod, only : microbeMethaneEffectiveAqueousDiffusivity
+    use MicrobeGasTransportMod, only : microbe_gas_ch4, microbe_gas_o2
+    use MicrobeGasTransportMod, only : microbe_gas_co2, microbe_gas_h2
+    use MicrobeGasTransportMod, only : microbe_gas_count
+    use, intrinsic :: ieee_arithmetic, only : ieee_is_finite
+
+    class(microbe_methane_type) :: this
+    type(bounds_type), intent(in) :: bounds
+    integer, intent(in) :: num_soilc
+    integer, intent(in) :: filter_soilc(:)
+    real(r8), intent(in) :: dt
+    type(atm2lnd_type), intent(in) :: atm2lnd_vars
+    type(column_energy_state), intent(in) :: col_es
+    type(column_water_state), intent(in) :: col_ws
+    type(chemstate_type), intent(in) :: chemstate_vars
+    type(soilstate_type), intent(in) :: soilstate_vars
+    type(soilhydrology_type), intent(in) :: soilhydrology_vars
+    real(r8), intent(in) :: ground_conductance_patch(bounds%begp:)
+    type(column_carbon_state), intent(inout) :: col_cs
+    type(column_nitrogen_state), intent(inout) :: col_ns
+    type(column_phosphorus_state), intent(inout) :: col_ps
+
+    type(microbe_methane_reaction_state_type) :: unsaturated_state(nlevdecomp)
+    type(microbe_methane_reaction_state_type) :: saturated_state(nlevdecomp)
+    type(microbe_methane_reaction_state_type) :: unsaturated_work(nlevdecomp)
+    type(microbe_methane_reaction_state_type) :: saturated_work(nlevdecomp)
+    type(microbe_methane_reaction_state_type) :: unsaturated_candidate(nlevdecomp)
+    type(microbe_methane_reaction_state_type) :: saturated_candidate(nlevdecomp)
+    type(microbe_methane_reaction_environment_type) :: unsaturated_environment
+    type(microbe_methane_reaction_environment_type) :: saturated_environment
+    type(microbe_methane_reaction_transaction_type) :: reaction(nlevdecomp)
+    real(r8) :: dom_c(nlevdecomp), dom_n(nlevdecomp), dom_p(nlevdecomp)
+    real(r8) :: mineral_n(nlevdecomp), mineral_p(nlevdecomp)
+    real(r8) :: layer_thickness(nlevdecomp), layer_depth(nlevdecomp)
+    real(r8) :: unsaturated_diffusivity(nlevdecomp,microbe_gas_count)
+    real(r8) :: saturated_diffusivity(nlevdecomp,microbe_gas_count)
+    real(r8) :: unsaturated_acetate_diffusivity(nlevdecomp)
+    real(r8) :: saturated_acetate_diffusivity(nlevdecomp)
+    real(r8) :: surface_equilibrium(microbe_gas_count)
+    real(r8) :: aerenchyma_equilibrium(nlevdecomp,microbe_gas_count)
+    real(r8) :: aerenchyma_exchange_rate(nlevdecomp,microbe_gas_count)
+    real(r8) :: unsaturated_surface_conductance(microbe_gas_count)
+    real(r8) :: saturated_surface_conductance(microbe_gas_count)
+    real(r8) :: ch4_ebullition_threshold(nlevdecomp)
+    real(r8) :: unsaturated_ebullition_activation(nlevdecomp)
+    real(r8) :: saturated_ebullition_activation(nlevdecomp)
+    real(r8) :: interface_flux(0:nlevdecomp,microbe_gas_count)
+    real(r8) :: aerenchyma_flux(nlevdecomp,microbe_gas_count)
+    real(r8) :: ch4_ebullition_loss(nlevdecomp)
+    real(r8) :: surface_diffusive_flux(microbe_gas_count)
+    real(r8) :: surface_aerenchyma_flux(microbe_gas_count)
+    real(r8) :: unsaturated_surface_flux(microbe_gas_count)
+    real(r8) :: saturated_surface_flux(microbe_gas_count)
+    real(r8) :: surface_ebullition_flux
+    real(r8) :: acetate_interface_flux(0:nlevdecomp)
+    real(r8) :: acetate_tendency(nlevdecomp)
+    real(r8) :: ground_conductance_col(bounds%begc:bounds%endc)
+    real(r8) :: partial_pressure(microbe_gas_count)
+    real(r8) :: liquid_saturation, thawed_fraction, moisture_scalar
+    real(r8) :: saturation_scalar, fraction, old_fraction, depth_scale
+    real(r8) :: bulk_surface_flux(microbe_gas_count)
+    real(r8) :: unused_surface_diffusive_flux(microbe_gas_count)
+    real(r8) :: unused_surface_aerenchyma_flux(microbe_gas_count)
+    real(r8) :: unused_surface_ebullition_flux
+    real(r8) :: unsaturated_gas_residual, saturated_gas_residual
+    real(r8) :: unsaturated_acetate_residual, saturated_acetate_residual
+    logical :: column_valid
+    logical :: unsaturated_acetate_valid, saturated_acetate_valid
+    logical :: unsaturated_gas_valid, saturated_gas_valid
+    integer :: c, fc, g, gas, j
+    character(len=160) :: message
+
+    if (.not. use_microbe_methane) return
+    if (dt <= 0._r8) then
+       call endrun(msg=' ERROR: revised methane adapter requires a positive timestep'//&
+            errMsg(__FILE__, __LINE__))
+    end if
+
+    call p2c(bounds, num_soilc, filter_soilc, &
+         ground_conductance_patch(bounds%begp:bounds%endp), &
+         ground_conductance_col(bounds%begc:bounds%endc))
+
+    do fc = 1, num_soilc
+       c = filter_soilc(fc)
+       g = col_pp%gridcell(c)
+       fraction = clampUnitInterval(max(soilhydrology_vars%fsat_col(c), &
+            col_ws%frac_h2osfc(c)))
+       old_fraction = clampUnitInterval(this%sat_fraction_previous_col(c))
+
+       partial_pressure(microbe_gas_ch4) = atmosphericPartialPressure( &
+            atm2lnd_vars%forc_pch4_grc(g), atm2lnd_vars%forc_pbot_downscaled_col(c), &
+            MicrobeMethaneParamsInst%atmospheric_ch4_mixing_ratio)
+       partial_pressure(microbe_gas_o2) = atmosphericPartialPressure( &
+            atm2lnd_vars%forc_po2_grc(g), atm2lnd_vars%forc_pbot_downscaled_col(c), &
+            MicrobeMethaneParamsInst%atmospheric_o2_mixing_ratio)
+       partial_pressure(microbe_gas_co2) = atmosphericPartialPressure( &
+            atm2lnd_vars%forc_pco2_grc(g), atm2lnd_vars%forc_pbot_downscaled_col(c), &
+            MicrobeMethaneParamsInst%atmospheric_co2_mixing_ratio)
+       partial_pressure(microbe_gas_h2) = atmosphericPartialPressure(0._r8, &
+            atm2lnd_vars%forc_pbot_downscaled_col(c), &
+            MicrobeMethaneParamsInst%atmospheric_h2_mixing_ratio)
+       if (any(.not. ieee_is_finite(partial_pressure)) .or. &
+            any(partial_pressure < 0._r8)) then
+          write(message,'(a,i0)') ' ERROR: invalid revised methane atmospheric boundary for column ', c
+          call endrun(msg=trim(message)//errMsg(__FILE__, __LINE__))
+       end if
+
+       call gatherColumnState(c, unsaturated_state, saturated_state)
+       call repartitionColumnState(old_fraction, fraction, unsaturated_state, saturated_state)
+       unsaturated_work = unsaturated_state
+       saturated_work = saturated_state
+       column_valid = .true.
+
+       do j = 1, nlevdecomp
+          layer_thickness(j) = col_pp%dz(c,j)
+          layer_depth(j) = col_pp%z(c,j)
+          dom_c(j) = col_cs%decomp_cpools_vr(c,j,i_dom)
+          dom_n(j) = col_ns%decomp_npools_vr(c,j,i_dom)
+          dom_p(j) = col_ps%decomp_ppools_vr(c,j,i_dom)
+          mineral_n(j) = col_ns%smin_nh4_vr(c,j)
+          mineral_p(j) = col_ps%solutionp_vr(c,j)
+
+          liquid_saturation = layerLiquidSaturation(c, j)
+          thawed_fraction = layerThawedFraction(c, j)
+          moisture_scalar = soilMoistureResponse(soilstate_vars%soilpsi_col(c,j), &
+               soilstate_vars%sucsat_col(c,j), &
+               MicrobeMethaneParamsInst%soil_water_potential_min)
+          saturation_scalar = clampUnitInterval(liquid_saturation / &
+               max(MicrobeMethaneParamsInst%saturation_reaction_threshold, tiny(1._r8)))
+
+          unsaturated_environment%soil_temperature = col_es%t_soisno(c,j)
+          unsaturated_environment%soil_ph = chemstate_vars%soil_pH(c,j)
+          unsaturated_environment%dom_fermentation_scalar = &
+               moisture_scalar * saturation_scalar
+          unsaturated_environment%aerobic_acetate_oxidation_scalar = &
+               moisture_scalar * (1._r8 - saturation_scalar)
+          saturated_environment%soil_temperature = col_es%t_soisno(c,j)
+          saturated_environment%soil_ph = chemstate_vars%soil_pH(c,j)
+          saturated_environment%dom_fermentation_scalar = moisture_scalar
+          saturated_environment%aerobic_acetate_oxidation_scalar = 0._r8
+
+          call advanceMicrobeMethaneReactionLayer(dom_c(j), dom_n(j), dom_p(j), &
+               mineral_n(j), mineral_p(j), fraction, unsaturated_work(j), &
+               saturated_work(j), unsaturated_environment, saturated_environment, &
+               MicrobeMethaneParamsInst, MicrobeDecompParamsInst%cn_dom, &
+               MicrobeDecompParamsInst%cp_dom, dt, reaction(j))
+          if (.not. reaction(j)%valid) column_valid = .false.
+          dom_c(j) = reaction(j)%dom_c
+          dom_n(j) = reaction(j)%dom_n
+          dom_p(j) = reaction(j)%dom_p
+          mineral_n(j) = reaction(j)%mineral_n
+          mineral_p(j) = reaction(j)%mineral_p
+          unsaturated_work(j) = reaction(j)%unsaturated_state
+          saturated_work(j) = reaction(j)%saturated_state
+
+          do gas = 1, microbe_gas_count
+             unsaturated_diffusivity(j,gas) = &
+                  microbeMethaneEffectiveAqueousDiffusivity( &
+                  referenceAqueousDiffusivity(gas), col_es%t_soisno(c,j), &
+                  liquid_saturation * thawed_fraction, MicrobeMethaneParamsInst)
+             saturated_diffusivity(j,gas) = &
+                  microbeMethaneEffectiveAqueousDiffusivity( &
+                  referenceAqueousDiffusivity(gas), col_es%t_soisno(c,j), &
+                  thawed_fraction, MicrobeMethaneParamsInst)
+             aerenchyma_equilibrium(j,gas) = henryEquilibriumConcentration( &
+                  partial_pressure(gas), col_es%t_soisno(c,j), gas)
+          end do
+          unsaturated_acetate_diffusivity(j) = &
+               MicrobeMethaneParamsInst%dom_diffusivity * liquid_saturation * thawed_fraction
+          saturated_acetate_diffusivity(j) = &
+               MicrobeMethaneParamsInst%dom_diffusivity * thawed_fraction
+
+          ! The legacy coefficient is dimensionally m s-1: division by a
+          ! finite layer depth converts it to the s-1 rate required by the
+          ! signed exchange kernel.
+          depth_scale = max(layer_depth(j), 0.5_r8 * layer_thickness(j), tiny(1._r8))
+          aerenchyma_exchange_rate(j,:) = MicrobeMethaneParamsInst%plant_transport_coefficient * &
+               max(0._r8, soilstate_vars%rootfr_col(c,j)) / depth_scale
+          aerenchyma_exchange_rate(j,microbe_gas_ch4) = &
+               aerenchyma_exchange_rate(j,microbe_gas_ch4) * &
+               exp(-layer_depth(j) / MicrobeMethaneParamsInst%ch4_h2_root_efold_depth)
+          aerenchyma_exchange_rate(j,microbe_gas_h2) = &
+               aerenchyma_exchange_rate(j,microbe_gas_h2) * &
+               exp(-layer_depth(j) / MicrobeMethaneParamsInst%ch4_h2_root_efold_depth)
+          aerenchyma_exchange_rate(j,microbe_gas_o2) = &
+               aerenchyma_exchange_rate(j,microbe_gas_o2) * &
+               exp(-layer_depth(j) / MicrobeMethaneParamsInst%o2_root_efold_depth) * &
+               (1._r8 - MicrobeMethaneParamsInst%plant_o2_consumption_fraction)
+          aerenchyma_exchange_rate(j,microbe_gas_co2) = &
+               aerenchyma_exchange_rate(j,microbe_gas_co2) * &
+               exp(-layer_depth(j) / MicrobeMethaneParamsInst%ch4_h2_root_efold_depth) * &
+               MicrobeMethaneParamsInst%plant_co2_flux_fraction
+          if (col_es%t_soisno(c,j) < MicrobeMethaneParamsInst%transport_thaw_threshold) then
+             aerenchyma_exchange_rate(j,:) = 0._r8
+          end if
+          aerenchyma_equilibrium(j,microbe_gas_ch4) = max( &
+               aerenchyma_equilibrium(j,microbe_gas_ch4), &
+               1.e-3_r8 * MicrobeMethaneParamsInst%ch4_transport_threshold)
+          aerenchyma_equilibrium(j,microbe_gas_h2) = max( &
+               aerenchyma_equilibrium(j,microbe_gas_h2), &
+               1.e-3_r8 * MicrobeMethaneParamsInst%h2_plant_transport_threshold)
+          ch4_ebullition_threshold(j) = &
+               1.e-3_r8 * MicrobeMethaneParamsInst%ch4_transport_threshold
+          unsaturated_ebullition_activation(j) = thawed_fraction * liquid_saturation * &
+               exp(-layer_depth(j) / MicrobeMethaneParamsInst%ebullition_efold_depth)
+          saturated_ebullition_activation(j) = thawed_fraction * &
+               exp(-layer_depth(j) / MicrobeMethaneParamsInst%ebullition_efold_depth)
+       end do
+
+       do gas = 1, microbe_gas_count
+          surface_equilibrium(gas) = henryEquilibriumConcentration( &
+               partial_pressure(gas), col_es%t_soisno(c,1), gas)
+          unsaturated_surface_conductance(gas) = surfaceConductance(c, gas, .false., &
+               ground_conductance_col(c), unsaturated_diffusivity(1,gas))
+          saturated_surface_conductance(gas) = surfaceConductance(c, gas, .true., &
+               ground_conductance_col(c), saturated_diffusivity(1,gas))
+       end do
+
+       call advanceMicrobeMethaneAcetateTransport(unsaturated_work, layer_thickness, &
+            unsaturated_acetate_diffusivity, dt, unsaturated_candidate, &
+            acetate_interface_flux, acetate_tendency, unsaturated_acetate_residual, &
+            unsaturated_acetate_valid)
+       call advanceMicrobeMethaneAcetateTransport(saturated_work, layer_thickness, &
+            saturated_acetate_diffusivity, dt, saturated_candidate, &
+            acetate_interface_flux, acetate_tendency, saturated_acetate_residual, &
+            saturated_acetate_valid)
+       column_valid = column_valid .and. unsaturated_acetate_valid .and. &
+            saturated_acetate_valid
+
+       call advanceMicrobeMethaneGasTransport(unsaturated_candidate, layer_thickness, &
+            unsaturated_diffusivity, surface_equilibrium, &
+            unsaturated_surface_conductance, aerenchyma_equilibrium, &
+            aerenchyma_exchange_rate, ch4_ebullition_threshold, &
+            unsaturated_ebullition_activation, dt, unsaturated_work, interface_flux, &
+            aerenchyma_flux, ch4_ebullition_loss, surface_diffusive_flux, &
+            surface_aerenchyma_flux, surface_ebullition_flux, &
+            unsaturated_surface_flux, unsaturated_gas_residual, unsaturated_gas_valid)
+       call advanceMicrobeMethaneGasTransport(saturated_candidate, layer_thickness, &
+            saturated_diffusivity, surface_equilibrium, saturated_surface_conductance, &
+            aerenchyma_equilibrium, aerenchyma_exchange_rate, ch4_ebullition_threshold, &
+            saturated_ebullition_activation, dt, saturated_work, interface_flux, &
+            aerenchyma_flux, ch4_ebullition_loss, unused_surface_diffusive_flux, &
+            unused_surface_aerenchyma_flux, unused_surface_ebullition_flux, &
+            saturated_surface_flux, saturated_gas_residual, saturated_gas_valid)
+       column_valid = column_valid .and. unsaturated_gas_valid .and. saturated_gas_valid
+
+       if (.not. column_valid) then
+          write(message,'(a,i0)') ' ERROR: revised methane column transaction failed validation for column ', c
+          call endrun(msg=trim(message)//errMsg(__FILE__, __LINE__))
+       end if
+
+       bulk_surface_flux = (1._r8 - fraction) * unsaturated_surface_flux + &
+            fraction * saturated_surface_flux
+       call commitColumnState(c, unsaturated_work, saturated_work)
+       do j = 1, nlevdecomp
+          col_cs%decomp_cpools_vr(c,j,i_dom) = dom_c(j)
+          col_ns%decomp_npools_vr(c,j,i_dom) = dom_n(j)
+          col_ps%decomp_ppools_vr(c,j,i_dom) = dom_p(j)
+          col_ns%smin_nh4_vr(c,j) = mineral_n(j)
+          col_ns%sminn_vr(c,j) = mineral_n(j) + col_ns%smin_no3_vr(c,j)
+          col_ps%solutionp_vr(c,j) = mineral_p(j)
+       end do
+       this%sat_fraction_previous_col(c) = fraction
+       this%additional_carbon_col(c) = microbeMethaneColumnAdditionalCarbon( &
+            fraction, unsaturated_work, saturated_work, layer_thickness)
+       this%surface_carbon_flux_col(c) = microbeMethaneSurfaceCarbonFlux(bulk_surface_flux)
+       this%surface_ch4_flux_col(c) = microbeMethaneCH4SurfaceFluxKgC(bulk_surface_flux)
+       this%surface_co2_flux_col(c) = microbeMethaneCO2Correction(bulk_surface_flux)
+    end do
+
+  contains
+
+    subroutine gatherColumnState(column, unsaturated, saturated)
+      integer, intent(in) :: column
+      type(microbe_methane_reaction_state_type), intent(out) :: unsaturated(nlevdecomp)
+      type(microbe_methane_reaction_state_type), intent(out) :: saturated(nlevdecomp)
+      integer :: layer
+      do layer = 1, nlevdecomp
+         unsaturated(layer)%acetate_c = this%acetate_c_unsat_col(column,layer)
+         saturated(layer)%acetate_c = this%acetate_c_sat_col(column,layer)
+         unsaturated(layer)%acetate_methanogen_c = &
+              this%acetate_methanogen_c_unsat_col(column,layer)
+         saturated(layer)%acetate_methanogen_c = &
+              this%acetate_methanogen_c_sat_col(column,layer)
+         unsaturated(layer)%h2_methanogen_c = this%h2_methanogen_c_unsat_col(column,layer)
+         saturated(layer)%h2_methanogen_c = this%h2_methanogen_c_sat_col(column,layer)
+         unsaturated(layer)%aerobic_methanotroph_c = &
+              this%aerobic_methanotroph_c_unsat_col(column,layer)
+         saturated(layer)%aerobic_methanotroph_c = &
+              this%aerobic_methanotroph_c_sat_col(column,layer)
+         unsaturated(layer)%anaerobic_methanotroph_c = &
+              this%anaerobic_methanotroph_c_unsat_col(column,layer)
+         saturated(layer)%anaerobic_methanotroph_c = &
+              this%anaerobic_methanotroph_c_sat_col(column,layer)
+         unsaturated(layer)%conc_ch4 = this%conc_ch4_unsat_col(column,layer)
+         saturated(layer)%conc_ch4 = this%conc_ch4_sat_col(column,layer)
+         unsaturated(layer)%conc_o2 = this%conc_o2_unsat_col(column,layer)
+         saturated(layer)%conc_o2 = this%conc_o2_sat_col(column,layer)
+         unsaturated(layer)%conc_co2 = this%conc_co2_unsat_col(column,layer)
+         saturated(layer)%conc_co2 = this%conc_co2_sat_col(column,layer)
+         unsaturated(layer)%conc_h2 = this%conc_h2_unsat_col(column,layer)
+         saturated(layer)%conc_h2 = this%conc_h2_sat_col(column,layer)
+      end do
+    end subroutine gatherColumnState
+
+    subroutine repartitionColumnState(old_sat, new_sat, unsaturated, saturated)
+      real(r8), intent(in) :: old_sat, new_sat
+      type(microbe_methane_reaction_state_type), intent(inout) :: unsaturated(nlevdecomp)
+      type(microbe_methane_reaction_state_type), intent(inout) :: saturated(nlevdecomp)
+      integer :: layer
+      do layer = 1, nlevdecomp
+         call repartitionLocalPair(old_sat, new_sat, unsaturated(layer)%acetate_c, &
+              saturated(layer)%acetate_c)
+         call repartitionLocalPair(old_sat, new_sat, &
+              unsaturated(layer)%acetate_methanogen_c, &
+              saturated(layer)%acetate_methanogen_c)
+         call repartitionLocalPair(old_sat, new_sat, unsaturated(layer)%h2_methanogen_c, &
+              saturated(layer)%h2_methanogen_c)
+         call repartitionLocalPair(old_sat, new_sat, &
+              unsaturated(layer)%aerobic_methanotroph_c, &
+              saturated(layer)%aerobic_methanotroph_c)
+         call repartitionLocalPair(old_sat, new_sat, &
+              unsaturated(layer)%anaerobic_methanotroph_c, &
+              saturated(layer)%anaerobic_methanotroph_c)
+         call repartitionLocalPair(old_sat, new_sat, unsaturated(layer)%conc_ch4, &
+              saturated(layer)%conc_ch4)
+         call repartitionLocalPair(old_sat, new_sat, unsaturated(layer)%conc_o2, &
+              saturated(layer)%conc_o2)
+         call repartitionLocalPair(old_sat, new_sat, unsaturated(layer)%conc_co2, &
+              saturated(layer)%conc_co2)
+         call repartitionLocalPair(old_sat, new_sat, unsaturated(layer)%conc_h2, &
+              saturated(layer)%conc_h2)
+      end do
+    end subroutine repartitionColumnState
+
+    subroutine repartitionLocalPair(old_sat, new_sat, unsaturated_value, saturated_value)
+      real(r8), intent(in) :: old_sat, new_sat
+      real(r8), intent(inout) :: unsaturated_value, saturated_value
+      real(r8) :: new_unsaturated, new_saturated
+      call repartitionMicrobeMethaneScalar(old_sat, new_sat, unsaturated_value, &
+           saturated_value, new_unsaturated, new_saturated)
+      unsaturated_value = new_unsaturated
+      saturated_value = new_saturated
+    end subroutine repartitionLocalPair
+
+    subroutine commitColumnState(column, unsaturated, saturated)
+      integer, intent(in) :: column
+      type(microbe_methane_reaction_state_type), intent(in) :: unsaturated(nlevdecomp)
+      type(microbe_methane_reaction_state_type), intent(in) :: saturated(nlevdecomp)
+      integer :: layer
+      do layer = 1, nlevdecomp
+         this%acetate_c_unsat_col(column,layer) = unsaturated(layer)%acetate_c
+         this%acetate_c_sat_col(column,layer) = saturated(layer)%acetate_c
+         this%acetate_methanogen_c_unsat_col(column,layer) = &
+              unsaturated(layer)%acetate_methanogen_c
+         this%acetate_methanogen_c_sat_col(column,layer) = &
+              saturated(layer)%acetate_methanogen_c
+         this%h2_methanogen_c_unsat_col(column,layer) = unsaturated(layer)%h2_methanogen_c
+         this%h2_methanogen_c_sat_col(column,layer) = saturated(layer)%h2_methanogen_c
+         this%aerobic_methanotroph_c_unsat_col(column,layer) = &
+              unsaturated(layer)%aerobic_methanotroph_c
+         this%aerobic_methanotroph_c_sat_col(column,layer) = &
+              saturated(layer)%aerobic_methanotroph_c
+         this%anaerobic_methanotroph_c_unsat_col(column,layer) = &
+              unsaturated(layer)%anaerobic_methanotroph_c
+         this%anaerobic_methanotroph_c_sat_col(column,layer) = &
+              saturated(layer)%anaerobic_methanotroph_c
+         this%conc_ch4_unsat_col(column,layer) = unsaturated(layer)%conc_ch4
+         this%conc_ch4_sat_col(column,layer) = saturated(layer)%conc_ch4
+         this%conc_o2_unsat_col(column,layer) = unsaturated(layer)%conc_o2
+         this%conc_o2_sat_col(column,layer) = saturated(layer)%conc_o2
+         this%conc_co2_unsat_col(column,layer) = unsaturated(layer)%conc_co2
+         this%conc_co2_sat_col(column,layer) = saturated(layer)%conc_co2
+         this%conc_h2_unsat_col(column,layer) = unsaturated(layer)%conc_h2
+         this%conc_h2_sat_col(column,layer) = saturated(layer)%conc_h2
+      end do
+    end subroutine commitColumnState
+
+    real(r8) function layerLiquidSaturation(column, layer) result(value)
+      integer, intent(in) :: column, layer
+      real(r8) :: porosity, liquid_volume
+      porosity = max(soilstate_vars%watsat_col(column,layer), tiny(1._r8))
+      liquid_volume = max(0._r8, col_ws%h2osoi_liq(column,layer)) / &
+           (denh2o * max(col_pp%dz(column,layer), tiny(1._r8)))
+      value = clampUnitInterval(liquid_volume / porosity)
+    end function layerLiquidSaturation
+
+    real(r8) function layerThawedFraction(column, layer) result(value)
+      integer, intent(in) :: column, layer
+      real(r8) :: liquid_volume, ice_volume
+      liquid_volume = max(0._r8, col_ws%h2osoi_liq(column,layer)) / denh2o
+      ice_volume = max(0._r8, col_ws%h2osoi_ice(column,layer)) / denice
+      if (liquid_volume + ice_volume > tiny(1._r8)) then
+         value = clampUnitInterval(liquid_volume / (liquid_volume + ice_volume))
+      else
+         value = 0._r8
+      end if
+    end function layerThawedFraction
+
+    pure real(r8) function soilMoistureResponse(soil_water_potential, saturated_suction, &
+         minimum_potential) result(value)
+      real(r8), intent(in) :: soil_water_potential, saturated_suction, minimum_potential
+      real(r8) :: wet_potential, bounded_potential, denominator
+      wet_potential = -abs(saturated_suction) * 9.8e-6_r8
+      if (minimum_potential >= 0._r8 .or. wet_potential >= 0._r8 .or. &
+           minimum_potential >= wet_potential) then
+         value = 0._r8
+         return
+      end if
+      bounded_potential = min(wet_potential, max(minimum_potential, soil_water_potential))
+      denominator = log(minimum_potential / wet_potential)
+      value = clampUnitInterval(log(minimum_potential / bounded_potential) / denominator)
+    end function soilMoistureResponse
+
+    pure real(r8) function atmosphericPartialPressure(forcing, pressure, fallback_mixing_ratio) &
+         result(value)
+      real(r8), intent(in) :: forcing, pressure, fallback_mixing_ratio
+      if (ieee_is_finite(forcing) .and. forcing > 0._r8) then
+         value = forcing
+      else if (ieee_is_finite(pressure) .and. pressure > 0._r8) then
+         value = pressure * fallback_mixing_ratio
+      else
+         value = -1._r8
+      end if
+    end function atmosphericPartialPressure
+
+    pure real(r8) function referenceAqueousDiffusivity(gas_index) result(value)
+      integer, intent(in) :: gas_index
+      real(r8) :: temperature_c
+      temperature_c = MicrobeMethaneParamsInst%aqueous_diffusion_t_ref - 273.15_r8
+      if (gas_index <= microbe_gas_co2) then
+         value = max(0._r8, d_con_w(gas_index,1) + &
+              d_con_w(gas_index,2) * temperature_c + &
+              d_con_w(gas_index,3) * temperature_c**2) * 1.e-9_r8
+      else
+         ! ELM's shared table currently stops at CO2. This non-tunable H2
+         ! physical constant is the CLM-SPRUCE Fick_D_w(4) value in SI.
+         value = 4.5e-9_r8
+      end if
+    end function referenceAqueousDiffusivity
+
+    pure real(r8) function henryEquilibriumConcentration(pressure_pa, temperature, &
+         gas_index) result(value)
+      real(r8), intent(in) :: pressure_pa, temperature
+      integer, intent(in) :: gas_index
+      real(r8) :: coefficient, reference_henry
+      if (temperature <= 0._r8) then
+         value = 0._r8
+         return
+      end if
+      if (gas_index <= microbe_gas_co2) then
+         coefficient = c_h_inv(gas_index)
+         reference_henry = kh_theta(gas_index)
+      else
+         ! H2 counterparts of ELM's shared CH4/O2/CO2 constants.
+         coefficient = 500._r8
+         reference_henry = 1282.1_r8
+      end if
+      value = max(0._r8, pressure_pa) / 101325._r8 * 1000._r8 / &
+           (reference_henry * exp(-coefficient * &
+           (1._r8 / temperature - 1._r8 / kh_tbase)))
+    end function henryEquilibriumConcentration
+
+    real(r8) function surfaceConductance(column, gas_index, saturated_partition, &
+         atmospheric_conductance, top_diffusivity) result(value)
+      integer, intent(in) :: column, gas_index
+      logical, intent(in) :: saturated_partition
+      real(r8), intent(in) :: atmospheric_conductance, top_diffusivity
+      real(r8) :: resistance, snow_diffusivity, pond_diffusivity
+      real(r8) :: air_fraction, water_fraction, ice_fraction, fluid_fraction
+      real(r8) :: temperature_c, pond_depth
+      integer :: snow_layer
+      value = 0._r8
+      if (atmospheric_conductance <= 0._r8 .or. top_diffusivity <= 0._r8) return
+      resistance = 1._r8 / atmospheric_conductance + &
+           0.5_r8 * col_pp%dz(column,1) / top_diffusivity
+
+      do snow_layer = col_pp%snl(column) + 1, 0
+         if (col_pp%dz(column,snow_layer) <= 0._r8) cycle
+         ice_fraction = max(0._r8, col_ws%h2osoi_ice(column,snow_layer)) / &
+              (denice * col_pp%dz(column,snow_layer))
+         water_fraction = max(0._r8, col_ws%h2osoi_liq(column,snow_layer)) / &
+              (denh2o * col_pp%dz(column,snow_layer))
+         air_fraction = max(0._r8, 1._r8 - ice_fraction - water_fraction)
+         fluid_fraction = air_fraction + water_fraction
+         if (air_fraction > 0.05_r8 .and. fluid_fraction > tiny(1._r8)) then
+            snow_diffusivity = referenceGasDiffusivity(gas_index, &
+                 col_es%t_soisno(column,snow_layer)) * &
+                 (air_fraction / fluid_fraction)**(10._r8/3._r8) / fluid_fraction**2
+         else
+            snow_diffusivity = microbeMethaneEffectiveAqueousDiffusivity( &
+                 referenceAqueousDiffusivity(gas_index), &
+                 col_es%t_soisno(column,snow_layer), water_fraction, &
+                 MicrobeMethaneParamsInst)
+         end if
+         if (snow_diffusivity <= 0._r8) return
+         resistance = resistance + col_pp%dz(column,snow_layer) / snow_diffusivity
+      end do
+
+      if (saturated_partition .and. col_ws%frac_h2osfc(column) > 0._r8 .and. &
+           col_ws%h2osfc(column) > 0._r8) then
+         if (col_es%t_h2osfc(column) < MicrobeMethaneParamsInst%transport_thaw_threshold) return
+         pond_depth = col_ws%h2osfc(column) / denh2o / col_ws%frac_h2osfc(column)
+         pond_diffusivity = microbeMethaneEffectiveAqueousDiffusivity( &
+              referenceAqueousDiffusivity(gas_index), col_es%t_h2osfc(column), &
+              1._r8, MicrobeMethaneParamsInst)
+         if (pond_diffusivity <= 0._r8) return
+         resistance = resistance + pond_depth / pond_diffusivity
+      end if
+      if (resistance > 0._r8) value = 1._r8 / resistance
+    end function surfaceConductance
+
+    pure real(r8) function referenceGasDiffusivity(gas_index, temperature) result(value)
+      integer, intent(in) :: gas_index
+      real(r8), intent(in) :: temperature
+      real(r8) :: temperature_c
+      temperature_c = temperature - tfrz
+      if (gas_index <= microbe_gas_co2) then
+         value = max(0._r8, d_con_g(gas_index,1) + &
+              d_con_g(gas_index,2) * temperature_c) * 1.e-4_r8
+      else
+         ! H2 molecular diffusivity in air near standard temperature (m2 s-1).
+         value = 6.11e-5_r8 * (max(temperature, 1._r8) / 298._r8)**1.75_r8
+      end if
+    end function referenceGasDiffusivity
+
+    pure real(r8) function clampUnitInterval(value) result(clamped)
+      real(r8), intent(in) :: value
+      clamped = min(1._r8, max(0._r8, value))
+    end function clampUnitInterval
+
+  end subroutine Advance
+
+  subroutine UpdateAdditionalCarbon(this, bounds)
+    ! Keep the derived storage term valid before the first balance check and
+    ! immediately after restart. DOM is not included because ELM already
+    ! carries it in the authoritative decomposition pools.
+    use elm_varpar, only : nlevdecomp
+    use ColumnType, only : col_pp
+    use MicrobeMethaneReactionMod, only : microbe_methane_reaction_state_type
+    use MicrobeMethaneStateUpdateMod, only : microbeMethaneColumnAdditionalCarbon
+
+    class(microbe_methane_type) :: this
+    type(bounds_type), intent(in) :: bounds
+    type(microbe_methane_reaction_state_type) :: unsaturated_state(nlevdecomp)
+    type(microbe_methane_reaction_state_type) :: saturated_state(nlevdecomp)
+    real(r8) :: layer_thickness(nlevdecomp)
+    integer :: c, j
+
+    do c = bounds%begc, bounds%endc
+       if (.not. (col_pp%is_soil(c) .or. col_pp%is_crop(c))) cycle
+       do j = 1, nlevdecomp
+          unsaturated_state(j)%acetate_c = this%acetate_c_unsat_col(c,j)
+          saturated_state(j)%acetate_c = this%acetate_c_sat_col(c,j)
+          unsaturated_state(j)%acetate_methanogen_c = &
+               this%acetate_methanogen_c_unsat_col(c,j)
+          saturated_state(j)%acetate_methanogen_c = &
+               this%acetate_methanogen_c_sat_col(c,j)
+          unsaturated_state(j)%h2_methanogen_c = this%h2_methanogen_c_unsat_col(c,j)
+          saturated_state(j)%h2_methanogen_c = this%h2_methanogen_c_sat_col(c,j)
+          unsaturated_state(j)%aerobic_methanotroph_c = &
+               this%aerobic_methanotroph_c_unsat_col(c,j)
+          saturated_state(j)%aerobic_methanotroph_c = &
+               this%aerobic_methanotroph_c_sat_col(c,j)
+          unsaturated_state(j)%anaerobic_methanotroph_c = &
+               this%anaerobic_methanotroph_c_unsat_col(c,j)
+          saturated_state(j)%anaerobic_methanotroph_c = &
+               this%anaerobic_methanotroph_c_sat_col(c,j)
+          unsaturated_state(j)%conc_ch4 = this%conc_ch4_unsat_col(c,j)
+          saturated_state(j)%conc_ch4 = this%conc_ch4_sat_col(c,j)
+          unsaturated_state(j)%conc_o2 = this%conc_o2_unsat_col(c,j)
+          saturated_state(j)%conc_o2 = this%conc_o2_sat_col(c,j)
+          unsaturated_state(j)%conc_co2 = this%conc_co2_unsat_col(c,j)
+          saturated_state(j)%conc_co2 = this%conc_co2_sat_col(c,j)
+          unsaturated_state(j)%conc_h2 = this%conc_h2_unsat_col(c,j)
+          saturated_state(j)%conc_h2 = this%conc_h2_sat_col(c,j)
+          layer_thickness(j) = col_pp%dz(c,j)
+       end do
+       this%additional_carbon_col(c) = microbeMethaneColumnAdditionalCarbon( &
+            this%sat_fraction_previous_col(c), unsaturated_state, saturated_state, &
+            layer_thickness)
+    end do
+  end subroutine UpdateAdditionalCarbon
+
   subroutine Restart(this, bounds, ncid, flag)
     use ncdio_pio, only : ncd_double
     use restUtilMod, only : restartvar
@@ -305,6 +955,7 @@ contains
          dim1name='column', long_name='previous revised-methane saturated-area fraction', units='1', &
          readvar=readvar, interpinic_flag='interp', data=this%sat_fraction_previous_col)
     call require_state_on_restart('MM_SAT_FRACTION_PREVIOUS', readvar)
+    if (flag == 'read') call this%UpdateAdditionalCarbon(bounds)
 
   contains
     subroutine restart_state(name, units, field)

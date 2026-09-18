@@ -43,7 +43,7 @@
     ["microbe_methane_ph_opt", "pHopt", 7.0, "1", "clm_spruce_declared_default"],
     ["microbe_methane_dom_diffusivity", "dom_diffus", 7.6103500761035e-6, "m2 s-1", "clm_spruce_declared_default"],
     ["microbe_methane_aqueous_gas_diffusion_multiplier", "m_Fick_ad", 0.75, "1", "clm_spruce_declared_default"],
-    ["microbe_methane_plant_transport_coefficient", "m_dPlantTrans", 0.0141666666666667, "legacy source units", "clm_spruce_active_literal"],
+    ["microbe_methane_plant_transport_coefficient", "m_dPlantTrans", 0.0141666666666667, "m s-1", "clm_spruce_active_literal_dimensionally_resolved"],
     ["microbe_methane_h2_plant_transport_threshold", "g_dMaxH2inWater", 0.000473, "mmol H2 m-3", "clm_spruce_active_literal"],
     ["microbe_methane_atmospheric_ch4_mixing_ratio", "atmch4", 1.79e-6, "mol mol-1", "clm_spruce_declared_default"],
     ["microbe_methane_atmospheric_o2_mixing_ratio", "atmo2", 0.20946, "mol mol-1", "clm_spruce_declared_default"],

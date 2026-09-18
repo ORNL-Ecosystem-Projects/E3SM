@@ -1,10 +1,10 @@
 # CLM-SPRUCE microbial decomposition and methane integration design
 
 Status: Phase 0 harness and Phases 1-2 implementation complete; Phase 3 Steps
-1-3 implemented on their feature branch and the Step 4 conservative
-transaction kernel is in progress. The Step 4 ELM adapter and budget wiring
-remain pending. The archived CLM-SPRUCE scientific reference required by the
-Phase 0 gate also remains pending.
+1-4 are implemented on their feature branch. Step 4 includes the conservative
+transaction kernel, ELM state adapter, diagnostics, and opt-in carbon-budget
+interfaces. Step 5 backend dispatch and the archived CLM-SPRUCE scientific
+reference required by the Phase 0 gate remain pending.
 Date: 2026-09-17
 
 ## 1. Executive summary
@@ -575,8 +575,9 @@ equivalent dissolved concentrations, aerenchyma exchange rates, and ebullition
 activation from current ELM hydrology, temperature, atmospheric forcing, root
 state, and the named parameter-file inputs. Keeping those model-state choices
 outside the pure transport kernel avoids old global pointers and `HUM_HOL`
-branches. It also leaves the unresolved legacy units of `m_dPlantTrans` behind
-an explicit adapter boundary rather than silently treating them as SI units.
+branches. It also keeps the dimensional interpretation of `m_dPlantTrans`
+inside the explicit adapter boundary: the source equation requires `m s-1`,
+which becomes a first-order `s-1` exchange after division by layer depth.
 
 Two CLM-SPRUCE behaviors are intentionally not copied. Its inundation update
 moves a fraction of each concentration without enforcing the area-weighted
@@ -659,6 +660,35 @@ NEE correction. The adapter must not reuse legacy `CH4Mod`'s production-minus-
 oxidation bookkeeping because those processes are internal transfers in the
 revised carbon ledger. The legacy offline/online atmosphere policy remains an
 outer ELM coupling decision rather than a reaction-kernel concern.
+
+The implemented adapter uses `max(fsat_col, frac_h2osfc)` as the current
+saturated-area fraction and conservatively remaps every partitioned state
+before reaction. It takes layer temperature and geometry from the column
+state, pH from `chemstate_vars`, liquid/ice content and surface water from the
+column water state, porosity, suction, water potential, and root fraction from
+`soilstate_vars`, and atmospheric partial pressures from `atm2lnd_vars`. The
+named mixing ratios are used only as missing-forcing fallbacks. The source
+water-potential response is evaluated in ELM's MPa units and combined with
+liquid saturation for the unsaturated reaction scalar.
+
+Gas surface conductance combines the patch-to-column boundary conductance with
+top-half-layer, snow, and ponded-water resistances. The first three gases reuse
+ELM's `d_con_w`, `d_con_g`, `c_h_inv`, `kh_theta`, and `kh_tbase` constants.
+Because those shared tables stop at CO2, H2 uses the corresponding non-tunable
+CLM-SPRUCE physical constants (`4.5e-9 m2 s-1` in water, `6.11e-5 m2 s-1` in
+air near 298 K, `1282.1 L atm mol-1`, and a `500 K` Henry temperature
+coefficient). These are physical conversion constants, not additional
+calibration parameters. Dimensional analysis of the source plant-flux equation
+resolves `m_dPlantTrans` as `m s-1`; division by finite layer depth produces
+the `s-1` exchange rate expected by the transport kernel.
+
+The adapter writes NH4 as the mineral-N counterpool and immediately refreshes
+total mineral N as `NH4 + NO3`; solution P is the mineral-P counterpool. It
+publishes additional methane-system storage, signed CH4+CO2 surface carbon
+exchange, CH4-C exchange in the established atmosphere units, and the CO2 NEE
+correction. Optional column, grid, and monthly carbon-budget arguments include
+these terms only for the revised backend. Existing calls omit the arguments and
+therefore preserve disabled-mode arithmetic.
 
 ## 10. Parameters and input data
 
@@ -774,7 +804,7 @@ C13 implementation gate in section 12 is enabled.
 | --- | --- |
 | `dom_diffus` | DOM and acetate liquid diffusion coefficient; migrate |
 | `m_Fick_ad` | Multiplier on aqueous gas diffusion; migrate |
-| `m_dPlantTrans` | Root/aerenchyma transport coefficient; migrate |
+| `m_dPlantTrans` | Root/aerenchyma transport coefficient; migrate as m s-1 |
 | `g_dMaxH2inWater` | Dissolved-H2 threshold for plant transport; migrate |
 | `atmch4`, `atmo2`, `atmco2`, `atmh2` | Fallback atmospheric mixing ratios; migrate, but current ELM atmosphere forcing takes precedence when supplied |
 | `Fick_D_w(1:4)` | Shared water diffusion coefficients for CH4, O2, CO2, and H2; reuse the current ELM equivalent rather than duplicate |
@@ -1189,8 +1219,8 @@ Implement Phase 3 as separately reviewable steps:
 3. Conservative saturated/unsaturated repartition and gas transport.
    **Implemented on the Phase 3 feature branch.**
 4. State limiting/commit, ELM C-budget integration, and atmosphere-facing CH4
-   and NEE terms. **Conservative transaction kernel in progress; ELM adapter,
-   budget calls, and atmosphere wiring remain pending.**
+   and NEE terms. **Implemented on the Phase 3 feature branch; the opt-in
+   interfaces are activated by Step 5 dispatch.**
 5. Explicit dispatch at the existing methane call site: select the revised
    backend when `use_microbe_methane=.true.` and the legacy backend otherwise.
    Both implementations remain in the model; neither may execute twice.

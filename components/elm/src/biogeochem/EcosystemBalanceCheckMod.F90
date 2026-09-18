@@ -74,7 +74,7 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine BeginColCBalance(bounds, num_soilc, filter_soilc, &
-       col_cs)
+       col_cs, additional_carbon_col)
     !
     ! !DESCRIPTION:
     ! On the radiation time step, calculate the beginning carbon balance for mass
@@ -85,6 +85,7 @@ contains
     integer                , intent(in)    :: num_soilc       ! number of soil columns filter
     integer                , intent(in)    :: filter_soilc(:) ! filter for soil columns
     type(column_carbon_state) , intent(inout) :: col_cs
+    real(r8), optional        , intent(in)    :: additional_carbon_col(bounds%begc:)
     !
     ! !LOCAL VARIABLES:
     integer :: c     ! indices
@@ -109,6 +110,9 @@ contains
       do fc = 1,num_soilc
          c = filter_soilc(fc)
          col_begcb(c) = totcolc(c)
+         if (present(additional_carbon_col)) then
+            col_begcb(c) = col_begcb(c) + additional_carbon_col(c)
+         end if
          totpftc_beg(c) = totpftc(c)
          cwdc_beg(c) = cwdc(c)
          totlitc_beg(c) = totlitc(c)
@@ -198,7 +202,7 @@ contains
   !-----------------------------------------------------------------------
   subroutine ColCBalanceCheck(bounds, &
        num_soilc, filter_soilc, &
-       col_cs, col_cf, soilstate_vars)
+       col_cs, col_cf, soilstate_vars, additional_carbon_col, surface_carbon_flux_col)
     !
     ! !DESCRIPTION:
     ! On the radiation time step, perform carbon mass conservation check for column and pft
@@ -210,6 +214,8 @@ contains
     type(column_carbon_state) , intent(inout) :: col_cs
     type(column_carbon_flux)  , intent(in)    :: col_cf
     type(soilstate_type)      , intent(in)    :: soilstate_vars
+    real(r8), optional        , intent(in)    :: additional_carbon_col(bounds%begc:)
+    real(r8), optional        , intent(in)    :: surface_carbon_flux_col(bounds%begc:)
     !
     ! !LOCAL VARIABLES:
     integer  :: c,err_index,p,j ! indices
@@ -274,6 +280,9 @@ contains
 
          ! calculate the total column-level carbon storage, for mass conservation check
          col_endcb(c) = totcolc(c)
+         if (present(additional_carbon_col)) then
+            col_endcb(c) = col_endcb(c) + additional_carbon_col(c)
+         end if
          col_totpftc_end(c) = col_totpftc(c)
          col_cwdc_end(c) = col_cwdc(c)
          col_totlitc_end(c) = col_totlitc(c)
@@ -303,6 +312,10 @@ contains
          ! Wood product losses and crop export losses
          col_coutputs(c) = col_coutputs(c) + &
                  col_prod1c_loss(c) + col_prod10c_loss(c) + col_prod100c_loss(c)
+
+         if (present(surface_carbon_flux_col)) then
+            col_coutputs(c) = col_coutputs(c) + surface_carbon_flux_col(c)
+         end if
 
          ! subtract leaching flux
          col_coutputs(c) = col_coutputs(c) - som_c_leached(c)
@@ -869,7 +882,7 @@ contains
   end subroutine ColPBalanceCheck
 
   !-----------------------------------------------------------------------
-  subroutine BeginGridCBalance(bounds, col_cs, grc_cs)
+  subroutine BeginGridCBalance(bounds, col_cs, grc_cs, additional_carbon_col)
     !
     ! !DESCRIPTION:
     ! Calculate the beginning carbon balance for mass conservation checks
@@ -879,6 +892,8 @@ contains
     type(bounds_type)          , intent(in)  :: bounds
     type(column_carbon_state)  , intent(in)  :: col_cs
     type(gridcell_carbon_state), intent(inout) :: grc_cs
+    real(r8), optional          , intent(in)    :: additional_carbon_col(bounds%begc:)
+    real(r8) :: total_carbon_col(bounds%begc:bounds%endc)
     !-----------------------------------------------------------------------
 
     associate(                                                    &
@@ -901,11 +916,19 @@ contains
          beg_cropseedc_deficit =>  grc_cs%beg_cropseedc_deficit   & ! Output: [real(r8) (:)] (gC/m2) column carbon pool for seeding new growth
          )
 
-      call c2g(bounds, totcolc(bounds%begc:bounds%endc), begcb_grc(bounds%begg:bounds%endg), &
-           c2l_scale_type = 'unity', l2g_scale_type = 'unity')
-
-      call c2g(bounds, totcolc(bounds%begc:bounds%endc), beg_totc(bounds%begg:bounds%endg), &
-               c2l_scale_type = 'unity', l2g_scale_type = 'unity')
+      if (present(additional_carbon_col)) then
+         total_carbon_col = totcolc(bounds%begc:bounds%endc) + &
+              additional_carbon_col(bounds%begc:bounds%endc)
+         call c2g(bounds, total_carbon_col, begcb_grc(bounds%begg:bounds%endg), &
+              c2l_scale_type = 'unity', l2g_scale_type = 'unity')
+         call c2g(bounds, total_carbon_col, beg_totc(bounds%begg:bounds%endg), &
+              c2l_scale_type = 'unity', l2g_scale_type = 'unity')
+      else
+         call c2g(bounds, totcolc(bounds%begc:bounds%endc), begcb_grc(bounds%begg:bounds%endg), &
+              c2l_scale_type = 'unity', l2g_scale_type = 'unity')
+         call c2g(bounds, totcolc(bounds%begc:bounds%endc), beg_totc(bounds%begg:bounds%endg), &
+              c2l_scale_type = 'unity', l2g_scale_type = 'unity')
+      end if
 
       call c2g(bounds, totpftc(bounds%begc:bounds%endc), beg_totpftc(bounds%begg:bounds%endg), &
                c2l_scale_type = 'unity', l2g_scale_type = 'unity')
@@ -933,7 +956,8 @@ contains
   end subroutine BeginGridCBalance
 
   !-----------------------------------------------------------------------
-  subroutine GridCBalanceCheck(bounds, col_cs, col_cf, grc_cs, grc_cf)
+  subroutine GridCBalanceCheck(bounds, col_cs, col_cf, grc_cs, grc_cf, &
+       additional_carbon_col, surface_carbon_flux_col)
     !
     ! !DESCRIPTION:
     ! Calculate the beginning carbon balance for mass conservation checks
@@ -948,9 +972,13 @@ contains
     type(column_carbon_flux)   , intent(in)    :: col_cf
     type(gridcell_carbon_state), intent(inout) :: grc_cs
     type(gridcell_carbon_flux) , intent(inout) :: grc_cf
+    real(r8), optional         , intent(in)    :: additional_carbon_col(bounds%begc:)
+    real(r8), optional         , intent(in)    :: surface_carbon_flux_col(bounds%begc:)
     !
     integer             :: g, nstep
     real(r8)            :: dt
+    real(r8)            :: total_carbon_col(bounds%begc:bounds%endc)
+    real(r8)            :: surface_carbon_flux_grc(bounds%begg:bounds%endg)
     !-----------------------------------------------------------------------
 
     associate(                                                       &
@@ -1009,8 +1037,19 @@ contains
          )
 
       ! c2g states
-      call c2g(bounds, col_totc(bounds%begc:bounds%endc), end_totc(bounds%begg:bounds%endg), &
-               c2l_scale_type = 'unity', l2g_scale_type = 'unity')
+      if (present(additional_carbon_col)) then
+         total_carbon_col = col_totc(bounds%begc:bounds%endc) + &
+              additional_carbon_col(bounds%begc:bounds%endc)
+         call c2g(bounds, total_carbon_col, end_totc(bounds%begg:bounds%endg), &
+              c2l_scale_type = 'unity', l2g_scale_type = 'unity')
+      else
+         call c2g(bounds, col_totc(bounds%begc:bounds%endc), end_totc(bounds%begg:bounds%endg), &
+              c2l_scale_type = 'unity', l2g_scale_type = 'unity')
+      end if
+      if (present(surface_carbon_flux_col)) then
+         call c2g(bounds, surface_carbon_flux_col(bounds%begc:bounds%endc), &
+              surface_carbon_flux_grc, c2l_scale_type = 'unity', l2g_scale_type = 'unity')
+      end if
       call c2g(bounds, col_totpftc(bounds%begc:bounds%endc), end_totpftc(bounds%begg:bounds%endg), &
                c2l_scale_type = 'unity', l2g_scale_type = 'unity')
       call c2g(bounds, col_cwdc(bounds%begc:bounds%endc), end_cwdc(bounds%begg:bounds%endg), &
@@ -1071,6 +1110,10 @@ contains
          grc_coutputs(g) = grc_er(g) + grc_fire_closs(g) + grc_hrv_xsmrpool_to_atm(g) + &
               grc_prod1c_loss(g) + grc_prod10c_loss(g) + grc_prod100c_loss(g) - grc_som_c_leached(g) + &
               grc_dwt_conv_cflux(g)
+
+         if (present(surface_carbon_flux_col)) then
+            grc_coutputs(g) = grc_coutputs(g) + surface_carbon_flux_grc(g)
+         end if
 
          if (ero_ccycle) then
             grc_coutputs(g) = grc_coutputs(g) + grc_som_c_yield(g)
@@ -1171,7 +1214,7 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine EndGridCBalanceAfterDynSubgridDriver(bounds, &
-       num_soilc, filter_soilc, col_cs, grc_cs, grc_cf)
+       num_soilc, filter_soilc, col_cs, grc_cs, grc_cf, additional_carbon_col)
     !
     ! !DESCRIPTION:
     ! On the radiation time step, perform carbon mass conservation check
@@ -1184,11 +1227,13 @@ contains
     type(column_carbon_state)  , intent(inout) :: col_cs
     type(gridcell_carbon_state), intent(inout) :: grc_cs
     type(gridcell_carbon_flux) , intent(inout) :: grc_cf
+    real(r8), optional         , intent(in)    :: additional_carbon_col(bounds%begc:)
     !
     ! !LOCAL VARIABLES:
     integer  :: g,err_index    ! indices
     logical  :: err_found      ! error flag
     real(r8) :: dt             ! radiation time step (seconds)
+    real(r8) :: total_carbon_col(bounds%begc:bounds%endc)
     !-----------------------------------------------------------------------
 
     associate(                                                                       &
@@ -1208,11 +1253,17 @@ contains
 
       err_found = .false.
 
-      call c2g( bounds = bounds, &
-           carr = totcolc(bounds%begc:bounds%endc), &
-           garr = endcb_grc(bounds%begg:bounds%endg), &
-           c2l_scale_type = unity, &
-           l2g_scale_type = unity)
+      if (present(additional_carbon_col)) then
+         total_carbon_col = totcolc(bounds%begc:bounds%endc) + &
+              additional_carbon_col(bounds%begc:bounds%endc)
+         call c2g(bounds = bounds, carr = total_carbon_col, &
+              garr = endcb_grc(bounds%begg:bounds%endg), &
+              c2l_scale_type = unity, l2g_scale_type = unity)
+      else
+         call c2g(bounds = bounds, carr = totcolc(bounds%begc:bounds%endc), &
+              garr = endcb_grc(bounds%begg:bounds%endg), &
+              c2l_scale_type = unity, l2g_scale_type = unity)
+      end if
 
       do g = bounds%begg, bounds%endg
          endcb_grc(g) = endcb_grc(g)
