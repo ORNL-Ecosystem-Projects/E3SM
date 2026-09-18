@@ -75,12 +75,28 @@ class Phase3AdapterTest(unittest.TestCase):
         self.assertIn("call p2c(bounds, nlevdecomp", self.adapter)
         self.assertIn("value_in <= 1._r8", self.adapter)
 
+    def test_native_elm_uses_explicit_soil_ph_fallback(self) -> None:
+        self.assertIn(
+            "unsaturated_environment%soil_ph = MicrobeMethaneParamsInst%ph_opt",
+            self.adapter,
+        )
+        self.assertIn(
+            "saturated_environment%soil_ph = MicrobeMethaneParamsInst%ph_opt",
+            self.adapter,
+        )
+        self.assertNotIn(
+            "unsaturated_environment%soil_ph = chemstate_vars%soil_pH(c,j)",
+            self.adapter,
+        )
+
     def test_storage_flux_diagnostics_and_balance_interfaces_are_explicit(self) -> None:
         for name, units in (
             ("MM_ADDITIONAL_C", "gC/m^2"),
             ("MM_SURFACE_C_FLUX", "gC/m^2/s"),
             ("MM_SURFACE_CH4_FLUX", "kgC/m^2/s"),
             ("MM_SURFACE_CO2_FLUX", "gC/m^2/s"),
+            ("MM_CH4_PROD", "gC/m^2/s"),
+            ("MM_CH4_OXID", "gC/m^2/s"),
         ):
             self.assertIn(f"fname='{name}', units='{units}'", self.adapter)
 
@@ -88,6 +104,14 @@ class Phase3AdapterTest(unittest.TestCase):
         self.assertIn("additional_carbon_col", self.balance)
         self.assertIn("surface_carbon_flux_col", self.balance)
         self.assertIn("surface_carbon_flux_col", self.budget)
+
+        for rate in (
+            "acetoclastic_methanogenesis_c",
+            "hydrogenotrophic_methanogenesis_c",
+            "aerobic_methane_oxidation_c",
+            "anaerobic_methane_oxidation_c",
+        ):
+            self.assertIn(rate, self.adapter)
 
     def test_step_5_dispatch_selects_exactly_one_backend(self) -> None:
         revised = self.driver.index("microbe_methane_vars%Advance")

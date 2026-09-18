@@ -148,9 +148,12 @@ contains
          (1._r8 - fraction) * microbeMethaneAdditionalCarbonDensity(transaction%unsaturated_state) + &
          fraction * microbeMethaneAdditionalCarbonDensity(transaction%saturated_state)
     transaction%carbon_residual = final_carbon - initial_carbon
-    initial_nitrogen = max(0._r8, dom_n) + max(0._r8, mineral_n)
+    ! Native RD nutrient updates can leave a depleted mineral pool slightly
+    ! negative. Preserve that inherited deficit in the transaction ledger;
+    ! the mortality limiter treats it as zero available nutrient.
+    initial_nitrogen = max(0._r8, dom_n) + mineral_n
     final_nitrogen = transaction%dom_n + transaction%mineral_n
-    initial_phosphorus = max(0._r8, dom_p) + max(0._r8, mineral_p)
+    initial_phosphorus = max(0._r8, dom_p) + mineral_p
     final_phosphorus = transaction%dom_p + transaction%mineral_p
     transaction%nitrogen_residual = final_nitrogen - initial_nitrogen
     transaction%phosphorus_residual = final_phosphorus - initial_phosphorus
@@ -158,8 +161,9 @@ contains
          parameters%mfg_biomass_min) .and. &
          reactionStateIsNonnegative(transaction%saturated_state, parameters%mfg_biomass_min) .and. &
          transaction%dom_c >= -state_tolerance .and. transaction%dom_n >= -state_tolerance .and. &
-         transaction%dom_p >= -state_tolerance .and. transaction%mineral_n >= -state_tolerance .and. &
-         transaction%mineral_p >= -state_tolerance .and. &
+         transaction%dom_p >= -state_tolerance .and. &
+         transaction%mineral_n >= min(0._r8, mineral_n) - state_tolerance .and. &
+         transaction%mineral_p >= min(0._r8, mineral_p) - state_tolerance .and. &
          residualIsClosed(transaction%carbon_residual, initial_carbon, final_carbon) .and. &
          residualIsClosed(transaction%nitrogen_residual, initial_nitrogen, final_nitrogen) .and. &
          residualIsClosed(transaction%phosphorus_residual, initial_phosphorus, final_phosphorus)

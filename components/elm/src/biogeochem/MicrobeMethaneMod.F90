@@ -44,6 +44,8 @@ module MicrobeMethaneMod
      real(r8), pointer :: surface_carbon_flux_col(:) => null()
      real(r8), pointer :: surface_ch4_flux_col(:) => null()
      real(r8), pointer :: surface_co2_flux_col(:) => null()
+     real(r8), pointer :: ch4_production_col(:) => null()
+     real(r8), pointer :: ch4_oxidation_col(:) => null()
    contains
      procedure, public  :: Init
      procedure, private :: InitAllocate
@@ -108,6 +110,8 @@ contains
     allocate(this%surface_carbon_flux_col(begc:endc)); this%surface_carbon_flux_col = nan
     allocate(this%surface_ch4_flux_col(begc:endc)); this%surface_ch4_flux_col = nan
     allocate(this%surface_co2_flux_col(begc:endc)); this%surface_co2_flux_col = nan
+    allocate(this%ch4_production_col(begc:endc)); this%ch4_production_col = nan
+    allocate(this%ch4_oxidation_col(begc:endc)); this%ch4_oxidation_col = nan
   end subroutine InitAllocate
 
   subroutine ReadParams(this)
@@ -154,6 +158,8 @@ contains
     this%surface_carbon_flux_col = 0._r8
     this%surface_ch4_flux_col = 0._r8
     this%surface_co2_flux_col = 0._r8
+    this%ch4_production_col = 0._r8
+    this%ch4_oxidation_col = 0._r8
 
     do c = bounds%begc, bounds%endc
        if (col_pp%is_soil(c) .or. col_pp%is_crop(c)) then
@@ -247,6 +253,12 @@ contains
     call hist_addfld1d(fname='MM_SURFACE_CO2_FLUX', units='gC/m^2/s', avgflag='A', &
          long_name='net revised methane CO2 carbon flux; positive to atmosphere', &
          ptr_col=this%surface_co2_flux_col, default='inactive')
+    call hist_addfld1d(fname='MM_CH4_PROD', units='gC/m^2/s', avgflag='A', &
+         long_name='gross revised methane production integrated over the soil column', &
+         ptr_col=this%ch4_production_col, default='inactive')
+    call hist_addfld1d(fname='MM_CH4_OXID', units='gC/m^2/s', avgflag='A', &
+         long_name='gross revised methane oxidation integrated over the soil column', &
+         ptr_col=this%ch4_oxidation_col, default='inactive')
 
   contains
     subroutine add_state(name, units, long_name, field)
@@ -426,6 +438,8 @@ contains
     this%surface_carbon_flux_col(bounds%begc:bounds%endc) = 0._r8
     this%surface_ch4_flux_col(bounds%begc:bounds%endc) = 0._r8
     this%surface_co2_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%ch4_production_col(bounds%begc:bounds%endc) = 0._r8
+    this%ch4_oxidation_col(bounds%begc:bounds%endc) = 0._r8
 
     call p2c(bounds, num_soilc, filter_soilc, &
          ground_conductance_patch(bounds%begp:bounds%endp), &
@@ -487,13 +501,19 @@ contains
                max(MicrobeMethaneParamsInst%saturation_reaction_threshold, tiny(1._r8)))
 
           unsaturated_environment%soil_temperature = col_es%t_soisno(c,j)
-          unsaturated_environment%soil_ph = chemstate_vars%soil_pH(c,j)
+          ! Native ELM allocates chemstate soil pH but does not currently
+          ! populate it. External chemistry backends that do populate it are
+          ! rejected by the revised-methane configuration gate. Use the named
+          ! optimum as the explicit native-ELM fallback until Phase 4 adds a
+          ! spatial soil-pH input; acetate feedback can still lower the
+          ! effective pH inside the reaction kernel.
+          unsaturated_environment%soil_ph = MicrobeMethaneParamsInst%ph_opt
           unsaturated_environment%dom_fermentation_scalar = &
                moisture_scalar * saturation_scalar
           unsaturated_environment%aerobic_acetate_oxidation_scalar = &
                moisture_scalar * (1._r8 - saturation_scalar)
           saturated_environment%soil_temperature = col_es%t_soisno(c,j)
-          saturated_environment%soil_ph = chemstate_vars%soil_pH(c,j)
+          saturated_environment%soil_ph = MicrobeMethaneParamsInst%ph_opt
           saturated_environment%dom_fermentation_scalar = moisture_scalar
           saturated_environment%aerobic_acetate_oxidation_scalar = 0._r8
 
@@ -603,6 +623,20 @@ contains
        column_valid = column_valid .and. unsaturated_gas_valid .and. saturated_gas_valid
 
        if (.not. column_valid) then
+          do j = 1, nlevdecomp
+             if (.not. reaction(j)%valid) then
+                write(iulog,*) 'invalid revised methane reaction layer: ', j
+                write(iulog,*) 'reaction C/N/P residuals: ', reaction(j)%carbon_residual, &
+                     reaction(j)%nitrogen_residual, reaction(j)%phosphorus_residual
+                write(iulog,*) 'reaction DOM C/N/P and mineral N/P: ', reaction(j)%dom_c, &
+                     reaction(j)%dom_n, reaction(j)%dom_p, reaction(j)%mineral_n, &
+                     reaction(j)%mineral_p
+                call reportReactionState('unsaturated reaction state', &
+                     reaction(j)%unsaturated_state)
+                call reportReactionState('saturated reaction state', &
+                     reaction(j)%saturated_state)
+             end if
+          end do
           write(iulog,*) 'revised methane atmospheric partial pressures: ', partial_pressure
           write(iulog,*) 'revised methane surface equilibrium concentrations: ', surface_equilibrium
           write(iulog,*) 'revised methane unsaturated surface conductance: ', &
@@ -651,10 +685,35 @@ contains
        this%surface_carbon_flux_col(c) = microbeMethaneSurfaceCarbonFlux(bulk_surface_flux)
        this%surface_ch4_flux_col(c) = microbeMethaneCH4SurfaceFluxKgC(bulk_surface_flux)
        this%surface_co2_flux_col(c) = microbeMethaneCO2Correction(bulk_surface_flux)
+       do j = 1, nlevdecomp
+          this%ch4_production_col(c) = this%ch4_production_col(c) + catomw * &
+               layer_thickness(j) * ((1._r8 - fraction) * &
+               (reaction(j)%unsaturated_rates%acetoclastic_methanogenesis_c + &
+               reaction(j)%unsaturated_rates%hydrogenotrophic_methanogenesis_c) + &
+               fraction * (reaction(j)%saturated_rates%acetoclastic_methanogenesis_c + &
+               reaction(j)%saturated_rates%hydrogenotrophic_methanogenesis_c))
+          this%ch4_oxidation_col(c) = this%ch4_oxidation_col(c) + catomw * &
+               layer_thickness(j) * ((1._r8 - fraction) * &
+               (reaction(j)%unsaturated_rates%aerobic_methane_oxidation_c + &
+               reaction(j)%unsaturated_rates%anaerobic_methane_oxidation_c) + &
+               fraction * (reaction(j)%saturated_rates%aerobic_methane_oxidation_c + &
+               reaction(j)%saturated_rates%anaerobic_methane_oxidation_c))
+       end do
        call syncLegacyOxygenBridge(c, fraction, unsaturated_work, saturated_work)
     end do
 
   contains
+
+    subroutine reportReactionState(label, state)
+      character(len=*), intent(in) :: label
+      type(microbe_methane_reaction_state_type), intent(in) :: state
+
+      write(iulog,*) trim(label)//' DOM/acetate/guild C: ', state%dom_c, &
+           state%acetate_c, state%acetate_methanogen_c, state%h2_methanogen_c, &
+           state%aerobic_methanotroph_c, state%anaerobic_methanotroph_c
+      write(iulog,*) trim(label)//' CH4/O2/CO2/H2: ', state%conc_ch4, &
+           state%conc_o2, state%conc_co2, state%conc_h2
+    end subroutine reportReactionState
 
     subroutine consumeELMAerobicOxygen(column, saturated_fraction, unsaturated, saturated)
       ! Standard decomposition, root respiration, and allocation have all

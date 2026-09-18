@@ -144,10 +144,10 @@ def advance_reaction_layer(
         new_unsaturated
     ) + fraction * additional_carbon_density(new_saturated)
     carbon_residual = final_carbon - initial_carbon
-    initial_nitrogen = max(0.0, dom_n) + max(0.0, mineral_n)
+    initial_nitrogen = max(0.0, dom_n) + mineral_n
     final_nitrogen = new_dom_n + new_mineral_n
     nitrogen_residual = final_nitrogen - initial_nitrogen
-    initial_phosphorus = max(0.0, dom_p) + max(0.0, mineral_p)
+    initial_phosphorus = max(0.0, dom_p) + mineral_p
     final_phosphorus = new_dom_p + new_mineral_p
     phosphorus_residual = final_phosphorus - initial_phosphorus
     floor = parameters["microbe_methane_mfg_biomass_min"]
@@ -170,8 +170,9 @@ def advance_reaction_layer(
         valid=(
             _state_valid(new_unsaturated, floor)
             and _state_valid(new_saturated, floor)
-            and min(new_dom_c, new_dom_n, new_dom_p, new_mineral_n, new_mineral_p)
-            >= -1.0e-12
+            and min(new_dom_c, new_dom_n, new_dom_p) >= -1.0e-12
+            and new_mineral_n >= min(0.0, mineral_n) - 1.0e-12
+            and new_mineral_p >= min(0.0, mineral_p) - 1.0e-12
             and _residual_closed(carbon_residual, initial_carbon, final_carbon)
             and _residual_closed(
                 nitrogen_residual, initial_nitrogen, final_nitrogen

@@ -5,8 +5,10 @@ Status: Phase 0 harness and Phases 1-2 implementation complete; Phase 3 Steps
 methane backends mutually exclusive and connects revised storage and surface
 fluxes to ELM balances, budgets, and atmosphere exchange. The archived
 CLM-SPRUCE scientific reference, exact-restart comparison, and SPRUCE science
-validation remain pending; Docker/CIME build and five-day enabled/disabled
-smoke tests pass.
+validation remain pending. Docker/CIME build, five-day enabled/disabled smoke
+tests, and a paired 50-year US-MOz run pass numerically with carbon balance at
+roundoff. The long run exposes large DOM and soil-C shifts and unconstrained
+anaerobic-methanotroph growth, which remain scientific calibration blockers.
 Date: 2026-09-18
 
 ## 1. Executive summary
@@ -42,6 +44,122 @@ The two methane backends must never run on the same soil column and timestep.
 The primary production target is the E3SM-Peatlands C-N-P, relative-demand,
 vertical CTC configuration. C:P behavior for the three new decomposition pools
 is therefore part of the initial integration, not a deferred enhancement.
+
+### 1.1 Science description
+
+The scientific purpose of this option is to connect decomposition, dissolved
+organic matter, microbial biomass, redox state, and methane cycling in one
+conservative soil-carbon system. Standard ELM represents litter and soil
+organic matter as a cascade of pools whose turnover is controlled by
+temperature, moisture, depth, and nutrient availability. Carbon leaving a
+donor pool is either respired or transferred to another litter or SOM pool.
+That structure is efficient for long-term carbon storage, but it does not
+explicitly represent the soluble organic substrates that feed anaerobic
+metabolism, nor does it distinguish living bacterial and fungal biomass from
+the SOM pools they help create. The microbial option adds those missing links
+while retaining the existing ELM litter and SOM hierarchy.
+
+DOM, bacteria, and fungi are added as ordinary vertically resolved C-N-P
+decomposition pools. Litter and SOM can solubilize into DOM, and they can be
+assimilated by bacteria or fungi. The allocation between bacterial and fungal
+uptake depends on substrate stoichiometry and the parameterized microbial C:N
+traits. Carbon-use efficiency determines how much assimilated substrate
+becomes microbial biomass and how much is respired. Bacterial and fungal
+turnover then returns carbon to DOM, transfers microbial residues into SOM1-4,
+or releases CO2. DOM can likewise be taken up by microbes or stabilized into
+SOM. The result is a feedback loop in which plant litter and SOM supply
+microbial substrates, microbial growth temporarily retains carbon and
+nutrients, and microbial death supplies both relatively available DOM and
+potentially persistent SOM residues.
+
+These pathways make decomposition stoichiometry more explicit. Each transfer
+attempts to move C, N, and P through the same generic cascade. If donor and
+receiver C:N or C:P ratios differ, ELM's nutrient competition machinery
+mineralizes excess organic nutrients or immobilizes NH4 and solution phosphate.
+The DOM phosphorus pool is dissolved *organic* P and is therefore distinct
+from `solutionp_vr`, which represents dissolved inorganic phosphate. DOM can
+move with the organic pool's vertical-transport rule; inorganic phosphate
+continues to use ELM's existing sorption, transport, and leaching processes.
+This distinction permits rapid dissolved-organic cycling without conflating it
+with plant-available mineral P.
+
+The present cascade is microbial-explicit in pool topology, but it is not yet
+an enzyme or population-control model. Litter and SOM turnover rates retain the
+standard environmental controls and are not multiplied directly by total
+bacterial or fungal biomass. Microbial biomass affects carbon and nutrient
+trajectories through uptake allocation, carbon-use efficiency, its own
+turnover, residue formation, and DOM recycling. Consequently, indirect
+substrate and nutrient feedbacks are possible, but a strong biomass-driven
+priming response to fresh carbon is not an explicit mechanism in this first
+port. Adding enzyme production, biomass-dependent depolymerization, or a
+formal priming formulation would be a separate science change with its own
+parameter and validation requirements.
+
+DOM provides the main bridge from the decomposition cascade to revised
+methane chemistry. Under sufficiently moist, warm, and reducing conditions,
+DOM-C is fermented to acetate, CO2, and H2. Acetate and H2/CO2 then support two
+gross methane-production pathways: acetoclastic methanogenesis and
+hydrogenotrophic methanogenesis. Their biomasses are represented by separate
+functional guilds, distinct from the general bacterial and fungal pools.
+Methane is consumed by aerobic methanotrophs where both CH4 and O2 are
+available and by an anaerobic methanotroph guild under low-O2 conditions. All
+four methane guilds grow and die explicitly; mortality carbon returns to DOM.
+The initial parity model treats these guilds as carbon-only, so their growth
+does not yet impose an additional N or P demand beyond the DOM transformations
+handled by the C-N-P transaction.
+
+Hydrology and oxygen determine which methane pathways can operate and whether
+their products reach the atmosphere. Each layer contains saturated and
+unsaturated subarea state. Changes in inundated fraction conservatively move
+existing acetate, gases, and guild biomass between those partitions. Dissolved
+CH4, O2, CO2, and H2 diffuse vertically; gases can also exchange through roots
+and aerenchyma, and methane above its solubility threshold can escape by
+ebullition. Snow, ponded water, the top soil layer, and the atmospheric
+boundary contribute resistances to surface exchange. Thus net CH4 emission is
+not equated with production: it is the remainder after oxidation, temporary
+dissolved storage, downward or upward redistribution, and the three transport
+pathways.
+
+Oxygen is shared with the rest of ELM rather than treated as an isolated
+methane control. Standard heterotrophic respiration, root respiration, and
+nitrification consume the revised dissolved-O2 inventory before methane
+reactions are evaluated. Nitrification is capped by available oxygen using two
+moles of O2 per mole of N nitrified. The remaining O2 constrains aerobic CH4
+oxidation, while low O2 favors anaerobic processes. The revised concentrations
+and oxygen stress are then published through the established ELM anoxia
+interface for the next decomposition and nitrification/denitrification step.
+This creates the intended feedback: wetness restricts atmospheric O2 supply,
+redox limitation alters decomposition and nitrogen transformations, DOM and
+fermentation products accumulate, methane production increases, and oxidation
+and transport determine the emitted fraction.
+
+Carbon accounting differs deliberately from the legacy `CH4Mod` diagnostic
+formulation. In the revised model, methanogenesis and methane oxidation are
+internal conversions among represented carbon pools; neither is itself an
+external source or sink. The carbon budget includes DOM through the standard
+decomposition pools and adds acetate, guild biomass, dissolved CH4-C, and
+dissolved CO2-C as revised-backend storage. Only net CH4-C and CO2-C crossing
+the land-atmosphere boundary are external fluxes. Gross diagnostics retain the
+science needed to interpret that net exchange: `MM_CH4_PROD` integrates
+acetoclastic plus hydrogenotrophic methanogenesis, while `MM_CH4_OXID`
+integrates aerobic plus anaerobic methane consumption. They correspond in
+purpose, though not in detailed formulation, to legacy `CH4PROD` and
+`FCH4TOCO2`.
+
+The expected land-carbon response is therefore not a uniform increase or
+decrease in SOM. Carbon is diverted into rapidly cycling DOM and living
+microbial pools, while microbial residues and DOM stabilization can feed slow
+SOM. Early spinup may show lower litter or selected SOM stocks because of new
+uptake and solubilization paths, together with a sizeable DOM pool if its
+production exceeds microbial consumption and vertical export. Long-term SOM3
+and SOM4 responses depend on residue routing, nutrient limitation, and the
+unaccelerated turnover of the new pools. Accelerated decomposition spinup
+remains useful for the inherited slow SOM pools, but bacteria, fungi, DOM, and
+the revised methane state retain a spinup factor of one. Their values during an
+AD run should therefore be interpreted as coupled fast-state adjustment around
+accelerated SOM, not as an independently accelerated equilibrium. Final
+spinup and transient tests are required before evaluating stocks, NEE, or CH4
+emissions scientifically.
 
 ## 2. Source baselines inspected
 
@@ -667,12 +785,18 @@ outer ELM coupling decision rather than a reaction-kernel concern.
 The implemented adapter uses `max(fsat_col, frac_h2osfc)` as the current
 saturated-area fraction and conservatively remaps every partitioned state
 before reaction. It takes layer temperature and geometry from the column
-state, pH from `chemstate_vars`, liquid/ice content and surface water from the
-column water state, porosity, suction, water potential, and root fraction from
-`soilstate_vars`, and atmospheric partial pressures from `atm2lnd_vars`. The
-named mixing ratios are used only as missing-forcing fallbacks. The source
-water-potential response is evaluated in ELM's MPa units and combined with
-liquid saturation for the unsaturated reaction scalar.
+state, liquid/ice content and surface water from the column water state,
+porosity, suction, water potential, and root fraction from `soilstate_vars`,
+and atmospheric partial pressures from `atm2lnd_vars`. Native ELM currently
+allocates `chemstate_vars%soil_pH` without populating it, while the external
+chemistry modes that do populate it are unsupported by this option. The
+adapter therefore uses the named `ph_opt` value as an explicit temporary base
+pH; acetate feedback can still modify effective pH inside the reaction
+kernel. Phase 4 must add a spatially resolved native-ELM soil-pH input before
+pH-response calibration. The named atmospheric mixing ratios are used only as
+missing-forcing fallbacks. The source water-potential response is evaluated in
+ELM's MPa units and combined with liquid saturation for the unsaturated
+reaction scalar.
 
 Because the legacy solver normally constructs `rootfr_col` internally, the
 revised adapter instead aggregates the authoritative patch root profile to
@@ -700,6 +824,14 @@ exchange, CH4-C exchange in the established atmosphere units, and the CO2 NEE
 correction. Optional column, grid, and monthly carbon-budget arguments include
 these terms only for the revised backend. Existing calls omit the arguments and
 therefore preserve disabled-mode arithmetic.
+
+The native RD phosphorus update can leave `solutionp_vr` slightly negative
+when the solution pool is depleted. The revised transaction carries an
+inherited negative value through its P ledger instead of clipping it and
+creating phosphorus. Its mortality limiter treats that value as zero available
+P, and the transaction may leave the inherited deficit unchanged or improve
+it, but may not make it more negative. DOM-P remains subject to the strict
+nonnegative-state check.
 
 Nitrification participates in the revised oxygen budget. Before allocation,
 its potential flux is capped by the area-weighted saturated/unsaturated O2
@@ -1388,3 +1520,195 @@ The integration is complete only when:
 - current atmosphere field names and sign/unit contracts are honored;
 - US-SPR process differences from CLM-SPRUCE are explained and accepted; and
 - the applicable ELM regression suite passes against the frozen baseline.
+
+## 19. Remaining scientific validation and parameter work
+
+The implemented equations and interfaces are not yet a production-calibrated
+model. The current Phase 2 and Phase 3 parameter files are integration-test
+fixtures: they make every required input explicit and allow conservation,
+restart, and long-run tests, but they do not establish that all values are the
+ones used by a successful CLM-SPRUCE experiment or that they are appropriate
+for ELM's current C-N-P formulation. The remaining work must distinguish three
+classes of information: recoverable legacy values, unit or equation choices
+that require interpretation, and genuinely new parameters introduced by the
+ELM integration.
+
+### 19.1 Recover the historical scientific reference
+
+The first priority is to locate an archived CLM-SPRUCE build and run directory
+with its exact `microbepar_in`, physiology parameter file, initial conditions,
+compiler flags, CPP options, and output. The 88-value positional reader paired
+with a 111-record input file is not sufficient evidence of the values actually
+used. For each active parameter, the audit must record the runtime value,
+effective units after all source conversions, its equation and call site, and
+whether it came from a text record, PFT parameter, source default, or literal.
+The audit must also establish whether both historical `microbech4` call sites
+executed. Until that evidence exists, agreement with the checked-in source
+file alone is not a scientific parity result.
+
+The archived executable should be used to produce one-layer and one-timestep
+vectors for DOM consumption, acetate and H2/CO2 production, both
+methanogenesis pathways, both oxidation pathways, guild growth and mortality,
+and diffusion, ebullition, and aerenchyma fluxes. Differences caused by the
+intentional carbon-accounting and units repairs in sections 9.2 and 9.3 must be
+quantified rather than tuned away. These vectors define which remaining
+differences are porting errors and which are accepted corrections to the old
+model.
+
+### 19.2 Resolve and calibrate microbial decomposition parameters
+
+The litter/SOM-to-DOM fractions, direct-stabilization fractions, bacterial and
+fungal allocation traits, pool turnover rates, carbon-use-efficiency controls,
+microbial-residue routing, DOM stabilization, and DOM vertical diffusivity all
+need traceable values. Several currently used PFT turnover and routing values
+are marked unverified because the legacy positional reader could not have
+filled the named PFT arrays as implied by the source. They should first be
+recovered from an archived run or investigator table. Only parameters that
+cannot be recovered should be calibrated.
+
+Calibration must use multiple observables rather than matching total soil C
+alone. Useful constraints include litter mass loss, heterotrophic respiration,
+dissolved organic carbon concentration or export, microbial biomass C,
+bacterial-to-fungal allocation where data exist, and the vertical and
+fractional distribution of SOM. SOM3 and SOM4 must be evaluated after final
+spinup because their accelerated-spinup values are deliberately rescaled,
+whereas DOM and microbial biomass are not accelerated. Parameter combinations
+that reproduce total soil C while producing implausible DOM or microbial
+stocks must be rejected.
+
+The initial paired 50-year US-MOz test provides a concrete calibration target,
+not a validated result. Relative to the legacy-CH4 case, the enabled case ended
+with `+216%` litter C, `+180%` SOM C, `+29%` total column C, and `-10%`
+vegetation C. Its DOM stock reached `759.94 gC m-2`, with bacterial and fungal
+stocks of `24.40` and `40.27 gC m-2`. These large shifts are consistent with a
+substantially altered decomposition cascade but are too large to accept
+without observational constraints and an unaccelerated final-spinup test.
+Routing fractions, DOM stabilization and transport, microbial turnover, and
+nutrient stoichiometry should be evaluated jointly rather than calibrating
+only total soil C.
+
+### 19.3 Define the new phosphorus science
+
+CLM-SPRUCE did not define phosphorus stoichiometry for the added DOM,
+bacterial, or fungal pools. The following are therefore new ELM science
+parameters, not values that can be recovered from the legacy methane module:
+
+| Parameter | Required scientific decision and evidence |
+| --- | --- |
+| `cp_bacteria` | Bacterial biomass C:P, including whether it is fixed, PFT-dependent, soil-dependent, or allowed to acclimate; constrain with microbial biomass C and P measurements or an accepted synthesis |
+| `cp_fungi` | Fungal biomass C:P and its variability; constrain separately from bacteria where fungal:bacterial composition data exist |
+| `cp_dom` | Effective C:P of the reactive dissolved-organic pool; constrain with paired DOC and DOP measurements and recognize that bulk extractable DOM may not equal the modeled reactive fraction |
+
+The cold-start P assigned to bacteria, fungi, and DOM follows these C:P ratios
+and must be included in initialization budgets. We must decide whether fixed
+ratios are adequate or whether flexible microbial and DOM stoichiometry is
+needed. That decision affects immobilization, mineralization, plant-microbe P
+competition, and the amount of DOM-C available to methane chemistry. It cannot
+be made by simply selecting large C:P values to make P limitation disappear.
+
+The use of `solutionp_vr` as the inorganic P counterpool also requires tests
+over representative soil P regimes. Those tests must verify conservation when
+DOM is produced, consumed, stabilized, and transported; competition with plant
+uptake; interaction with sorption and secondary-mineral pools; and behavior
+when solution P approaches zero. Sensitivity experiments should bracket
+literature-supported bacterial, fungal, and DOM C:P ranges. The selected values
+and uncertainty ranges need science-owner approval before the parameter file
+is promoted beyond testing status.
+
+### 19.4 Resolve revised-methane kinetics and redox assumptions
+
+The growth, mortality, yield, half-saturation, Q10, pH, moisture, inhibition,
+and biomass-floor parameters need a dimensional audit and, after legacy
+recovery, calibration against process observations. Particular attention is
+required for the interpretation of growth rates versus substrate-consumption
+rates, the hydrogenotrophic yield after removal of the old extra factor of
+four, the acetoclastic CH4/CO2 split, and the O2:CH4 ratio for aerobic
+oxidation. Gross `MM_CH4_PROD` and `MM_CH4_OXID` should be evaluated separately;
+matching net FCH4 can otherwise hide compensating errors in production and
+oxidation.
+
+Native ELM also needs a spatial soil-pH data path. The current adapter uses
+`ph_opt` as a documented temporary fallback because native
+`chemstate_vars%soil_pH` is not populated. Phase 4 should identify an
+appropriate soil-profile or surface-data product, define interpolation and
+depth behavior, and test whether pH is prescribed or evolves. Methane kinetic
+calibration must not use `ph_opt` to absorb a missing site-pH constraint.
+
+Anaerobic methane oxidation remains scientifically incomplete because the old
+model does not identify or budget its electron acceptor. The initial port can
+retain the carbon-only AOM parameterization for parity, but a production claim
+must explicitly state this limitation. Adding sulfate, nitrate, ferric iron,
+or another acceptor would require new state, stoichiometry, parameterization,
+and site data; it must not be inferred from the existing O2-inhibition scalar.
+
+The first 50-year US-MOz AD-spinup integration test demonstrates that this is
+an active calibration blocker rather than only a conceptual caveat. With the
+uncalibrated CLM-SPRUCE reference values, additional methane-system C rose from
+`0.38 gC m-2` after model year 25 to `316.51 gC m-2` after year 50, dominated
+by anaerobic-methanotroph biomass. At year 50, gross CH4 oxidation was
+`1.31e-6 gC m-2 s-1`, versus gross production of only
+`4.13e-10 gC m-2 s-1`, and the atmospheric boundary supplied a net CH4 influx.
+The run remained numerically stable and carbon-conservative, so this result
+specifically flags the unconstrained AOM science and reference parameters.
+Before scientific use, evaluate an explicit electron-acceptor limitation or a
+documented AOM-off configuration and constrain AOM growth, death, yield, and
+CH4 half-saturation against observations. Do not tune transport merely to hide
+this biomass growth.
+
+The shared oxygen budget needs evaluation using observed or credible modeled
+soil O2/redox profiles, nitrification and denitrification rates, and wetting or
+water-table transitions. The current sequential coupling gives standard
+respiration, roots, and nitrification first access to O2 and passes revised O2
+stress to the next ELM timestep. Timestep-sensitivity experiments must show
+that this lag does not control annual CH4 or N cycling. If it does, a more
+tightly coupled O2 solve or bounded subcycling will be needed.
+
+### 19.5 Calibrate transport and hydrologic controls
+
+DOM/acetate diffusivity, the aqueous-gas diffusion multiplier, plant transport
+coefficient, CH4 and H2 thresholds, root e-folding depths, ebullition depth
+scale, saturation threshold, thaw threshold, and plant O2/CO2 factors need to
+be checked against their legacy units and current ELM hydrology. Surface CH4
+must be decomposed into diffusion, ebullition, and aerenchyma components during
+calibration. Water-table position, inundated fraction, ice state, snow and
+surface-water resistance, rooting depth, and plant functional type should be
+validated before modifying reaction kinetics to fix a flux timing error that
+is actually hydrologic or transport-driven.
+
+US-SPR remains the key scientific comparison because it motivated the source
+model, but US-MOz is the simpler integration and parameter-sensitivity site.
+The recommended sequence is: use US-MOz to establish numerical stability,
+budgets, and interpretable production/oxidation behavior; reproduce the
+archived US-SPR configuration; then add independent wetland and upland sites
+that span water-table, temperature, vegetation, and nutrient regimes. A
+site-specific fit at SPRUCE alone is not evidence of transferable parameter
+values.
+
+### 19.6 Required validation experiments and release evidence
+
+Before calibration, the implementation must pass exact restart, timestep
+convergence, C/N/P and revised-carbon closure, nonnegative-state, and long-run
+stability tests with the option both off and on. The disabled path must retain
+the recorded B4B behavior. Enabled runs should include unaccelerated segments
+after AD and final spinup so slow SOM, fast microbial/DOM state, vegetation,
+and nutrients can adjust on compatible clocks.
+
+Scientific evaluation should report at least DOM, bacteria, fungi, litter C,
+SOM1-4, mineral N and solution P, GPP, NPP, HR, NEE, gross CH4 production,
+gross CH4 oxidation, dissolved CH4 and O2 profiles, and net CH4 exchange. For
+the revised backend, production must be split into acetoclastic and
+hydrogenotrophic components and oxidation into aerobic and anaerobic
+components in detailed diagnostic runs, even if routine history stores only
+the gross totals. Seasonal cycles and responses to water-table and temperature
+changes are at least as important as annual means.
+
+Calibration should use parameter priors and an identifiability analysis rather
+than adjusting all microbial and methane coefficients simultaneously. A
+sensible order is: hydrology and transport; microbial decomposition and DOM;
+P stoichiometry and nutrient competition; gross methane production; methane
+oxidation; then net surface exchange. Part of the available site record must be
+withheld for validation, and parameter uncertainty should be propagated to
+soil-C, NEE, and CH4 predictions. The production parameter file must record the
+calibration data, objective functions, priors, posterior or selected values,
+software revision, and validation results. Until these tasks are complete, the
+reference parameter file remains explicitly labeled for testing only.

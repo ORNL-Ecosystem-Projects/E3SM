@@ -148,6 +148,40 @@ class Phase3StateUpdateTest(unittest.TestCase):
         self.assertAlmostEqual(transaction.mineral_n, 0.0)
         self.assertAlmostEqual(transaction.mineral_p, 0.0)
 
+    def test_inherited_negative_solution_p_is_conserved_and_not_worsened(self) -> None:
+        floor = self.parameters["microbe_methane_mfg_biomass_min"]
+        state = State(
+            acetate_methanogen_c=floor,
+            h2_methanogen_c=floor,
+            aerobic_methanotroph_c=floor,
+            anaerobic_methanotroph_c=floor,
+        )
+        inherited_solution_p = -3.15e-8
+        transaction = advance_reaction_layer(
+            dom_c=1.0,
+            dom_n=0.1,
+            dom_p=0.01,
+            mineral_n=0.0,
+            mineral_p=inherited_solution_p,
+            saturated_fraction=0.5,
+            unsaturated_state=state,
+            saturated_state=state,
+            unsaturated_environment=Environment(286.65, 7.0, 0.0, 0.0),
+            saturated_environment=Environment(286.65, 7.0, 0.0, 0.0),
+            parameters=self.parameters,
+            cn_dom=10.0,
+            cp_dom=100.0,
+            dt=1800.0,
+        )
+        self.assertTrue(transaction.valid)
+        self.assertEqual(transaction.mineral_p, inherited_solution_p)
+        self.assertAlmostEqual(transaction.phosphorus_residual, 0.0, places=14)
+        self.assertIn("initial_phosphorus = max(0._r8, dom_p) + mineral_p", self.source)
+        self.assertIn(
+            "transaction%mineral_p >= min(0._r8, mineral_p) - state_tolerance",
+            self.source,
+        )
+
     def test_budget_conversions_have_explicit_units_and_sign(self) -> None:
         fluxes = [2.0e-7, -1.0e-6, 3.0e-7, 4.0e-8]
         self.assertAlmostEqual(surface_carbon_flux(fluxes), CATOMW * 5.0e-7)
