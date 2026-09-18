@@ -296,7 +296,16 @@ def limit_rates(state: State, parameters: Mapping[str, float], dt: float, rates:
         setattr(
             rates,
             rate_name,
-            min(getattr(rates, rate_name), max(0.0, getattr(state, state_name)) / CATOMW / dt),
+            min(
+                getattr(rates, rate_name),
+                max(
+                    0.0,
+                    getattr(state, state_name)
+                    - _p(parameters, "mfg_biomass_min"),
+                )
+                / CATOMW
+                / dt,
+            ),
         )
     return rates
 

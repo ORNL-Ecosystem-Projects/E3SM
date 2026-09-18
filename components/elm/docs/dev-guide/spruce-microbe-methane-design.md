@@ -1,8 +1,10 @@
 # CLM-SPRUCE microbial decomposition and methane integration design
 
 Status: Phase 0 harness and Phases 1-2 implementation complete; Phase 3 Steps
-1-3 implemented on their feature branch. The archived CLM-SPRUCE scientific
-reference required by the Phase 0 gate remains pending.
+1-3 implemented on their feature branch and the Step 4 conservative
+transaction kernel is in progress. The Step 4 ELM adapter and budget wiring
+remain pending. The archived CLM-SPRUCE scientific reference required by the
+Phase 0 gate also remains pending.
 Date: 2026-09-17
 
 ## 1. Executive summary
@@ -614,6 +616,50 @@ exist; either change would combine a numerical-method change with the port.
 After parity, timestep-convergence tests may justify bounded subcycling as a
 separate change.
 
+### 9.6 Step 4 transaction and ELM accounting contract
+
+Step 4 is the boundary between the pure reaction/transport kernels and mutable
+ELM state. It stages a complete candidate update before changing any ELM-owned
+array. For each soil layer the transaction:
+
+1. presents both saturated and unsaturated reaction kernels with the same
+   authoritative bulk DOM concentration;
+2. restricts reactive DOM C to the amount supported by DOM N and P;
+3. area-weights the two reaction tendencies once, with mortality limited
+   proportionally when its return to DOM would require more mineral N or P than
+   is available;
+4. produces paired DOM and mineral N/P tendencies and candidate methane state;
+5. applies acetate and gas transport to candidate state; and
+6. commits all candidate arrays together only after nonnegativity and C/N/P
+   residual checks pass.
+
+The transaction kernel is pure and independent of ELM data types. The ELM
+adapter remains responsible for translating current hydrology, temperature,
+pH, root distribution, atmospheric forcing, layer geometry, DOM C/N/P, and
+mineral N/P into kernel units. It is also responsible for constructing the
+transport boundary terms described in section 9.3.1. DOM continues to use the
+Phase 2 decomposition-cascade transport path; Step 4 transports acetate and
+the four gases and must not transport DOM a second time.
+
+Carbon accounting uses one explicit ledger. DOM is excluded from the revised
+methane storage addition because it is already included in ELM's standard
+decomposition pools. The additional column storage is the area-weighted,
+layer-integrated sum of acetate, the four functional-guild biomasses,
+dissolved CH4-C, and dissolved CO2-C. The matching external loss is the sum of
+the net positive-upward CH4-C and CO2-C surface fluxes. Internal reaction,
+partition exchange, and vertical transport do not enter the external budget.
+The column, gridcell, and monthly C-budget interfaces will receive these
+additional storage and flux terms only when `use_microbe_methane=.true.`;
+disabled-mode calls and arithmetic remain unchanged.
+
+The atmosphere-facing mapping is likewise explicit. Net CH4 surface exchange
+is converted to `kg C m-2 s-1` for `flux_ch4_grc`. Net CO2 surface exchange is
+converted to `g C m-2 s-1` and supplies the revised backend's methane-related
+NEE correction. The adapter must not reuse legacy `CH4Mod`'s production-minus-
+oxidation bookkeeping because those processes are internal transfers in the
+revised carbon ledger. The legacy offline/online atmosphere policy remains an
+outer ELM coupling decision rather than a reaction-kernel concern.
+
 ## 10. Parameters and input data
 
 All parameters used by the enabled feature will be migrated into ELM's standard
@@ -1143,7 +1189,8 @@ Implement Phase 3 as separately reviewable steps:
 3. Conservative saturated/unsaturated repartition and gas transport.
    **Implemented on the Phase 3 feature branch.**
 4. State limiting/commit, ELM C-budget integration, and atmosphere-facing CH4
-   and NEE terms.
+   and NEE terms. **Conservative transaction kernel in progress; ELM adapter,
+   budget calls, and atmosphere wiring remain pending.**
 5. Explicit dispatch at the existing methane call site: select the revised
    backend when `use_microbe_methane=.true.` and the legacy backend otherwise.
    Both implementations remain in the model; neither may execute twice.

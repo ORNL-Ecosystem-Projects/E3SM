@@ -20,6 +20,7 @@ Run focused tests:
 python3 -m unittest -v test_phase3_state.py
 python3 -m unittest -v test_phase3_reactions.py
 python3 -m unittest -v test_phase3_transport.py
+python3 -m unittest -v test_phase3_state_update.py
 ```
 
 `reaction_oracle.py` is an independent scalar implementation used for unit and
@@ -36,6 +37,13 @@ one-area limits, analytic and zero-gradient diffusion, nonnegative donor
 limiting, surface-flux units/signs, and exact inventory closure. Step 3 adds a
 state repartition method but does not call it from `elm_driver.F90`; the ELM
 hydrology adapter, combined state commit, and backend dispatch are later steps.
+
+`state_update_oracle.py` independently exercises the Step 4 transaction
+boundary. Tests require one shared DOM pool across the two area partitions,
+pre-commit C/N/P and mineral-nutrient limiting, preservation of the functional
+biomass floor without post-hoc clipping, and explicit conversions for stored
+carbon, surface CH4, and the CO2 correction. The transaction routines return
+candidate state; the ELM adapter must validate it before committing once.
 
 Starting with the Phase 2 parameter file, add the revised methane variables in
 the Docker environment:

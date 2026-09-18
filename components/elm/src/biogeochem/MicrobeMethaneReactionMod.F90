@@ -244,16 +244,18 @@ contains
     rates%aerobic_acetate_oxidation_c = rates%aerobic_acetate_oxidation_c * scale
     rates%aerobic_methane_oxidation_c = rates%aerobic_methane_oxidation_c * scale
 
-    ! Mortality cannot consume biomass produced in this call. Its carbon is
-    ! returned to DOM when tendencies are assembled.
+    ! Mortality cannot consume biomass produced in this call or the functional
+    ! biomass seed. Reserving the floor here avoids a post-update clamp that
+    ! would create carbon. Mortality carbon is returned to DOM when tendencies
+    ! are assembled.
     rates%acetate_methanogen_mortality_c = min(rates%acetate_methanogen_mortality_c, &
-         gCToMolC(state%acetate_methanogen_c) / dt)
+         gCToMolC(max(0._r8, state%acetate_methanogen_c - parameters%mfg_biomass_min)) / dt)
     rates%h2_methanogen_mortality_c = min(rates%h2_methanogen_mortality_c, &
-         gCToMolC(state%h2_methanogen_c) / dt)
+         gCToMolC(max(0._r8, state%h2_methanogen_c - parameters%mfg_biomass_min)) / dt)
     rates%aerobic_methanotroph_mortality_c = min(rates%aerobic_methanotroph_mortality_c, &
-         gCToMolC(state%aerobic_methanotroph_c) / dt)
+         gCToMolC(max(0._r8, state%aerobic_methanotroph_c - parameters%mfg_biomass_min)) / dt)
     rates%anaerobic_methanotroph_mortality_c = min(rates%anaerobic_methanotroph_mortality_c, &
-         gCToMolC(state%anaerobic_methanotroph_c) / dt)
+         gCToMolC(max(0._r8, state%anaerobic_methanotroph_c - parameters%mfg_biomass_min)) / dt)
   end subroutine limitMicrobeMethaneReactionRates
 
   pure subroutine assembleMicrobeMethaneReactionTendencies(parameters, rates, tendencies)
