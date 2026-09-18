@@ -1,8 +1,9 @@
-# Phase 3 parameter, state, and reaction tests
+# Phase 3 parameter, state, reaction, and transport tests
 
-This directory verifies the revised-methane parameter/state foundation and the
-side-effect-free Step 2 reaction kernel. It supplements CIME; it does not
-replace ELM build, run, or exact-restart tests.
+This directory verifies the revised-methane parameter/state foundation, the
+side-effect-free Step 2 reaction kernel, and the conservative Step 3
+repartition/transport kernels. It supplements CIME; it does not replace ELM
+build, run, or exact-restart tests.
 
 The 64 scalar values in `phase3_reference_parameters.json` are traceable test
 inputs, not a production calibration. Values tagged `clm_spruce_declared_default`
@@ -18,6 +19,7 @@ Run focused tests:
 ```console
 python3 -m unittest -v test_phase3_state.py
 python3 -m unittest -v test_phase3_reactions.py
+python3 -m unittest -v test_phase3_transport.py
 ```
 
 `reaction_oracle.py` is an independent scalar implementation used for unit and
@@ -26,6 +28,14 @@ represented-carbon closure, and confirm that proportional substrate limiting
 cannot drive a state negative over the requested timestep. The Fortran kernel
 is not dispatched by ELM in Step 2; CIME compilation remains the authoritative
 Fortran interface and dependency check.
+
+`transport_oracle.py` independently exercises saturated/unsaturated
+area-transfer repartition, finite-volume vertical diffusion, signed
+aerenchyma exchange, and threshold ebullition. Tests cover the zero- and
+one-area limits, analytic and zero-gradient diffusion, nonnegative donor
+limiting, surface-flux units/signs, and exact inventory closure. Step 3 adds a
+state repartition method but does not call it from `elm_driver.F90`; the ELM
+hydrology adapter, combined state commit, and backend dispatch are later steps.
 
 Starting with the Phase 2 parameter file, add the revised methane variables in
 the Docker environment:

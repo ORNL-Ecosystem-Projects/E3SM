@@ -1,7 +1,6 @@
 module MicrobeMethaneMod
 
   ! State and lifecycle owner for the revised microbial methane backend.
-  ! Phase 3 step 1 adds only parameter, state, history, and restart support.
   ! CH4Mod remains the executing backend until later explicit dispatch work.
   ! DOM, bacteria, and fungi remain authoritative decomposition pools.
 
@@ -44,6 +43,7 @@ module MicrobeMethaneMod
      procedure, private :: InitCold
      procedure, private :: InitHistory
      procedure, private :: ReadParams
+     procedure, public  :: Repartition
      procedure, public  :: Restart
   end type microbe_methane_type
 
@@ -219,6 +219,55 @@ contains
            avgflag='A', long_name=long_name, ptr_col=field, default='inactive')
     end subroutine add_state
   end subroutine InitHistory
+
+  subroutine Repartition(this, bounds, num_soilc, filter_soilc, saturated_fraction)
+    use elm_varpar, only : nlevdecomp
+    use MicrobeGasTransportMod, only : repartitionMicrobeMethaneScalar
+
+    class(microbe_methane_type) :: this
+    type(bounds_type), intent(in) :: bounds
+    integer, intent(in) :: num_soilc
+    integer, intent(in) :: filter_soilc(:)
+    real(r8), intent(in) :: saturated_fraction(bounds%begc:bounds%endc)
+    integer :: c, fc, j
+    real(r8) :: old_fraction, new_fraction
+
+    if (.not. use_microbe_methane) return
+
+    do fc = 1, num_soilc
+       c = filter_soilc(fc)
+       old_fraction = this%sat_fraction_previous_col(c)
+       new_fraction = min(1._r8, max(0._r8, saturated_fraction(c)))
+       do j = 1, nlevdecomp
+          call repartition_pair(this%acetate_c_unsat_col(c,j), this%acetate_c_sat_col(c,j))
+          call repartition_pair(this%acetate_methanogen_c_unsat_col(c,j), &
+               this%acetate_methanogen_c_sat_col(c,j))
+          call repartition_pair(this%h2_methanogen_c_unsat_col(c,j), &
+               this%h2_methanogen_c_sat_col(c,j))
+          call repartition_pair(this%aerobic_methanotroph_c_unsat_col(c,j), &
+               this%aerobic_methanotroph_c_sat_col(c,j))
+          call repartition_pair(this%anaerobic_methanotroph_c_unsat_col(c,j), &
+               this%anaerobic_methanotroph_c_sat_col(c,j))
+          call repartition_pair(this%conc_ch4_unsat_col(c,j), this%conc_ch4_sat_col(c,j))
+          call repartition_pair(this%conc_o2_unsat_col(c,j), this%conc_o2_sat_col(c,j))
+          call repartition_pair(this%conc_co2_unsat_col(c,j), this%conc_co2_sat_col(c,j))
+          call repartition_pair(this%conc_h2_unsat_col(c,j), this%conc_h2_sat_col(c,j))
+       end do
+       this%sat_fraction_previous_col(c) = new_fraction
+    end do
+
+  contains
+    subroutine repartition_pair(unsaturated_concentration, saturated_concentration)
+      real(r8), intent(inout) :: unsaturated_concentration, saturated_concentration
+      real(r8) :: repartitioned_unsaturated, repartitioned_saturated
+
+      call repartitionMicrobeMethaneScalar(old_fraction, new_fraction, &
+           unsaturated_concentration, saturated_concentration, &
+           repartitioned_unsaturated, repartitioned_saturated)
+      unsaturated_concentration = repartitioned_unsaturated
+      saturated_concentration = repartitioned_saturated
+    end subroutine repartition_pair
+  end subroutine Repartition
 
   subroutine Restart(this, bounds, ncid, flag)
     use ncdio_pio, only : ncd_double

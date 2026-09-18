@@ -1,7 +1,7 @@
 # CLM-SPRUCE microbial decomposition and methane integration design
 
 Status: Phase 0 harness and Phases 1-2 implementation complete; Phase 3 Steps
-1-2 implemented on their feature branch. The archived CLM-SPRUCE scientific
+1-3 implemented on their feature branch. The archived CLM-SPRUCE scientific
 reference required by the Phase 0 gate remains pending.
 Date: 2026-09-17
 
@@ -529,6 +529,60 @@ M_total = V_layer * [(1 - f_sat) * C_unsat + f_sat * C_sat]
 Changing `f_sat` must redistribute existing mass; it must not create or destroy
 gas, acetate, DOM, or guild biomass. Handle the zero-area limits without
 division by zero.
+
+#### 9.3.1 Step 3 repartition and transport contract
+
+Step 3 implements repartition and transport as independently testable kernels;
+it does not dispatch the revised backend. For each partitioned acetate, guild,
+or gas concentration, an area-transfer repartition moves the concentration of
+the area that changed class into the receiving partition. If saturated area
+increases from `f_old` to `f_new`, for example:
+
+```text
+C_sat,new = [f_old C_sat,old + (f_new - f_old) C_unsat,old] / f_new
+C_unsat,new = C_unsat,old
+```
+
+The analogous expression mixes saturated concentration into the unsaturated
+partition when saturated area decreases. This exactly preserves
+`(1-f) C_unsat + f C_sat`, including transitions to and from `f=0` and `f=1`.
+DOM remains the single authoritative bulk decomposition pool, so it needs no
+partition remap; its Phase 2 vertical transport remains authoritative.
+
+Vertical transport uses a finite-volume interface-flux calculation that is
+generic over concentration units, and can therefore transport acetate as well
+as all four dissolved gases. ELM supplies layer thickness, effective
+diffusivity, an atmosphere-equivalent upper concentration, and a total surface
+conductance. The upper conductance will include the current ELM-selected
+top-half-layer, snow, ponded-water, and boundary-layer resistances; the lower
+boundary is closed. Internal fluxes are equal-and-opposite interface fluxes.
+For an explicit timestep, every layer's simultaneous outward fluxes are scaled
+by one donor factor if necessary, preventing negative concentration without
+breaking internal conservation.
+
+Aerenchyma is represented as signed, first-order layer-to-atmosphere exchange.
+This permits CH4, CO2, and H2 emission and O2 uptake through the same interface,
+rather than suppressing reverse exchange. Ebullition removes a bounded fraction
+of CH4 above a layer-specific solubility threshold. Its activation input
+combines inundation, thaw state, and depth attenuation. Both kernels report a
+positive-upward surface flux, and the layer-integrated tendency plus that flux
+closes exactly.
+
+The Step 4 ELM adapter will construct effective diffusivities, atmosphere-
+equivalent dissolved concentrations, aerenchyma exchange rates, and ebullition
+activation from current ELM hydrology, temperature, atmospheric forcing, root
+state, and the named parameter-file inputs. Keeping those model-state choices
+outside the pure transport kernel avoids old global pointers and `HUM_HOL`
+branches. It also leaves the unresolved legacy units of `m_dPlantTrans` behind
+an explicit adapter boundary rather than silently treating them as SI units.
+
+Two CLM-SPRUCE behaviors are intentionally not copied. Its inundation update
+moves a fraction of each concentration without enforcing the area-weighted
+inventory, and its vertical diffusion mutates adjacent layers sequentially
+while mixing `1e-3` and `1e-4` metric factors. Step 3 instead uses the
+conservative area-transfer equations and one simultaneous finite-volume flux
+divergence. Golden-vector comparisons must classify these as accounting and
+numerical repairs rather than port regressions.
 
 ### 9.4 Units and conservation
 
@@ -1087,6 +1141,7 @@ Implement Phase 3 as separately reviewable steps:
    with unit and closed-box tests. **Implemented on the Phase 3 feature
    branch.**
 3. Conservative saturated/unsaturated repartition and gas transport.
+   **Implemented on the Phase 3 feature branch.**
 4. State limiting/commit, ELM C-budget integration, and atmosphere-facing CH4
    and NEE terms.
 5. Explicit dispatch at the existing methane call site: select the revised
