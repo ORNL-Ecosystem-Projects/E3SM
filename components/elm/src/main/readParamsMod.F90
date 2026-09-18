@@ -81,6 +81,7 @@ contains
     use DecompCascadeBGCMod    , only : readDecompBGCParams
     use DecompCascadeCNMod     , only : readDecompCNParams
     use MicrobeDecompMod       , only : readMicrobeDecompParams
+    use MicrobeMethaneParamsMod, only : readMicrobeMethaneParams
     use PhenologyMod             , only : readPhenolParams
     use CNPhenologyBeTRMod       , only : readCNPhenolBeTRParams
     use MaintenanceRespMod               , only : readMaintenanceRespParams
@@ -140,6 +141,7 @@ contains
             call readDecompCNParams(ncid)
             if (use_microbe_methane) then
                call readMicrobeDecompParams(ncid)
+               call readMicrobeMethaneParams(ncid)
             end if
          end if
        

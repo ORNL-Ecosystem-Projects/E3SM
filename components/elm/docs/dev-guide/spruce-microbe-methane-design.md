@@ -1,6 +1,8 @@
 # CLM-SPRUCE microbial decomposition and methane integration design
 
-Status: proposed design; no implementation has begun
+Status: Phase 0 harness and Phases 1-2 implementation complete; Phase 3 Step 1
+implemented on its feature branch. The archived CLM-SPRUCE scientific reference
+required by the Phase 0 gate remains pending.
 Date: 2026-09-17
 
 ## 1. Executive summary
@@ -672,6 +674,92 @@ factors are documented constants, not calibration parameters. Site-specific
 `HUM_HOL` layer geometry, lateral-exchange literals, and hard-coded SPRUCE grid
 indices are deliberately excluded because that hydrology is not being ported.
 
+#### 10.3.1 Phase 3 Step 1 standard parameter-file names
+
+Step 1 freezes 64 active bulk-model inputs under a
+`microbe_methane_` namespace and reads them through ELM's existing `paramfile`
+path only when `use_microbe_methane=.true.`. This avoids collisions with the
+legacy `CH4Mod` variables and allows both backends to remain supported. The
+exact inventory is:
+
+- initialization and acetate production:
+  `microbe_methane_mfg_biomass_min`, `microbe_methane_k_acetate`,
+  `microbe_methane_acetate_prod_max`,
+  `microbe_methane_k_acetate_prod_o2`,
+  `microbe_methane_dom_to_acetate_q10`;
+- acetogenesis:
+  `microbe_methane_acetogenesis_max`,
+  `microbe_methane_k_acetogenesis_h2`,
+  `microbe_methane_k_acetogenesis_co2`,
+  `microbe_methane_acetogenesis_q10`;
+- hydrogenotrophic methanogens:
+  `microbe_methane_h2_methanogen_growth_rate`,
+  `microbe_methane_h2_methanogen_death_rate`,
+  `microbe_methane_h2_methanogen_yield`,
+  `microbe_methane_k_h2_methanogenesis_h2`,
+  `microbe_methane_k_h2_methanogenesis_co2`,
+  `microbe_methane_h2_methanogenesis_q10`,
+  `microbe_methane_h2_methanogenesis_co2_inhibition_scale`;
+- acetoclastic methanogens:
+  `microbe_methane_acetate_methanogen_growth_rate`,
+  `microbe_methane_acetate_methanogen_death_rate`,
+  `microbe_methane_acetate_methanogen_yield`,
+  `microbe_methane_k_acetoclastic_methanogenesis_acetate`,
+  `microbe_methane_acetoclastic_methanogenesis_q10`,
+  `microbe_methane_acetoclastic_methanogenesis_ch4_yield`;
+- aerobic methanotrophs and oxidation:
+  `microbe_methane_aerobic_methanotroph_growth_rate`,
+  `microbe_methane_aerobic_methanotroph_death_rate`,
+  `microbe_methane_aerobic_methanotroph_yield`,
+  `microbe_methane_k_aerobic_oxidation_ch4`,
+  `microbe_methane_k_aerobic_oxidation_o2`,
+  `microbe_methane_aerobic_oxidation_q10`,
+  `microbe_methane_aerobic_oxidation_o2_ch4_ratio`,
+  `microbe_methane_aerobic_decomp_o2_c_ratio`,
+  `microbe_methane_aerobic_acetate_oxidation_rate`;
+- anaerobic methanotrophs and oxidation:
+  `microbe_methane_anaerobic_methanotroph_growth_rate`,
+  `microbe_methane_anaerobic_methanotroph_death_rate`,
+  `microbe_methane_anaerobic_methanotroph_yield`,
+  `microbe_methane_k_anaerobic_oxidation_ch4`,
+  `microbe_methane_anaerobic_oxidation_q10`,
+  `microbe_methane_aom_o2_inhibition_scale`;
+- pH, saturation, temperature, and moisture controls:
+  `microbe_methane_ph_min`, `microbe_methane_ph_max`,
+  `microbe_methane_ph_opt`, `microbe_methane_acetate_ph_trigger`,
+  `microbe_methane_acidification_coefficient`,
+  `microbe_methane_acetate_feedback_half_saturation`,
+  `microbe_methane_soil_water_potential_min`,
+  `microbe_methane_saturation_reaction_threshold`,
+  `microbe_methane_reaction_t_ref`, `microbe_methane_aom_t_ref`;
+- diffusion, plant transport, and ebullition:
+  `microbe_methane_dom_diffusivity`,
+  `microbe_methane_aqueous_gas_diffusion_multiplier`,
+  `microbe_methane_plant_transport_coefficient`,
+  `microbe_methane_h2_plant_transport_threshold`,
+  `microbe_methane_ch4_transport_threshold`,
+  `microbe_methane_ch4_h2_root_efold_depth`,
+  `microbe_methane_o2_root_efold_depth`,
+  `microbe_methane_ebullition_efold_depth`,
+  `microbe_methane_transport_thaw_threshold`,
+  `microbe_methane_plant_o2_consumption_fraction`,
+  `microbe_methane_plant_co2_flux_fraction`,
+  `microbe_methane_aqueous_diffusion_t_ref`,
+  `microbe_methane_aqueous_diffusion_temperature_exponent`;
+- atmospheric fallback boundary values:
+  `microbe_methane_atmospheric_ch4_mixing_ratio`,
+  `microbe_methane_atmospheric_o2_mixing_ratio`,
+  `microbe_methane_atmospheric_co2_mixing_ratio`, and
+  `microbe_methane_atmospheric_h2_mixing_ratio`.
+
+The versioned reference manifest records the legacy identifier, value, units,
+and provenance of every name. It is an injection and integration-test fixture,
+not a production calibration. In particular, legacy kinetic units still need
+the archived-run audit. Step 1 resolves two unambiguous source defects:
+`aom_t_ref=286.65 K` replaces a 13.5-Celsius literal used against Kelvin state,
+and `transport_thaw_threshold=273.05 K` replaces a -0.1-Celsius literal used
+against Kelvin state. C13 fractionation inputs remain deferred to Phase 5.
+
 ### 10.4 Parameters already owned by ELM
 
 The enabled modules also consume ordinary ELM parameter/state inputs such as
@@ -771,8 +859,11 @@ Add one instance to `elm_instMod` whose lifecycle mirrors current ELM types:
 - `ReadParams` conditionally from the standard ELM parameter file.
 
 Legacy `ch4_vars%InitHistory`, `InitCold`, and `Restart` remain selected for
-`use_lch4 .and. .not. use_microbe_methane`. Its allocation behavior need not be
-refactored during this work.
+`use_lch4 .and. .not. use_microbe_methane` in the final dispatch. During Phase
+3 Steps 1-4, the established lifecycle continues to run when `use_lch4` is true
+because it still supplies the Phase 2 oxygen/anoxia bridge. Step 5 makes the two
+executing backends exclusive without removing the legacy implementation or its
+namelist capability.
 
 ### 11.2 Restart compatibility
 
@@ -921,16 +1012,29 @@ closed-box tests. For site integration, the established methane backend is
 fully initialized and continues to own its state, history, restart, gas
 transport, and oxygen/anoxia coupling while the microbial cascade supplies the
 generic decomposition respiration inputs. Phase 3 replaces this bridge with
-the revised backend. Site runs with the test parameter manifest are integration
+the revised backend only when `use_microbe_methane=.true.`; the established
+`CH4Mod` path remains a permanent supported capability when the option is
+false. Site runs with the test parameter manifest are integration
 evidence only; unverified PFT values and CNP-only assumptions still require
 recovery or science-owner approval before production use.
 
 ### Phase 3: bulk revised methane
 
-- Add acetate, functional guilds, reaction tendencies, partitioning, and gas
-  transport.
-- Call the backend once at the existing methane dispatch location.
-- Publish current ELM methane/NEE exchange and balance terms.
+Implement Phase 3 as separately reviewable steps:
+
+1. Parameter and state foundation: conditionally read the 64 named variables
+   from the standard ELM parameter file; allocate saturated/unsaturated acetate,
+   four functional-guild, and four dissolved-gas states; add cold-start,
+   inactive-by-default history fields, and complete restart I/O. Keep legacy
+   `CH4Mod` dispatch unchanged. **Implemented on the Phase 3 Step 1 branch.**
+2. Standalone reaction kernel: compute named tendencies without mutating state,
+   with unit and closed-box tests.
+3. Conservative saturated/unsaturated repartition and gas transport.
+4. State limiting/commit, ELM C-budget integration, and atmosphere-facing CH4
+   and NEE terms.
+5. Explicit dispatch at the existing methane call site: select the revised
+   backend when `use_microbe_methane=.true.` and the legacy backend otherwise.
+   Both implementations remain in the model; neither may execute twice.
 
 Gate: golden-vector process parity, closed-box conservation, exact restart, and
 short SPRUCE integration tests pass.

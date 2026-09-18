@@ -16,6 +16,7 @@ module restFileMod
   use histFileMod          , only : hist_restart_ncd
   use elm_varpar           , only : crop_prog
   use elm_varctl           , only : use_cn, use_c13, use_c14, use_lch4, use_fates, use_betr
+  use elm_varctl           , only : use_microbe_methane
   use elm_varctl           , only : use_erosion
   use elm_varctl           , only : create_glacier_mec_landunit, iulog 
   use elm_varcon           , only : c13ratio, c14ratio
@@ -64,6 +65,7 @@ module restFileMod
   use VegetationDataType   , only : veg_ns, veg_nf
   use VegetationDataType   , only : veg_ps, veg_pf
   use GridcellDataType     , only : grc_cs, grc_ws 
+  use elm_instMod          , only : microbe_methane_vars
   
   !
   ! !PUBLIC TYPES:
@@ -235,6 +237,9 @@ contains
     if (use_lch4) then
        call ch4_vars%restart(bounds, ncid, flag='define')
     end if
+    if (use_microbe_methane) then
+       call microbe_methane_vars%Restart(bounds, ncid, flag='define')
+    end if
 
 
     if (use_cn .or. use_fates) then
@@ -370,6 +375,9 @@ contains
 
     if (use_lch4) then
        call ch4_vars%restart(  bounds, ncid, flag='write' )
+    end if
+    if (use_microbe_methane) then
+       call microbe_methane_vars%Restart(bounds, ncid, flag='write')
     end if
 
     if (use_cn .or. use_fates) then
@@ -597,6 +605,9 @@ contains
 
     if (use_lch4) then
        call ch4_vars%restart(  bounds, ncid, flag='read' )
+    end if
+    if (use_microbe_methane) then
+       call microbe_methane_vars%Restart(bounds, ncid, flag='read')
     end if
 
     if (use_cn .or. use_fates) then

@@ -204,7 +204,9 @@ class Phase2CascadeTest(unittest.TestCase):
         self.assertNotIn("use_lch4 .and. .not. use_microbe_methane", ch4_source)
         self.assertIn("if (use_lch4) then", read_params_source)
         self.assertNotIn("use_lch4 .and. .not. use_microbe_methane", read_params_source)
-        self.assertNotIn("microbe_methane_vars%Restart", restart_source)
+        # Phase 3 adds its independent state lifecycle while preserving the
+        # established backend as a permanent capability.
+        self.assertIn("microbe_methane_vars%Restart", restart_source)
         self.assertIn("call ch4_vars%restart", restart_source)
 
     def test_parameter_file_injection_round_trip(self) -> None:
