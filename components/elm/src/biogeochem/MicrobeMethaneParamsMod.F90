@@ -248,20 +248,22 @@ contains
     call require_positive('acetogenesis_q10', MicrobeMethaneParamsInst%acetogenesis_q10)
     call require_nonnegative('h2_methanogen_growth_rate', MicrobeMethaneParamsInst%h2_methanogen_growth_rate)
     call require_nonnegative('h2_methanogen_death_rate', MicrobeMethaneParamsInst%h2_methanogen_death_rate)
-    call require_fraction('h2_methanogen_yield', MicrobeMethaneParamsInst%h2_methanogen_yield)
+    call require_positive_fraction('h2_methanogen_yield', MicrobeMethaneParamsInst%h2_methanogen_yield)
     call require_nonnegative('acetate_methanogen_growth_rate', MicrobeMethaneParamsInst%acetate_methanogen_growth_rate)
     call require_nonnegative('acetate_methanogen_death_rate', MicrobeMethaneParamsInst%acetate_methanogen_death_rate)
-    call require_fraction('acetate_methanogen_yield', MicrobeMethaneParamsInst%acetate_methanogen_yield)
+    call require_positive_fraction('acetate_methanogen_yield', MicrobeMethaneParamsInst%acetate_methanogen_yield)
     call require_nonnegative('aerobic_methanotroph_growth_rate', &
          MicrobeMethaneParamsInst%aerobic_methanotroph_growth_rate)
     call require_nonnegative('aerobic_methanotroph_death_rate', &
          MicrobeMethaneParamsInst%aerobic_methanotroph_death_rate)
-    call require_fraction('aerobic_methanotroph_yield', MicrobeMethaneParamsInst%aerobic_methanotroph_yield)
+    call require_positive_fraction('aerobic_methanotroph_yield', &
+         MicrobeMethaneParamsInst%aerobic_methanotroph_yield)
     call require_nonnegative('anaerobic_methanotroph_growth_rate', &
          MicrobeMethaneParamsInst%anaerobic_methanotroph_growth_rate)
     call require_nonnegative('anaerobic_methanotroph_death_rate', &
          MicrobeMethaneParamsInst%anaerobic_methanotroph_death_rate)
-    call require_fraction('anaerobic_methanotroph_yield', MicrobeMethaneParamsInst%anaerobic_methanotroph_yield)
+    call require_positive_fraction('anaerobic_methanotroph_yield', &
+         MicrobeMethaneParamsInst%anaerobic_methanotroph_yield)
     call require_positive('dom_to_acetate_q10', MicrobeMethaneParamsInst%dom_to_acetate_q10)
     call require_positive('k_h2_methanogenesis_h2', MicrobeMethaneParamsInst%k_h2_methanogenesis_h2)
     call require_positive('k_h2_methanogenesis_co2', MicrobeMethaneParamsInst%k_h2_methanogenesis_co2)
@@ -351,6 +353,15 @@ contains
        call parameter_error(trim(name)//' must be in [0,1]')
     end if
   end subroutine require_fraction
+
+  subroutine require_positive_fraction(name, value)
+    character(len=*), intent(in) :: name
+    real(r8), intent(in) :: value
+    call require_finite(name, value)
+    if (value <= 0._r8 .or. value > 1._r8) then
+       call parameter_error(trim(name)//' must be in (0,1]')
+    end if
+  end subroutine require_positive_fraction
 
   subroutine parameter_error(message)
     character(len=*), intent(in) :: message

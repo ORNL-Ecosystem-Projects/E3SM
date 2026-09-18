@@ -1,8 +1,8 @@
 # CLM-SPRUCE microbial decomposition and methane integration design
 
-Status: Phase 0 harness and Phases 1-2 implementation complete; Phase 3 Step 1
-implemented on its feature branch. The archived CLM-SPRUCE scientific reference
-required by the Phase 0 gate remains pending.
+Status: Phase 0 harness and Phases 1-2 implementation complete; Phase 3 Steps
+1-2 implemented on their feature branch. The archived CLM-SPRUCE scientific
+reference required by the Phase 0 gate remains pending.
 Date: 2026-09-17
 
 ## 1. Executive summary
@@ -455,6 +455,62 @@ inside the methane type.
 Each process returns named tendencies. Substrate limiting is applied to the set
 of competing tendencies before any state is changed. All pools must remain
 nonnegative without post-hoc clipping that loses mass.
+
+#### 9.2.1 Step 2 reaction-kernel contract
+
+The Step 2 kernel is a pure, scalar, one-layer calculation. Inputs are immutable
+and use `g C m-3 soil` for DOM, acetate, and functional guilds; dissolved gases
+use `mol gas m-3`. Outputs are named per-second tendencies in the corresponding
+units plus carbon-basis process rates in `mol C m-3 s-1`. Hydrology supplies
+bounded DOM-fermentation and aerobic-acetate-oxidation scalars; defining those
+scalars and applying the kernel across saturated/unsaturated state belongs to
+Steps 3-4.
+
+For a process extent `R`, the implemented carbon and gas stoichiometry is:
+
+- DOM fermentation: `-1.5 DOM-C + 1 acetate-C + 0.5 CO2 + 1/6 H2`;
+- acetogenesis: `-1 CO2-C - 2 H2 + 1 acetate-C`;
+- acetoclastic methanogenesis: acetate-C is divided between guild growth and
+  the non-biomass remainder, with the named CH4 yield dividing that remainder
+  between CH4 and CO2;
+- hydrogenotrophic methanogenesis: `4 H2` produces one CH4-C, while an
+  additional `y_H2` CO2-C supplies the explicitly represented biomass growth;
+- aerobic methane oxidation: consumed CH4-C is divided between methanotroph
+  growth and CO2, with the named O2:CH4 ratio applied to the full CH4 uptake;
+- anaerobic methane oxidation: consumed CH4-C is divided between anaerobic
+  methanotroph growth and CO2; and
+- each guild's mortality carbon returns to DOM.
+
+All four guild yields are interpreted consistently as biomass-C per
+carbon-substrate process extent. For hydrogenotrophic methanogenesis, the
+extent is CH4-C production, so applying `y_H2` makes the named growth-rate
+parameter the maximum specific biomass growth rate. The kernel does not retain
+CLM-SPRUCE's additional factor of four in hydrogenotroph biomass growth; that
+source behavior is recorded as an explicit golden-vector review point.
+
+Water and functional-guild H/O are not state variables, and CLM-SPRUCE does not
+identify an electron acceptor for anaerobic methane oxidation. The kernel can
+therefore close represented carbon and expose gas stoichiometric demands, but
+cannot claim a complete H/O atom budget for biomass synthesis or AOM until
+those missing constituents are specified.
+
+The legacy equations contain several unambiguous accounting defects that are
+not reproduced: full substrate product plus biomass growth creates carbon,
+guild mortality deletes carbon, the above-water-table acetate-oxidation sign
+creates O2, and acetogenesis limits on hydrogenotrophic methanogen biomass where
+the parameter and documented equation identify CO2. Step 2 instead partitions
+substrate carbon with the named yields, returns mortality carbon to DOM, consumes
+O2 during aerobic acetate oxidation, and limits acetogenesis with dissolved CO2
+rather than methanogen biomass. These changes mean the kernel intentionally
+does not reproduce those carbon leaks in raw CLM-SPRUCE vectors.
+
+Potential rates are computed first. A separate pure limiter then stages DOM
+conversion; competing H2/CO2 consumers; competing acetate consumers; competing
+CH4 consumers; and competing O2 consumers. Each competing group is scaled
+proportionally to available substrate over the requested timestep. A final
+pure assembly routine converts the limited process rates to tendencies. State
+mutation, saturation repartition, transport, and ELM budget commits remain out
+of scope for Step 2.
 
 ### 9.3 Gas transport
 
@@ -1028,7 +1084,8 @@ Implement Phase 3 as separately reviewable steps:
    inactive-by-default history fields, and complete restart I/O. Keep legacy
    `CH4Mod` dispatch unchanged. **Implemented on the Phase 3 Step 1 branch.**
 2. Standalone reaction kernel: compute named tendencies without mutating state,
-   with unit and closed-box tests.
+   with unit and closed-box tests. **Implemented on the Phase 3 feature
+   branch.**
 3. Conservative saturated/unsaturated repartition and gas transport.
 4. State limiting/commit, ELM C-budget integration, and atmosphere-facing CH4
    and NEE terms.
