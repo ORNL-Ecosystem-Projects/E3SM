@@ -2,9 +2,9 @@
 
 This directory verifies the revised-methane parameter/state foundation, the
 side-effect-free Step 2 reaction kernel, the conservative Step 3
-repartition/transport kernels, and the Step 4 ELM adapter and accounting
-interfaces. It supplements CIME; it does not replace ELM build, run, or
-exact-restart tests.
+repartition/transport kernels, the Step 4 ELM adapter and accounting
+interfaces, and the Step 5 mutually exclusive backend dispatch. It supplements
+CIME; it does not replace ELM build, run, or exact-restart tests.
 
 The 64 scalar values in `phase3_reference_parameters.json` are traceable test
 inputs, not a production calibration. Values tagged `clm_spruce_declared_default`
@@ -36,7 +36,8 @@ Fortran interface and dependency check.
 area-transfer repartition, finite-volume vertical diffusion, signed
 aerenchyma exchange, and threshold ebullition. Tests cover the zero- and
 one-area limits, analytic and zero-gradient diffusion, nonnegative donor
-limiting, surface-flux units/signs, and exact inventory closure.
+limiting, monotone relaxation toward aerenchyma equilibrium, surface-flux
+units/signs, and exact inventory closure.
 
 `state_update_oracle.py` independently exercises the Step 4 transaction
 boundary. Tests require one shared DOM pool across the two area partitions,
@@ -46,8 +47,16 @@ carbon, surface CH4, and the CO2 correction. The transaction routines return
 candidate state. The Step 4 adapter gathers ELM decomposition, nutrient,
 hydrology, temperature, root, atmosphere, snow, and pond state; validates the
 complete column; and commits state and budget diagnostics once. Its interfaces
-are not called by `elm_driver.F90` yet: Step 5 will select revised methane or
-the retained legacy `CH4Mod` backend from the namelist option.
+are called by `elm_driver.F90` only when `use_microbe_methane=.true.`; otherwise
+the retained legacy `CH4Mod` call is unchanged. Revised CH4 and CO2 surface
+fluxes feed the established atmosphere fields, and revised storage plus surface
+carbon exchange feed the opt-in balance and monthly-budget arguments. Potential
+nitrification is limited by revised O2 availability, and actual nitrification
+consumes revised O2 before methane reactions.
+The adapter constructs column root fractions directly from patch state because
+the retained legacy solver is not dispatched, and all inactive revised state
+is initialized to finite zero so standard single-precision history output is
+safe.
 
 Starting with the Phase 2 parameter file, add the revised methane variables in
 the Docker environment:

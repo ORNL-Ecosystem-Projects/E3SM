@@ -10,7 +10,8 @@ module NitrifDenitrifMod
   use elm_varpar          , only : nlevgrnd,nlevdecomp
   use elm_varcon          , only : rpi, denh2o, dzsoi, zisoi, grav
   use elm_varcon          , only : d_con_g, d_con_w, spval, secspday
-  use elm_varctl          , only : use_lch4, iulog
+  use elm_varctl          , only : use_lch4, use_microbe_methane, iulog
+  use timeinfoMod         , only : dtime_mod
   use abortutils          , only : endrun
   use decompMod           , only : bounds_type
   use SoilStatetype       , only : soilstate_type
@@ -154,6 +155,7 @@ contains
     real(r8) :: anaerobic_frac_sat, r_psi_sat, r_min_sat ! scalar values in sat portion for averaging
     real(r8) :: organic_max              ! organic matter content (kg/m3) where
                                          ! soil is assumed to act like peat
+    real(r8) :: bulk_o2_available_rate   ! revised-model O2 supply (mol O2/m3/s)
     !character(len=32) :: subname='nitrif_denitrif' ! subroutine name
     !-----------------------------------------------------------------------
 
@@ -323,6 +325,17 @@ contains
             if ( t_soisno(c,j) <= SHR_CONST_TKFRZ .and. no_frozen_nitrif_denitrif) then
                pot_f_nit_vr(c,j) = 0._r8
             endif
+
+            if (use_microbe_methane) then
+               ! Revised methane owns the prognostic O2 inventory. Limit
+               ! nitrification to the bulk saturated/unsaturated O2 that can
+               ! be consumed this timestep (2 mol O2 per mol N nitrified).
+               bulk_o2_available_rate = ((1._r8 - finundated(c)) * &
+                    max(0._r8, conc_o2_unsat(c,j)) + finundated(c) * &
+                    max(0._r8, conc_o2_sat(c,j))) / dtime_mod
+               pot_f_nit_vr(c,j) = min(pot_f_nit_vr(c,j), &
+                    bulk_o2_available_rate * 14._r8 / 2._r8)
+            end if
 
 
             !---------------- denitrification

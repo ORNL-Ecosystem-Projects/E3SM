@@ -12,7 +12,8 @@ module lnd2atmMod
   use shr_fan_mod          , only : shr_fan_to_atm
   use elm_varpar           , only : numrad, ndst, nlevgrnd, nlevsno, nlevsoi !ndst = number of dust bins.
   use elm_varcon           , only : rair, grav, cpair, hfus, tfrz, spval
-  use elm_varctl           , only : iulog, use_c13, use_cn, use_lch4, use_voc, use_fates, use_atm_downscaling_to_topunit, use_fan
+  use elm_varctl           , only : iulog, use_c13, use_cn, use_lch4, use_microbe_methane
+  use elm_varctl           , only : use_voc, use_fates, use_atm_downscaling_to_topunit, use_fan
   use elm_varctl           , only : use_lnd_rof_two_way, use_finetop_rad
   use tracer_varcon        , only : is_active_betr_bgc
   use seq_drydep_mod   , only : n_drydep, drydep_method, DD_XLND
@@ -21,6 +22,7 @@ module lnd2atmMod
   use lnd2atmType          , only : lnd2atm_type
   use atm2lndType          , only : atm2lnd_type
   use CH4Mod               , only : ch4_type
+  use MicrobeMethaneMod    , only : microbe_methane_type
   use DUSTMod              , only : dust_type
   use DryDepVelocity       , only : drydepvel_type
   use VocEmissionMod       , only : vocemis_type
@@ -226,7 +228,7 @@ contains
        atm2lnd_vars, surfalb_vars, frictionvel_vars, &
        energyflux_vars, &
        solarabs_vars, drydepvel_vars, &
-       vocemis_vars, dust_vars, ch4_vars, soilhydrology_vars, &
+       vocemis_vars, dust_vars, ch4_vars, microbe_methane_vars, soilhydrology_vars, &
        sedflux_vars, lnd2atm_vars)
     !
     ! !DESCRIPTION:
@@ -247,6 +249,7 @@ contains
     type(vocemis_type)     , intent(in)     :: vocemis_vars
     type(dust_type)        , intent(in)     :: dust_vars
     type(ch4_type)         , intent(in)     :: ch4_vars
+    type(microbe_methane_type), intent(in)  :: microbe_methane_vars
     type(soilhydrology_type), intent(in)    :: soilhydrology_vars
     type(sedflux_type)     , intent(in)     :: sedflux_vars
     type(lnd2atm_type)     , intent(inout)  :: lnd2atm_vars
@@ -395,6 +398,15 @@ contains
          eflx_lh_tot_grc(bounds%begg:bounds%endg)      , &
          p2c_scale_type=unity, c2l_scale_type= urbanf, l2g_scale_type=unity)
 
+    if (use_microbe_methane) then
+       ! The revised backend diagnoses its carbon-conserving CO2 correction
+       ! directly.  Keep ch4offline policy in the existing NEE block below.
+       call c2g(bounds, &
+            microbe_methane_vars%surface_co2_flux_col(bounds%begc:bounds%endc), &
+            lnd2atm_vars%nem_grc(bounds%begg:bounds%endg), &
+            c2l_scale_type=unity, l2g_scale_type=unity)
+    end if
+
     if (use_cn .or. use_fates) then
        call c2g(bounds, &
             nee    (bounds%begc:bounds%endc)   , &
@@ -446,10 +458,17 @@ contains
 
     ! ch4 flux
     if (use_lch4 .and. (.not. is_active_betr_bgc)) then
-       call c2g( bounds,     &
-            ch4_surf_flux_tot_col(bounds%begc:bounds%endc) , &
-            flux_ch4_grc         (bounds%begg:bounds%endg) , &
-            c2l_scale_type= unity, l2g_scale_type=unity )
+       if (use_microbe_methane) then
+          call c2g(bounds, &
+               microbe_methane_vars%surface_ch4_flux_col(bounds%begc:bounds%endc), &
+               flux_ch4_grc(bounds%begg:bounds%endg), &
+               c2l_scale_type=unity, l2g_scale_type=unity)
+       else
+          call c2g(bounds, &
+               ch4_surf_flux_tot_col(bounds%begc:bounds%endc), &
+               flux_ch4_grc(bounds%begg:bounds%endg), &
+               c2l_scale_type=unity, l2g_scale_type=unity)
+       end if
     end if
 
     ! nh3 flux

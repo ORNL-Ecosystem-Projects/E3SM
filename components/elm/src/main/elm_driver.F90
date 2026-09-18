@@ -13,7 +13,7 @@ module elm_driver
   use shr_log_mod            , only : errMsg => shr_log_errMsg
   use elm_varpar             , only : nlevtrc_soil, nlevsoi
   use elm_varctl             , only : wrtdia, iulog, create_glacier_mec_landunit, use_fates, use_betr, use_firn_percolation_and_compaction
-  use elm_varctl             , only : use_cn, use_lch4, use_voc, use_noio, use_c13, use_c14
+  use elm_varctl             , only : use_cn, use_lch4, use_microbe_methane, use_voc, use_noio, use_c13, use_c14
   use elm_varctl             , only : use_erosion, use_fates_sp, use_fan
   use elm_varctl             , only : iac_present
   use elm_varctl             , only : mpi_sync_nstep_freq
@@ -98,7 +98,7 @@ module elm_driver
   use DaylengthMod           , only : UpdateDaylength
   use perf_mod
   !
-  use elm_instMod            , only : ch4_vars, ep_betr
+  use elm_instMod            , only : ch4_vars, microbe_methane_vars, ep_betr
   use elm_instMod            , only : carbonstate_vars, c13_carbonstate_vars, c14_carbonstate_vars
   use elm_instMod            , only : carbonflux_vars, c13_carbonflux_vars, c14_carbonflux_vars
   use elm_instMod            , only : nitrogenstate_vars
@@ -444,7 +444,12 @@ contains
           call col_ps%Summary(bounds_clump, &
                filter(nc)%num_soilc, filter(nc)%soilc)
 
-          call BeginGridCBalance(bounds_clump, col_cs, grc_cs)
+          if (use_microbe_methane) then
+             call BeginGridCBalance(bounds_clump, col_cs, grc_cs, &
+                  additional_carbon_col=microbe_methane_vars%additional_carbon_col)
+          else
+             call BeginGridCBalance(bounds_clump, col_cs, grc_cs)
+          end if
           call BeginGridNBalance(bounds_clump, col_ns, grc_ns)
           call BeginGridPBalance(bounds_clump, col_ps, grc_ps)
 
@@ -516,9 +521,16 @@ contains
              call col_ps%Summary(bounds_clump, &
                   filter(nc)%num_soilc, filter(nc)%soilc)
 
-             call EndGridCBalanceAfterDynSubgridDriver(bounds_clump, &
-                  filter(nc)%num_soilc, filter(nc)%soilc, &
-                  col_cs, grc_cs, grc_cf)
+             if (use_microbe_methane) then
+                call EndGridCBalanceAfterDynSubgridDriver(bounds_clump, &
+                     filter(nc)%num_soilc, filter(nc)%soilc, &
+                     col_cs, grc_cs, grc_cf, &
+                     additional_carbon_col=microbe_methane_vars%additional_carbon_col)
+             else
+                call EndGridCBalanceAfterDynSubgridDriver(bounds_clump, &
+                     filter(nc)%num_soilc, filter(nc)%soilc, &
+                     col_cs, grc_cs, grc_cf)
+             end if
 
              call EndGridNBalanceAfterDynSubgridDriver(bounds_clump, &
                   filter(nc)%num_soilc, filter(nc)%soilc, &
@@ -595,9 +607,14 @@ contains
                filter(nc)%num_soilc, filter(nc)%soilc)
           call col_ps%Summary(bounds_clump, &
                filter(nc)%num_soilc, filter(nc)%soilc)
-          call BeginColCBalance(bounds_clump, &
-               filter(nc)%num_soilc, filter(nc)%soilc, &
-               col_cs)
+          if (use_microbe_methane) then
+             call BeginColCBalance(bounds_clump, &
+                  filter(nc)%num_soilc, filter(nc)%soilc, col_cs, &
+                  additional_carbon_col=microbe_methane_vars%additional_carbon_col)
+          else
+             call BeginColCBalance(bounds_clump, &
+                  filter(nc)%num_soilc, filter(nc)%soilc, col_cs)
+          end if
           call BeginColNBalance(bounds_clump, &
                filter(nc)%num_soilc, filter(nc)%soilc, &
                col_ns)
@@ -1205,8 +1222,17 @@ contains
           call ep_betr%StepWithoutDrainage(bounds_clump, col_pp, veg_pp)
        endif  !end use_betr
 
-       if (use_lch4 .and. .not. is_active_betr_bgc) then
-          !warning: do not call ch4 before AnnualUpdate, which will fail the ch4 model
+       if (use_lch4 .and. .not. is_active_betr_bgc .and. use_microbe_methane) then
+          ! Do not call either methane backend before AnnualUpdate.
+          call t_startf('microbe_methane')
+          call microbe_methane_vars%Advance(bounds_clump, &
+               filter(nc)%num_soilc, filter(nc)%soilc, dtime_mod, &
+               atm2lnd_vars, col_es, col_ws, chemstate_vars, soilstate_vars, &
+               soilhydrology_vars, ch4_vars%grnd_ch4_cond_patch, &
+               ch4_vars, col_cs, col_cf, col_ns, col_nf, col_ps)
+          call t_stopf('microbe_methane')
+       else if (use_lch4 .and. .not. is_active_betr_bgc) then
+          ! Warning: do not call CH4 before AnnualUpdate, which will fail the legacy model.
           call t_startf('ch4')
           call CH4 (bounds_clump,                                                                  &
                filter(nc)%num_soilc, filter(nc)%soilc,                                             &
@@ -1355,9 +1381,17 @@ contains
 
           call t_startf('cnbalchk')
 
-          call ColCBalanceCheck(bounds_clump, &
-               filter(nc)%num_soilc, filter(nc)%soilc, &
-               col_cs, col_cf, soilstate_vars)
+          if (use_microbe_methane) then
+             call ColCBalanceCheck(bounds_clump, &
+                  filter(nc)%num_soilc, filter(nc)%soilc, &
+                  col_cs, col_cf, soilstate_vars, &
+                  additional_carbon_col=microbe_methane_vars%additional_carbon_col, &
+                  surface_carbon_flux_col=microbe_methane_vars%surface_carbon_flux_col)
+          else
+             call ColCBalanceCheck(bounds_clump, &
+                  filter(nc)%num_soilc, filter(nc)%soilc, &
+                  col_cs, col_cf, soilstate_vars)
+          end if
 
           call ColNBalanceCheck(bounds_clump, &
                filter(nc)%num_soilc, filter(nc)%soilc, &
@@ -1367,7 +1401,13 @@ contains
                filter(nc)%num_soilc, filter(nc)%soilc, &
                col_ps, col_pf)
 
-          call GridCBalanceCheck(bounds_clump, col_cs, col_cf, grc_cs, grc_cf)
+          if (use_microbe_methane) then
+             call GridCBalanceCheck(bounds_clump, col_cs, col_cf, grc_cs, grc_cf, &
+                  additional_carbon_col=microbe_methane_vars%additional_carbon_col, &
+                  surface_carbon_flux_col=microbe_methane_vars%surface_carbon_flux_col)
+          else
+             call GridCBalanceCheck(bounds_clump, col_cs, col_cf, grc_cs, grc_cf)
+          end if
 
           call t_stopf('cnbalchk')
        end if
@@ -1439,7 +1479,7 @@ contains
     call lnd2atm(bounds_proc,                                   &
          atm2lnd_vars, surfalb_vars, frictionvel_vars,          &
          energyflux_vars, solarabs_vars, drydepvel_vars,        &
-         vocemis_vars, dust_vars, ch4_vars, soilhydrology_vars, &
+         vocemis_vars, dust_vars, ch4_vars, microbe_methane_vars, soilhydrology_vars, &
          sedflux_vars, lnd2atm_vars)
     call t_stopf('lnd2atm')
 
@@ -1540,7 +1580,12 @@ contains
             budget_ann,  budget_ltann,  budget_ltend)
 
        if (use_cn .and. do_budgets) then
-          call CNPBudget_Run(bounds_proc, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf)
+          if (use_microbe_methane) then
+             call CNPBudget_Run(bounds_proc, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf, &
+                  surface_carbon_flux_col=microbe_methane_vars%surface_carbon_flux_col)
+          else
+             call CNPBudget_Run(bounds_proc, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf)
+          end if
           call CNPBudget_Accum()
           call CNPBudget_Print(budget_inst,  budget_daily,  budget_month,  &
                budget_ann,  budget_ltann,  budget_ltend)

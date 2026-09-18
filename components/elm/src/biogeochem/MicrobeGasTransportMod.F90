@@ -163,6 +163,7 @@ contains
     real(r8), intent(out) :: surface_flux
     logical, intent(in), optional :: apply_donor_limit
     integer :: j
+    real(r8) :: equilibrium_flux
     logical :: limit_inventory
 
     flux_to_atmosphere = 0._r8
@@ -175,6 +176,18 @@ contains
     do j = 1, size(concentration)
        flux_to_atmosphere(j) = max(0._r8, layer_exchange_rate(j)) * &
             (concentration(j) - atmospheric_equivalent_concentration(j))
+       ! Explicit exchange must not cross its reservoir equilibrium in one
+       ! timestep. This bound applies in both directions independently of the
+       ! joint soil-inventory limiter used by the combined transport driver.
+       equilibrium_flux = (concentration(j) - &
+            atmospheric_equivalent_concentration(j)) / dt
+       if (flux_to_atmosphere(j) > 0._r8) then
+          flux_to_atmosphere(j) = min(flux_to_atmosphere(j), &
+               max(0._r8, equilibrium_flux))
+       else if (flux_to_atmosphere(j) < 0._r8) then
+          flux_to_atmosphere(j) = max(flux_to_atmosphere(j), &
+               min(0._r8, equilibrium_flux))
+       end if
        if (limit_inventory .and. flux_to_atmosphere(j) > 0._r8) then
           flux_to_atmosphere(j) = min(flux_to_atmosphere(j), &
                max(0._r8, concentration(j)) / dt)

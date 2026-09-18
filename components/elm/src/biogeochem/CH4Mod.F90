@@ -17,7 +17,7 @@ module CH4Mod
   use elm_varcon         , only : catomw, s_con, d_con_w, d_con_g, c_h_inv, kh_theta, kh_tbase
   use landunit_varcon    , only : istdlak
   use elm_time_manager   , only : get_step_size, get_nstep
-  use elm_varctl         , only : iulog, use_cn, use_lch4, use_fates
+  use elm_varctl         , only : iulog, use_cn, use_lch4, use_microbe_methane, use_fates
   use abortutils         , only : endrun
   use decompMod          , only : bounds_type
   use SharedParamsMod    , only : ParamsShareInst
@@ -210,7 +210,9 @@ contains
 
     call this%InitAllocate (bounds)
     if (use_lch4) then
-        call this%InitHistory (bounds)
+        ! Revised methane retains only the shared oxygen/anoxia carrier below;
+        ! do not expose uncomputed legacy methane diagnostics in its history.
+        if (.not. use_microbe_methane) call this%InitHistory (bounds)
         call this%InitCold (bounds, cellorg_col)
     end if
 

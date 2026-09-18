@@ -1,11 +1,13 @@
 # CLM-SPRUCE microbial decomposition and methane integration design
 
 Status: Phase 0 harness and Phases 1-2 implementation complete; Phase 3 Steps
-1-4 are implemented on their feature branch. Step 4 includes the conservative
-transaction kernel, ELM state adapter, diagnostics, and opt-in carbon-budget
-interfaces. Step 5 backend dispatch and the archived CLM-SPRUCE scientific
-reference required by the Phase 0 gate remain pending.
-Date: 2026-09-17
+1-5 are implemented on their feature branch. Step 5 makes the executing
+methane backends mutually exclusive and connects revised storage and surface
+fluxes to ELM balances, budgets, and atmosphere exchange. The archived
+CLM-SPRUCE scientific reference, exact-restart comparison, and SPRUCE science
+validation remain pending; Docker/CIME build and five-day enabled/disabled
+smoke tests pass.
+Date: 2026-09-18
 
 ## 1. Executive summary
 
@@ -310,12 +312,13 @@ provided to methane. There must be no second call from `EcosystemDynMod`.
 
 ### 7.3 Shared methane output contract
 
-For the lowest-risk first integration, the revised backend may publish the net
-column CH4 flux through the already allocated
-`ch4_vars%ch4_surf_flux_tot_col` exchange field and publish the CO2 correction
-through `lnd2atm_vars%nem_grc`. This leaves the existing `lnd2atmMod` aggregation
-and coupler field names unchanged. All revised-backend internal state remains in
-its own type.
+The implemented revised backend publishes distinct column CH4 and CO2 surface
+fluxes from its own type. `lnd2atmMod` selects those fields when
+`use_microbe_methane=.true.`, aggregates them into the established
+`flux_ch4_grc` and `nem_grc` coupler fields, and otherwise reads the unchanged
+legacy `ch4_vars%ch4_surf_flux_tot_col` path. Revised internal state therefore
+does not masquerade as legacy CH4 state, while coupler field names remain
+unchanged.
 
 If this proves too confusing during implementation, introduce a small
 backend-neutral `methane_exchange_type`; do not move legacy internal state into
@@ -671,6 +674,14 @@ named mixing ratios are used only as missing-forcing fallbacks. The source
 water-potential response is evaluated in ELM's MPa units and combined with
 liquid saturation for the unsaturated reaction scalar.
 
+Because the legacy solver normally constructs `rootfr_col` internally, the
+revised adapter instead aggregates the authoritative patch root profile to
+columns before computing plant transport. Missing roots on unvegetated
+columns become zero transport. The aerenchyma kernel also bounds signed
+exchange by the amount needed to reach atmospheric equilibrium over one
+timestep, preventing an explicit 30-minute update from crossing that
+equilibrium while retaining exact surface-flux closure.
+
 Gas surface conductance combines the patch-to-column boundary conductance with
 top-half-layer, snow, and ponded-water resistances. The first three gases reuse
 ELM's `d_con_w`, `d_con_g`, `c_h_inv`, `kh_theta`, and `kh_tbase` constants.
@@ -689,6 +700,21 @@ exchange, CH4-C exchange in the established atmosphere units, and the CO2 NEE
 correction. Optional column, grid, and monthly carbon-budget arguments include
 these terms only for the revised backend. Existing calls omit the arguments and
 therefore preserve disabled-mode arithmetic.
+
+Nitrification participates in the revised oxygen budget. Before allocation,
+its potential flux is capped by the area-weighted saturated/unsaturated O2
+inventory available over the timestep, using 2 mol O2 per mol N nitrified.
+After ELM resolves decomposition and NH4 competition, the adapter removes the
+actual aerobic demand from standard heterotrophic respiration, root
+respiration, and `f_nit_vr` (the latter at 2 mol O2 per mol N) before revised
+methane reactions compete for the remaining gas state. The removal is
+proportional to each partition's O2 inventory, so neither partition becomes
+negative. This preserves the external-demand ordering in CLM-SPRUCE while
+adding nitrification to the same prognostic ledger. The adapter then publishes
+revised O2 concentration, oxygen stress, aerobic demand, and saturated fraction
+through the existing `ch4_vars` oxygen/anoxia interface for the next standard
+decomposition and nitrification/denitrification calculation. In revised mode
+that object is a compatibility carrier; the legacy CH4 solver is not called.
 
 ## 10. Parameters and input data
 
@@ -1044,12 +1070,16 @@ Add one instance to `elm_instMod` whose lifecycle mirrors current ELM types:
 - `Restart(flag='define'|'write'|'read')`; and
 - `ReadParams` conditionally from the standard ELM parameter file.
 
-Legacy `ch4_vars%InitHistory`, `InitCold`, and `Restart` remain selected for
-`use_lch4 .and. .not. use_microbe_methane` in the final dispatch. During Phase
-3 Steps 1-4, the established lifecycle continues to run when `use_lch4` is true
-because it still supplies the Phase 2 oxygen/anoxia bridge. Step 5 makes the two
-executing backends exclusive without removing the legacy implementation or its
-namelist capability.
+Step 5 makes the two executing backends exclusive without removing the legacy
+implementation or its namelist capability. The existing `ch4_vars` allocation,
+cold initialization, and restart lifecycle temporarily remain active whenever
+`use_lch4` is true because standard decomposition and
+nitrification/denitrification still consume its oxygen/anoxia fields. Legacy
+methane history fields are registered only for the legacy backend. In revised
+mode the adapter overwrites the shared oxygen subset from revised O2 state each
+timestep; no legacy methane production, oxidation, or transport routine
+executes. Moving the shared oxygen interface into a backend-neutral type is a
+later structural refactor, not part of the Step 5 science change.
 
 ### 11.2 Restart compatibility
 
@@ -1224,6 +1254,8 @@ Implement Phase 3 as separately reviewable steps:
 5. Explicit dispatch at the existing methane call site: select the revised
    backend when `use_microbe_methane=.true.` and the legacy backend otherwise.
    Both implementations remain in the model; neither may execute twice.
+   **Implemented on the Phase 3 feature branch, including revised carbon
+   accounting, atmosphere export, and nitrification O2 consumption.**
 
 Gate: golden-vector process parity, closed-box conservation, exact restart, and
 short SPRUCE integration tests pass.

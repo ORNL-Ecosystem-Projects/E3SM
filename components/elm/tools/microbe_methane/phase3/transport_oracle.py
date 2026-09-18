@@ -132,6 +132,13 @@ def aerenchyma_transport(
         flux = max(0.0, layer_exchange_rate[layer]) * (
             value - atmospheric_equivalent_concentration[layer]
         )
+        equilibrium_flux = (
+            value - atmospheric_equivalent_concentration[layer]
+        ) / dt
+        if flux > 0.0:
+            flux = min(flux, max(0.0, equilibrium_flux))
+        elif flux < 0.0:
+            flux = max(flux, min(0.0, equilibrium_flux))
         if apply_donor_limit and flux > 0.0:
             flux = min(flux, max(0.0, value) / dt)
         flux_to_atmosphere[layer] = flux

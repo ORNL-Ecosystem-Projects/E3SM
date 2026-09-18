@@ -124,6 +124,14 @@ class Phase3TransportTest(unittest.TestCase):
             transport_residual(tendency, [0.2, 0.4], surface_flux), 0.0
         )
 
+    def test_aerenchyma_influx_cannot_cross_atmospheric_equilibrium(self) -> None:
+        dt = 1800.0
+        layer_flux, tendency, _surface_flux = aerenchyma_transport(
+            [0.0], [0.3], [0.01], [4.0], dt, apply_donor_limit=False
+        )
+        self.assertAlmostEqual(layer_flux[0], -0.3 / dt)
+        self.assertAlmostEqual(0.0 + dt * tendency[0], 0.3)
+
     def test_ebullition_threshold_and_budget(self) -> None:
         dt = 10.0
         loss, tendency, surface_flux = methane_ebullition(

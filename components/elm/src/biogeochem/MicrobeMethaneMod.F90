@@ -1,7 +1,7 @@
 module MicrobeMethaneMod
 
   ! State and lifecycle owner for the revised microbial methane backend.
-  ! CH4Mod remains the executing backend until later explicit dispatch work.
+  ! The ELM driver selects this backend instead of CH4Mod when enabled.
   ! DOM, bacteria, and fungi remain authoritative decomposition pools.
 
   use shr_kind_mod, only : r8 => shr_kind_r8
@@ -118,7 +118,6 @@ contains
 
   subroutine InitCold(this, bounds)
     use elm_varpar, only : nlevdecomp
-    use shr_infnan_mod, only : spval => shr_infnan_nan, assignment(=)
     use ColumnType, only : col_pp
     use MicrobeMethaneParamsMod, only : MicrobeMethaneParamsInst
 
@@ -128,29 +127,33 @@ contains
     real(r8) :: biomass_seed
 
     biomass_seed = MicrobeMethaneParamsInst%mfg_biomass_min
-    this%acetate_c_unsat_col = spval
-    this%acetate_c_sat_col = spval
-    this%acetate_methanogen_c_unsat_col = spval
-    this%acetate_methanogen_c_sat_col = spval
-    this%h2_methanogen_c_unsat_col = spval
-    this%h2_methanogen_c_sat_col = spval
-    this%aerobic_methanotroph_c_unsat_col = spval
-    this%aerobic_methanotroph_c_sat_col = spval
-    this%anaerobic_methanotroph_c_unsat_col = spval
-    this%anaerobic_methanotroph_c_sat_col = spval
-    this%conc_ch4_unsat_col = spval
-    this%conc_ch4_sat_col = spval
-    this%conc_o2_unsat_col = spval
-    this%conc_o2_sat_col = spval
-    this%conc_co2_unsat_col = spval
-    this%conc_co2_sat_col = spval
-    this%conc_h2_unsat_col = spval
-    this%conc_h2_sat_col = spval
-    this%sat_fraction_previous_col = spval
-    this%additional_carbon_col = spval
-    this%surface_carbon_flux_col = spval
-    this%surface_ch4_flux_col = spval
-    this%surface_co2_flux_col = spval
+    ! History aggregation can inspect the complete allocated decomposition
+    ! dimension, including inactive columns and levels below nlevdecomp. Keep
+    ! those entries finite and carbon-neutral; active soil levels are seeded
+    ! below.
+    this%acetate_c_unsat_col = 0._r8
+    this%acetate_c_sat_col = 0._r8
+    this%acetate_methanogen_c_unsat_col = 0._r8
+    this%acetate_methanogen_c_sat_col = 0._r8
+    this%h2_methanogen_c_unsat_col = 0._r8
+    this%h2_methanogen_c_sat_col = 0._r8
+    this%aerobic_methanotroph_c_unsat_col = 0._r8
+    this%aerobic_methanotroph_c_sat_col = 0._r8
+    this%anaerobic_methanotroph_c_unsat_col = 0._r8
+    this%anaerobic_methanotroph_c_sat_col = 0._r8
+    this%conc_ch4_unsat_col = 0._r8
+    this%conc_ch4_sat_col = 0._r8
+    this%conc_o2_unsat_col = 0._r8
+    this%conc_o2_sat_col = 0._r8
+    this%conc_co2_unsat_col = 0._r8
+    this%conc_co2_sat_col = 0._r8
+    this%conc_h2_unsat_col = 0._r8
+    this%conc_h2_sat_col = 0._r8
+    this%sat_fraction_previous_col = 0._r8
+    this%additional_carbon_col = 0._r8
+    this%surface_carbon_flux_col = 0._r8
+    this%surface_ch4_flux_col = 0._r8
+    this%surface_co2_flux_col = 0._r8
 
     do c = bounds%begc, bounds%endc
        if (col_pp%is_soil(c) .or. col_pp%is_crop(c)) then
@@ -305,22 +308,25 @@ contains
 
   subroutine Advance(this, bounds, num_soilc, filter_soilc, dt, atm2lnd_vars, &
        col_es, col_ws, chemstate_vars, soilstate_vars, soilhydrology_vars, &
-       ground_conductance_patch, col_cs, col_ns, col_ps)
+       ground_conductance_patch, ch4_vars, col_cs, col_cf, col_ns, col_nf, col_ps)
     ! Mutable ELM boundary for the pure revised-methane kernels. Every update
     ! for one column is staged locally, checked, and then committed once.
     use abortutils, only : endrun
     use shr_log_mod, only : errMsg => shr_log_errMsg
+    use elm_varctl, only : iulog
     use elm_varpar, only : nlevdecomp, i_dom
-    use elm_varcon, only : denh2o, denice, tfrz, d_con_w, d_con_g
+    use elm_varcon, only : denh2o, denice, tfrz, d_con_w, d_con_g, catomw
     use elm_varcon, only : c_h_inv, kh_theta, kh_tbase
     use ColumnType, only : col_pp
     use ColumnDataType, only : column_energy_state, column_water_state
-    use ColumnDataType, only : column_carbon_state, column_nitrogen_state
+    use ColumnDataType, only : column_carbon_state, column_carbon_flux
+    use ColumnDataType, only : column_nitrogen_state, column_nitrogen_flux
     use ColumnDataType, only : column_phosphorus_state
     use atm2lndType, only : atm2lnd_type
     use ChemStateType, only : chemstate_type
     use SoilStateType, only : soilstate_type
     use SoilHydrologyType, only : soilhydrology_type
+    use CH4Mod, only : ch4_type
     use subgridAveMod, only : p2c
     use MicrobeDecompMod, only : MicrobeDecompParamsInst
     use MicrobeMethaneParamsMod, only : MicrobeMethaneParamsInst
@@ -353,8 +359,11 @@ contains
     type(soilstate_type), intent(in) :: soilstate_vars
     type(soilhydrology_type), intent(in) :: soilhydrology_vars
     real(r8), intent(in) :: ground_conductance_patch(bounds%begp:)
+    type(ch4_type), intent(inout) :: ch4_vars
     type(column_carbon_state), intent(inout) :: col_cs
+    type(column_carbon_flux), intent(in) :: col_cf
     type(column_nitrogen_state), intent(inout) :: col_ns
+    type(column_nitrogen_flux), intent(in) :: col_nf
     type(column_phosphorus_state), intent(inout) :: col_ps
 
     type(microbe_methane_reaction_state_type) :: unsaturated_state(nlevdecomp)
@@ -392,6 +401,7 @@ contains
     real(r8) :: acetate_interface_flux(0:nlevdecomp)
     real(r8) :: acetate_tendency(nlevdecomp)
     real(r8) :: ground_conductance_col(bounds%begc:bounds%endc)
+    real(r8) :: root_fraction_col(bounds%begc:bounds%endc,1:nlevdecomp)
     real(r8) :: partial_pressure(microbe_gas_count)
     real(r8) :: liquid_saturation, thawed_fraction, moisture_scalar
     real(r8) :: saturation_scalar, fraction, old_fraction, depth_scale
@@ -405,7 +415,7 @@ contains
     logical :: unsaturated_acetate_valid, saturated_acetate_valid
     logical :: unsaturated_gas_valid, saturated_gas_valid
     integer :: c, fc, g, gas, j
-    character(len=160) :: message
+    character(len=512) :: message
 
     if (.not. use_microbe_methane) return
     if (dt <= 0._r8) then
@@ -413,9 +423,19 @@ contains
             errMsg(__FILE__, __LINE__))
     end if
 
+    this%surface_carbon_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%surface_ch4_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%surface_co2_flux_col(bounds%begc:bounds%endc) = 0._r8
+
     call p2c(bounds, num_soilc, filter_soilc, &
          ground_conductance_patch(bounds%begp:bounds%endp), &
          ground_conductance_col(bounds%begc:bounds%endc))
+    ! Legacy CH4 computes this column average inside its solver. Revised mode
+    ! bypasses that solver, so it must establish its own plant-transport
+    ! input directly from the authoritative patch root profile.
+    call p2c(bounds, nlevdecomp, &
+         soilstate_vars%rootfr_patch(bounds%begp:bounds%endp,1:nlevdecomp), &
+         root_fraction_col(bounds%begc:bounds%endc,1:nlevdecomp), 0)
 
     do fc = 1, num_soilc
        c = filter_soilc(fc)
@@ -444,6 +464,7 @@ contains
 
        call gatherColumnState(c, unsaturated_state, saturated_state)
        call repartitionColumnState(old_fraction, fraction, unsaturated_state, saturated_state)
+       call consumeELMAerobicOxygen(c, fraction, unsaturated_state, saturated_state)
        unsaturated_work = unsaturated_state
        saturated_work = saturated_state
        column_valid = .true.
@@ -512,7 +533,7 @@ contains
           ! signed exchange kernel.
           depth_scale = max(layer_depth(j), 0.5_r8 * layer_thickness(j), tiny(1._r8))
           aerenchyma_exchange_rate(j,:) = MicrobeMethaneParamsInst%plant_transport_coefficient * &
-               max(0._r8, soilstate_vars%rootfr_col(c,j)) / depth_scale
+               validRootFraction(root_fraction_col(c,j)) / depth_scale
           aerenchyma_exchange_rate(j,microbe_gas_ch4) = &
                aerenchyma_exchange_rate(j,microbe_gas_ch4) * &
                exp(-layer_depth(j) / MicrobeMethaneParamsInst%ch4_h2_root_efold_depth)
@@ -582,7 +603,34 @@ contains
        column_valid = column_valid .and. unsaturated_gas_valid .and. saturated_gas_valid
 
        if (.not. column_valid) then
-          write(message,'(a,i0)') ' ERROR: revised methane column transaction failed validation for column ', c
+          write(iulog,*) 'revised methane atmospheric partial pressures: ', partial_pressure
+          write(iulog,*) 'revised methane surface equilibrium concentrations: ', surface_equilibrium
+          write(iulog,*) 'revised methane unsaturated surface conductance: ', &
+               unsaturated_surface_conductance
+          write(iulog,*) 'revised methane saturated surface conductance: ', &
+               saturated_surface_conductance
+          write(iulog,*) 'revised methane top aerenchyma equilibrium: ', &
+               aerenchyma_equilibrium(1,:)
+          write(iulog,*) 'revised methane top aerenchyma exchange rate: ', &
+               aerenchyma_exchange_rate(1,:)
+          write(iulog,*) 'revised methane bulk surface flux: ', bulk_surface_flux
+          write(iulog,*) 'revised methane unsaturated top state before gas transport: ', &
+               unsaturated_candidate(1)%conc_ch4, unsaturated_candidate(1)%conc_o2, &
+               unsaturated_candidate(1)%conc_co2, unsaturated_candidate(1)%conc_h2
+          write(iulog,*) 'revised methane unsaturated top state after gas transport: ', &
+               unsaturated_work(1)%conc_ch4, unsaturated_work(1)%conc_o2, &
+               unsaturated_work(1)%conc_co2, unsaturated_work(1)%conc_h2
+          write(message,'(a,i0,5(a,l1),4(a,es12.4))') &
+               ' ERROR: revised methane column transaction failed validation for column ', c, &
+               '; reaction=', all(reaction(:)%valid), &
+               '; acetate_unsat=', unsaturated_acetate_valid, &
+               '; acetate_sat=', saturated_acetate_valid, &
+               '; gas_unsat=', unsaturated_gas_valid, &
+               '; gas_sat=', saturated_gas_valid, &
+               '; acetate_residual_unsat=', unsaturated_acetate_residual, &
+               '; acetate_residual_sat=', saturated_acetate_residual, &
+               '; gas_residual_unsat=', unsaturated_gas_residual, &
+               '; gas_residual_sat=', saturated_gas_residual
           call endrun(msg=trim(message)//errMsg(__FILE__, __LINE__))
        end if
 
@@ -603,9 +651,88 @@ contains
        this%surface_carbon_flux_col(c) = microbeMethaneSurfaceCarbonFlux(bulk_surface_flux)
        this%surface_ch4_flux_col(c) = microbeMethaneCH4SurfaceFluxKgC(bulk_surface_flux)
        this%surface_co2_flux_col(c) = microbeMethaneCO2Correction(bulk_surface_flux)
+       call syncLegacyOxygenBridge(c, fraction, unsaturated_work, saturated_work)
     end do
 
   contains
+
+    subroutine consumeELMAerobicOxygen(column, saturated_fraction, unsaturated, saturated)
+      ! Standard decomposition, root respiration, and allocation have all
+      ! resolved before this adapter runs. Remove their actual aerobic demand,
+      ! including nitrification, before revised methane reactions compete for
+      ! the remaining prognostic O2 inventory.
+      integer, intent(in) :: column
+      real(r8), intent(in) :: saturated_fraction
+      type(microbe_methane_reaction_state_type), intent(inout) :: unsaturated(nlevdecomp)
+      type(microbe_methane_reaction_state_type), intent(inout) :: saturated(nlevdecomp)
+      real(r8) :: bulk_inventory, oxygen_demand_rate, oxygen_consumed
+      real(r8) :: remaining_fraction
+      integer :: layer
+
+      do layer = 1, nlevdecomp
+         bulk_inventory = (1._r8 - saturated_fraction) * &
+              max(0._r8, unsaturated(layer)%conc_o2) + saturated_fraction * &
+              max(0._r8, saturated(layer)%conc_o2)
+         oxygen_demand_rate = max(0._r8, col_cf%hr_vr(column,layer)) / catomw
+         oxygen_demand_rate = oxygen_demand_rate + &
+              max(0._r8, col_cf%rr_vr(column,layer)) / &
+              (catomw * max(col_pp%dz(column,layer), tiny(1._r8)))
+         oxygen_demand_rate = oxygen_demand_rate + &
+              max(0._r8, col_nf%f_nit_vr(column,layer)) * (2._r8 / 14._r8)
+         oxygen_consumed = oxygen_demand_rate * dt
+         if (bulk_inventory > tiny(1._r8)) then
+            remaining_fraction = max(0._r8, 1._r8 - oxygen_consumed / bulk_inventory)
+            unsaturated(layer)%conc_o2 = unsaturated(layer)%conc_o2 * remaining_fraction
+            saturated(layer)%conc_o2 = saturated(layer)%conc_o2 * remaining_fraction
+         else
+            unsaturated(layer)%conc_o2 = 0._r8
+            saturated(layer)%conc_o2 = 0._r8
+         end if
+      end do
+    end subroutine consumeELMAerobicOxygen
+
+    subroutine syncLegacyOxygenBridge(column, saturated_fraction, unsaturated, saturated)
+      ! Decomposition and nitrification still consume the CH4Mod oxygen
+      ! interface.  In revised mode ch4_vars is only a compatibility carrier;
+      ! the legacy CH4 solver is not executed.  Publish the revised O2 state
+      ! and a lagged estimate of aerobic demand for the next ELM timestep.
+      integer, intent(in) :: column
+      real(r8), intent(in) :: saturated_fraction
+      type(microbe_methane_reaction_state_type), intent(in) :: unsaturated(nlevdecomp)
+      type(microbe_methane_reaction_state_type), intent(in) :: saturated(nlevdecomp)
+      real(r8) :: potential_demand, stress_unsaturated, stress_saturated
+      integer :: layer
+
+      ch4_vars%finundated_col(column) = saturated_fraction
+      do layer = 1, nlevdecomp
+         potential_demand = max(0._r8, col_cf%phr_vr(column,layer)) / catomw
+         if (col_cf%o_scalar(column,layer) > tiny(1._r8)) then
+            potential_demand = potential_demand / col_cf%o_scalar(column,layer)
+         end if
+         potential_demand = potential_demand + &
+              max(0._r8, col_cf%rr_vr(column,layer)) / &
+              (catomw * max(layer_thickness(layer), tiny(1._r8)))
+         potential_demand = potential_demand + &
+              max(0._r8, col_nf%f_nit_vr(column,layer)) * 2._r8 / 14._r8
+
+         if (potential_demand > tiny(1._r8)) then
+            stress_unsaturated = min(unsaturated(layer)%conc_o2 / dt / potential_demand, 1._r8)
+            stress_saturated = min(saturated(layer)%conc_o2 / dt / potential_demand, 1._r8)
+         else
+            stress_unsaturated = 1._r8
+            stress_saturated = 1._r8
+         end if
+
+         ch4_vars%conc_o2_unsat_col(column,layer) = unsaturated(layer)%conc_o2
+         ch4_vars%conc_o2_sat_col(column,layer) = saturated(layer)%conc_o2
+         ch4_vars%o2stress_unsat_col(column,layer) = stress_unsaturated
+         ch4_vars%o2stress_sat_col(column,layer) = stress_saturated
+         ch4_vars%o2_decomp_depth_unsat_col(column,layer) = &
+              potential_demand * stress_unsaturated
+         ch4_vars%o2_decomp_depth_sat_col(column,layer) = &
+              potential_demand * stress_saturated
+      end do
+    end subroutine syncLegacyOxygenBridge
 
     subroutine gatherColumnState(column, unsaturated, saturated)
       integer, intent(in) :: column
@@ -761,6 +888,17 @@ contains
       end if
     end function atmosphericPartialPressure
 
+    pure real(r8) function validRootFraction(value_in) result(value)
+      real(r8), intent(in) :: value_in
+      if (ieee_is_finite(value_in) .and. value_in >= 0._r8 .and. value_in <= 1._r8) then
+         value = value_in
+      else
+         ! Missing patch roots denote a genuinely unvegetated column for this
+         ! pathway, not an arbitrarily large aerenchyma conductance.
+         value = 0._r8
+      end if
+    end function validRootFraction
+
     pure real(r8) function referenceAqueousDiffusivity(gas_index) result(value)
       integer, intent(in) :: gas_index
       real(r8) :: temperature_c
@@ -884,6 +1022,7 @@ contains
     real(r8) :: layer_thickness(nlevdecomp)
     integer :: c, j
 
+    this%additional_carbon_col(bounds%begc:bounds%endc) = 0._r8
     do c = bounds%begc, bounds%endc
        if (.not. (col_pp%is_soil(c) .or. col_pp%is_crop(c))) cycle
        do j = 1, nlevdecomp
