@@ -7,7 +7,7 @@ module SurfaceRadiationMod
   ! !USES:
   use shr_kind_mod      , only : r8 => shr_kind_r8
   use shr_log_mod       , only : errMsg => shr_log_errMsg
-  use elm_varctl        , only : use_snicar_frc, use_fates, iulog
+  use elm_varctl        , only : use_snicar_frc, use_fates, iulog, use_shrub_moss_shading
   use abortutils        , only : endrun
   use decompMod         , only : bounds_type
   use elm_varcon        , only : namec, spval, ispval
@@ -21,6 +21,7 @@ module SurfaceRadiationMod
   use ColumnType        , only : col_pp
   use ColumnDataType    , only : col_ws
   use VegetationType    , only : veg_pp
+  use VegetationPropertiesType, only : veg_vp
   use landunit_varcon   , only : istdlak
 
   use timeinfoMod
@@ -889,11 +890,14 @@ contains
 
       ! local variables
       integer           :: fp                         ! non-urban filter patch index
-      integer           :: p                          ! patch index
+      integer           :: p, p_shrub                 ! patch indices
+      integer           :: fp_shrub                   ! shrub filter index
       integer           :: t                          ! topounit index
-      integer           :: g                          ! gridcell index
       integer           :: iv                         ! canopy layer index
       integer,parameter :: ipar = 1                   ! The band index for PAR
+      real(r8)          :: shrub_lai                  ! area-weighted shrub LAI in this topounit
+      real(r8)          :: transmission               ! PAR transmitted through shrubs
+      real(r8), parameter :: shrub_extinction = 0.5_r8
 
       associate(   &
             tlai_z      => surfalb_vars%tlai_z_patch,     & ! tlai increment for canopy layer
@@ -918,6 +922,21 @@ contains
 
            p = filter_nourbanp(fp)
            t = veg_pp%topounit(p)
+
+           transmission = 1._r8
+           if (use_shrub_moss_shading .and. &
+                nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+              shrub_lai = 0._r8
+              do fp_shrub = 1, num_nourbanp
+                 p_shrub = filter_nourbanp(fp_shrub)
+                 if (veg_pp%topounit(p_shrub) == t .and. &
+                      veg_pp%column(p_shrub) == veg_pp%column(p) .and. &
+                      nint(veg_vp%woody(veg_pp%itype(p_shrub))) == 2) then
+                    shrub_lai = shrub_lai + elai(p_shrub) * veg_pp%wtcol(p_shrub)
+                 end if
+              end do
+              transmission = exp(-shrub_extinction * shrub_lai)
+           end if
 
            do iv = 1, nrad(p)
               parsun_z(p,iv) = 0._r8
@@ -949,11 +968,11 @@ contains
            ! If sun/shade big leaf code, nrad=1 and fluxes from SurfaceAlbedo
            ! are canopy integrated so that layer values equal big leaf values.
 
-           g = veg_pp%gridcell(p)
-
            do iv = 1, nrad(p)
-              parsun_z(p,iv) = forc_solad(t,ipar)*fabd_sun_z(p,iv) + forc_solai(t,ipar)*fabi_sun_z(p,iv)
-              parsha_z(p,iv) = forc_solad(t,ipar)*fabd_sha_z(p,iv) + forc_solai(t,ipar)*fabi_sha_z(p,iv)
+              parsun_z(p,iv) = transmission * (forc_solad(t,ipar)*fabd_sun_z(p,iv) + &
+                   forc_solai(t,ipar)*fabi_sun_z(p,iv))
+              parsha_z(p,iv) = transmission * (forc_solad(t,ipar)*fabd_sha_z(p,iv) + &
+                   forc_solai(t,ipar)*fabi_sha_z(p,iv))
            end do
 
         end do ! end of fp = 1,num_nourbanp loop

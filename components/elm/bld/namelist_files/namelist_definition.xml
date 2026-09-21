@@ -766,6 +766,12 @@ If TRUE, fineTOP radiation parameterization will be activated, which considers t
 </entry>
 <!-- End fineTOP radiation parameterization -->
 
+<entry id="use_shrub_moss_shading" type="logical" category="elm_physics"
+       group="elm_inparm" valid_values="" value=".false.">
+If TRUE, attenuate PAR received by moss PFTs using a Beer-Lambert transmission
+calculated from the area-weighted LAI of shrub PFTs in the same topounit.
+</entry>
+
 <!-- ========================================================================================  -->
 <!-- Former CPP tokens -->
 <!-- ========================================================================================  -->

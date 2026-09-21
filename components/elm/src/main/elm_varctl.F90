@@ -402,6 +402,8 @@ module elm_varctl
   logical, public :: use_lake_wat_storage = .false.
   logical, public :: use_top_solar_rad   = .false.  ! TOP : sub-grid topographic effect on surface solar radiation
   logical, public :: use_finetop_rad     = .false.  ! fineTOP : fine(grid)-scale topographic effect on surface radiation balance (longwave + shortwave)
+  logical, public :: use_shrub_moss_shading = .false. ! apply shrub-canopy attenuation to moss PAR
+  !$acc declare copyin(use_shrub_moss_shading)
   
   !----------------------------------------------------------
   ! Fan controls (use_fan)
