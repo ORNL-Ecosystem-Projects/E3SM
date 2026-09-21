@@ -72,6 +72,7 @@ module AllocationMod
 
      real(r8), pointer :: bdnr              => null() ! bulk denitrification rate (1/s)
      real(r8), pointer :: dayscrecover      => null() ! number of days to recover negative cpool
+     real(r8), pointer :: cpool_xsmr_recovery_max_frac => null() ! maximum cpool fraction used per timestep
      real(r8), pointer :: compet_plant_no3  => null() ! (unitless) relative compettiveness of plants for NO3
      real(r8), pointer :: compet_plant_nh4  => null() ! (unitless) relative compettiveness of plants for NH4
      real(r8), pointer :: compet_decomp_no3 => null() ! (unitless) relative competitiveness of immobilizers for NO3
@@ -108,12 +109,14 @@ module AllocationMod
   ! !PRIVATE DATA MEMBERS:
   real(r8)              :: bdnr                 !bulk denitrification rate (1/s)
   real(r8)              :: dayscrecover         !number of days to recover negative cpool
+  real(r8)              :: cpool_xsmr_recovery_max_frac !maximum cpool fraction used per timestep
   real(r8), allocatable :: arepr(:)             !reproduction allocation coefficient
   real(r8), allocatable :: aroot(:)             !root allocation coefficient
   real(r8), allocatable :: aerial(:)            !aboveground allocation coefficient
 
   !$acc declare create(bdnr                )
   !$acc declare create(dayscrecover        )
+  !$acc declare create(cpool_xsmr_recovery_max_frac)
   !$acc declare create(arepr(:)            )
   !$acc declare create(aroot(:)            )
 
@@ -162,6 +165,7 @@ contains
     !-----------------------------------------------------------------------
     allocate(AllocParamsInst%bdnr              )
     allocate(AllocParamsInst%dayscrecover      )
+    allocate(AllocParamsInst%cpool_xsmr_recovery_max_frac)
     allocate(AllocParamsInst%compet_plant_no3  )
     allocate(AllocParamsInst%compet_plant_nh4  )
     allocate(AllocParamsInst%compet_decomp_no3 )
@@ -178,6 +182,15 @@ contains
     call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
     AllocParamsInst%dayscrecover=tempr
+
+    tString='cpool_xsmr_recovery_max_frac'
+    call ncd_io(varname=trim(tString), data=tempr, flag='read', ncid=ncid, &
+         readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) tempr = 0.1_r8
+    if (tempr < 0._r8 .or. tempr > 1._r8) then
+       call endrun(msg=trim(errCode)//trim(tString)//' must be between zero and one'//errMsg(__FILE__, __LINE__))
+    end if
+    AllocParamsInst%cpool_xsmr_recovery_max_frac=tempr
 
     tString='compet_plant_no3'
     call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
@@ -269,6 +282,7 @@ contains
     ! set space-and-time parameters from parameter file
     bdnr         = AllocParamsInst%bdnr * (dt/secspday)
     dayscrecover = AllocParamsInst%dayscrecover
+    cpool_xsmr_recovery_max_frac = AllocParamsInst%cpool_xsmr_recovery_max_frac
 
     ! This call updates the supplementation status (ie adding N and/or P)
     ! as well as some dependencies
@@ -502,6 +516,8 @@ contains
     real(r8):: cnl,cnfr,cnlw,cndw  !C:N ratios for leaf, fine root, and wood
 
     real(r8):: curmr, curmr_ratio  !xsmrpool temporary variables
+    real(r8):: cpool_xsmr_recover  !xsmrpool recovery funded by existing cpool
+    real(r8):: newc_xsmr_recover   !xsmrpool recovery funded by new available C
 
     !! Local P variables
     real(r8):: cpl,cpfr,cplw,cpdw,cpg                                    !C:N ratios for leaf, fine root, and wood
@@ -553,7 +569,8 @@ contains
          vf                           => crop_vars%vf_patch                                    , & ! Output: [real(r8) (:)   ]  vernalization factor
          cphase                       => crop_vars%cphase_patch                                , & ! Output: [real(r8) (:)   ]  phenology phase
 
-         xsmrpool                     => veg_cs%xsmrpool                       , & ! Input:  [real(r8) (:)   ]  (gC/m2) temporary photosynthate C pool
+         cpool                        => veg_cs%cpool                          , & ! Input:  [real(r8) (:)   ]  (gC/m2) temporary photosynthate C pool
+         xsmrpool                     => veg_cs%xsmrpool                       , & ! Input:  [real(r8) (:)   ]  (gC/m2) maintenance respiration reserve/debt
          leafc                        => veg_cs%leafc                          , & ! Input:  [real(r8) (:)   ]
          frootc                       => veg_cs%frootc                         , & ! Input:  [real(r8) (:)   ]
          livestemc                    => veg_cs%livestemc                      , & ! Input:  [real(r8) (:)   ]
@@ -720,13 +737,31 @@ contains
             ! Determine rate of recovery for xsmrpool deficit
 
             xsmrpool_recover(p) = -xsmrpool(p)/(dayscrecover*secspday)
-            if (xsmrpool_recover(p) < availc(p)) then
-               ! available carbon reduced by amount for xsmrpool recovery
-               availc(p) = availc(p) - xsmrpool_recover(p)
+            if (top_pp%peat_depth(veg_pp%topounit(p)) > 0._r8) then
+               ! Peatland vegetation can repay maintenance-respiration debt
+               ! from existing nonstructural C without diverting the same
+               ! amount from current growth. Limit the reserve withdrawal to
+               ! a fraction of cpool per timestep; any remainder retains the
+               ! standard priority claim on newly available carbon.
+               cpool_xsmr_recover = min(xsmrpool_recover(p), &
+                    cpool_xsmr_recovery_max_frac * max(cpool(p), 0._r8) / dt)
+               newc_xsmr_recover = xsmrpool_recover(p) - cpool_xsmr_recover
+               if (newc_xsmr_recover < availc(p)) then
+                  availc(p) = availc(p) - newc_xsmr_recover
+               else
+                  newc_xsmr_recover = availc(p)
+                  availc(p) = 0._r8
+               end if
+               xsmrpool_recover(p) = cpool_xsmr_recover + newc_xsmr_recover
             else
-               ! all of the available carbon goes to xsmrpool recovery
-               xsmrpool_recover(p) = availc(p)
-               availc(p) = 0.0_r8
+               if (xsmrpool_recover(p) < availc(p)) then
+                  ! available carbon reduced by amount for xsmrpool recovery
+                  availc(p) = availc(p) - xsmrpool_recover(p)
+               else
+                  ! all of the available carbon goes to xsmrpool recovery
+                  xsmrpool_recover(p) = availc(p)
+                  availc(p) = 0.0_r8
+               end if
             end if
             cpool_to_xsmrpool(p) = xsmrpool_recover(p)
          end if
@@ -3948,7 +3983,9 @@ contains
      real(r8):: rc, rc_p, r            !Factors for nitrogen pool
      real(r8):: cpl,cpfr,cplw,cpdw,cpg !C:N ratios for leaf, fine root, and wood
      real(r8):: mr, curmr, curmr_ratio !xsmrpool temporary variables
-     real(r8):: xsmr_ratio           ! ratio of mr comes from non-structure carbon hydrate pool
+     real(r8):: xsmr_ratio            ! ratio of mr comes from non-structure carbon hydrate pool
+     real(r8):: cpool_xsmr_recover    !xsmrpool recovery funded by existing cpool
+     real(r8):: newc_xsmr_recover     !xsmrpool recovery funded by new available C
      integer :: ivt,fp,p,c,j
      real(r8), parameter :: cn_stoich_var=0.2    ! variability of CN ratio
      real(r8), parameter :: cp_stoich_var=0.4    ! variability of CP ratio
@@ -4072,6 +4109,7 @@ contains
         annmax_retransp              => cnstate_vars%annmax_retransp_patch , &
         retransn                     => veg_ns%retransn                    , &
         retransp                     => veg_ps%retransp                    , &
+        cpool                        => veg_cs%cpool                         , &
         cpool_to_xsmrpool            => veg_cf%cpool_to_xsmrpool               , &
         xsmrpool                     => veg_cs%xsmrpool                    , &
         xsmrpool_recover             => veg_cf%xsmrpool_recover            , &
@@ -4280,13 +4318,29 @@ contains
             ! Determine rate of recovery for xsmrpool deficit
 
             xsmrpool_recover(p) = -xsmrpool(p)/(dayscrecover*secspday)
-            if (xsmrpool_recover(p) < availc(p)) then
-               ! available carbon reduced by amount for xsmrpool recovery
-               availc(p) = availc(p) - xsmrpool_recover(p)
+            if (top_pp%peat_depth(veg_pp%topounit(p)) > 0._r8) then
+               ! Use existing nonstructural C first on peatland topounits,
+               ! subject to a bounded per-timestep withdrawal. Any remaining
+               ! recovery retains the standard priority over current growth.
+               cpool_xsmr_recover = min(xsmrpool_recover(p), &
+                    cpool_xsmr_recovery_max_frac * max(cpool(p), 0._r8) / dtime_mod)
+               newc_xsmr_recover = xsmrpool_recover(p) - cpool_xsmr_recover
+               if (newc_xsmr_recover < availc(p)) then
+                  availc(p) = availc(p) - newc_xsmr_recover
+               else
+                  newc_xsmr_recover = availc(p)
+                  availc(p) = 0._r8
+               end if
+               xsmrpool_recover(p) = cpool_xsmr_recover + newc_xsmr_recover
             else
-               ! all of the available carbon goes to xsmrpool recovery
-               xsmrpool_recover(p) = availc(p)
-               availc(p) = 0.0_r8
+               if (xsmrpool_recover(p) < availc(p)) then
+                  ! available carbon reduced by amount for xsmrpool recovery
+                  availc(p) = availc(p) - xsmrpool_recover(p)
+               else
+                  ! all of the available carbon goes to xsmrpool recovery
+                  xsmrpool_recover(p) = availc(p)
+                  availc(p) = 0.0_r8
+               end if
             end if
             cpool_to_xsmrpool(p) = xsmrpool_recover(p)
 
