@@ -1484,10 +1484,11 @@ contains
     ! !USES:
     use ncdio_pio       , only : file_desc_t, var_desc_t, ncd_pio_openfile, ncd_pio_closefile
     use ncdio_pio       , only : ncd_io, check_var, ncd_inqfdims, check_dim, ncd_inqdid, ncd_inqdlen
-    use elm_varctl      , only: fsurdat
+    use elm_varctl      , only: fsurdat, use_humhol
     use fileutils       , only : getfil   
     use GridcellType    , only : grc_pp
     use elm_varsur      , only : wt_tunit, elv_tunit, dist_tunit, regional_target_tunit
+    use elm_varsur      , only : surface_target_tunit
     use elm_varsur      , only : slp_tunit, asp_tunit, bog_tunit, peat_depth_tunit, till_ksat_tunit
     use elm_varsur      , only : structure_shade_frac_tunit, structure_light_trans_tunit
     use elm_varsur      , only : num_tunit_per_grd
@@ -1514,6 +1515,7 @@ contains
     real(r8) ,pointer :: TopounitElv(:,:)         ! Topounit elevation
     real(r8),pointer :: TopounitLateralDist(:,:) ! Lateral distance to the next lower topounit
     integer ,pointer :: TopounitRegionalTarget(:,:) ! Local regional lateral-flow target
+    integer ,pointer :: TopounitSurfaceTarget(:,:) ! Local one-way surface-routing target
     real(r8),pointer :: TopounitSlope(:,:)       ! Topounit slope 
     integer ,pointer :: TopounitAspect(:,:)      ! Topounit aspect
     integer ,pointer :: TopounitIsBog(:,:)       ! Bog flag: 1=bog, 0=non-bog
@@ -1535,6 +1537,7 @@ contains
     allocate(TopounitElv(begg:endg,max_topounits))
     allocate(TopounitLateralDist(begg:endg,max_topounits))
     allocate(TopounitRegionalTarget(begg:endg,max_topounits))
+    allocate(TopounitSurfaceTarget(begg:endg,max_topounits))
     allocate(TopounitSlope(begg:endg,max_topounits))
     allocate(TopounitAspect(begg:endg,max_topounits))
     allocate(TopounitIsBog(begg:endg,max_topounits))
@@ -1547,6 +1550,7 @@ contains
 
     TopounitLateralDist(:,:) = 1._r8
     TopounitRegionalTarget(:,:) = 0
+    TopounitSurfaceTarget(:,:) = 0
     TopounitIsBog(:,:) = 0
     TopounitPeatDepth(:,:) = 0._r8
     TopounitTillKsat(:,:) = 0._r8
@@ -1593,9 +1597,58 @@ contains
          dim1name=grlnd, readvar=readvar)
     else
        do n = begg,endg
-          do t = 2,max_topounits
-             TopounitRegionalTarget(n,t) = t - 1
-          end do
+          if (use_humhol) then
+             select case (numTopoPerGrid(n))
+             case (3)
+                ! Standalone fen, hollow, and hummock: one connected aquifer chain.
+                TopounitRegionalTarget(n,2) = 1
+                TopounitRegionalTarget(n,3) = 2
+             case (4)
+                ! Peatland watershed default: fen <-> upland and hollow <-> hummock.
+                TopounitRegionalTarget(n,3) = 2
+                TopounitRegionalTarget(n,4) = 1
+             case default
+                ! Retain the historical downhill chain for other layouts.
+                do t = 2,numTopoPerGrid(n)
+                   TopounitRegionalTarget(n,t) = t - 1
+                end do
+             end select
+          else
+             do t = 2,numTopoPerGrid(n)
+                TopounitRegionalTarget(n,t) = t - 1
+             end do
+          endif
+       end do
+    endif
+
+    call check_var(ncid=ncid, varname='TopounitSurfaceTarget', vardesc=vardesc, readvar=readvar)
+    if (readvar) then
+       call ncd_io(ncid=ncid, varname='TopounitSurfaceTarget', flag='read', data=TopounitSurfaceTarget, &
+         dim1name=grlnd, readvar=readvar)
+    else
+       do n = begg,endg
+          if (use_humhol) then
+             select case (numTopoPerGrid(n))
+             case (3)
+                ! Fen outlet, with hummock runoff passing through hollow.
+                TopounitSurfaceTarget(n,2) = 1
+                TopounitSurfaceTarget(n,3) = 2
+             case (4)
+                ! Upland bypasses the bog and drains directly to fen/lagg.
+                TopounitSurfaceTarget(n,2) = 1
+                TopounitSurfaceTarget(n,3) = 2
+                TopounitSurfaceTarget(n,4) = 1
+             case default
+                ! Retain the historical elevation-ordered chain for other layouts.
+                do t = 2,numTopoPerGrid(n)
+                   TopounitSurfaceTarget(n,t) = t - 1
+                end do
+             end select
+          else
+             do t = 2,numTopoPerGrid(n)
+                TopounitSurfaceTarget(n,t) = t - 1
+             end do
+          endif
        end do
     endif
 
@@ -1680,6 +1733,7 @@ contains
               elv_tunit(n,t) = TopounitElv(n,t)
               dist_tunit(n,t) = TopounitLateralDist(n,t)
               regional_target_tunit(n,t) = TopounitRegionalTarget(n,t)
+              surface_target_tunit(n,t) = TopounitSurfaceTarget(n,t)
               bog_tunit(n,t) = TopounitIsBog(n,t)
               peat_depth_tunit(n,t) = TopounitPeatDepth(n,t)
               till_ksat_tunit(n,t) = TopounitTillKsat(n,t)
@@ -1691,7 +1745,7 @@ contains
         end do		
      endif	
     deallocate(maxTopoElv,TopounitFracArea,TopounitElv,TopounitLateralDist, &
-         TopounitRegionalTarget,TopounitSlope,TopounitAspect,TopounitIsBog, &
+         TopounitRegionalTarget,TopounitSurfaceTarget,TopounitSlope,TopounitAspect,TopounitIsBog, &
          TopounitPeatDepth,TopounitTillKsat,TopounitStructureShadeFrac, &
          TopounitStructureLightTrans,GridElevation)
     

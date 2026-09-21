@@ -256,6 +256,7 @@ contains
     !
     ! !USES
     use elm_varsur , only : wt_tunit, elv_tunit, dist_tunit, regional_target_tunit
+    use elm_varsur , only : surface_target_tunit
     use elm_varsur , only : slp_tunit, asp_tunit, bog_tunit, peat_depth_tunit, till_ksat_tunit
     use elm_varsur , only : structure_shade_frac_tunit, structure_light_trans_tunit
     use elm_varsur , only : num_tunit_per_grd
@@ -272,6 +273,7 @@ contains
     real(r8) :: structure_shade_frac, structure_light_trans   ! surface-structure radiation properties
     integer :: asp                                             ! aspect
     integer :: regional_target, regional_target_ti             ! regional lateral-flow target
+    integer :: surface_target                                  ! one-way surface-routing target
     integer :: t1, t2, begt, endt, dn_index, min_index         ! local topounit indexing
     real(r8):: t1_elev, t2_elev, min_elev, dn_elev             ! for finding downhill neighbor
     logical :: is_tpu_active                                   ! Check if topounit is active
@@ -323,9 +325,38 @@ contains
             structure_light_trans=structure_light_trans, regional_target_ti=regional_target_ti)
     end do
 
-    ! Find the nearest lower active topounit for IM2 and peatland surface routing.
-    ! The use_humhol branch is intentionally generic in the number of topounits.
-    if (ntopos > 1 .and. (use_IM2_hillslope_hydrology .or. use_humhol)) then
+    ! Peatland surface routing uses an explicit graph that is independent of
+    ! the bidirectional regional-aquifer graph.
+    if (ntopos > 1 .and. use_humhol) then
+      do topounit = 1, ntopos
+         t1 = begt + topounit - 1
+         if (.not. top_pp%active(t1)) cycle
+         surface_target = surface_target_tunit(gdc,topounit)
+         if (surface_target == 0) cycle
+         if (surface_target < 1 .or. surface_target > ntopos .or. surface_target == topounit) then
+            write(iulog,*) 'Invalid TopounitSurfaceTarget at grid/topounit ', gdc, topounit, &
+                 surface_target
+            call endrun(msg='TopounitSurfaceTarget must identify another local topounit'// &
+                 errMsg(__FILE__, __LINE__))
+         endif
+         dn_index = begt + surface_target - 1
+         if (.not. top_pp%active(dn_index)) then
+            write(iulog,*) 'Inactive TopounitSurfaceTarget at grid/topounit ', gdc, topounit, &
+                 surface_target
+            call endrun(msg='TopounitSurfaceTarget must identify an active topounit'// &
+                 errMsg(__FILE__, __LINE__))
+         endif
+         if (top_pp%elevation(dn_index) >= top_pp%elevation(t1)) then
+            write(iulog,*) 'Non-downhill TopounitSurfaceTarget at grid/topounit ', gdc, topounit, &
+                 surface_target, top_pp%elevation(t1), top_pp%elevation(dn_index)
+            call endrun(msg='TopounitSurfaceTarget must identify a lower topounit'// &
+                 errMsg(__FILE__, __LINE__))
+         endif
+         top_pp%downhill_ti(t1) = dn_index
+      end do
+
+    ! IM2 retains its elevation-derived nearest-lower-neighbor graph.
+    else if (ntopos > 1 .and. use_IM2_hillslope_hydrology) then
       ! find the minimum elevation over all topounits on the gridcell
       min_elev = top_pp%elevation(begt)
       min_index = begt

@@ -54,6 +54,7 @@ module elm_varsur
   real(r8), pointer :: elv_tunit(:,:)  ! Topounit elevation 
   real(r8), pointer :: dist_tunit(:,:) ! Lateral distance to the next lower topounit
   integer, pointer :: regional_target_tunit(:,:) ! Local target topounit for regional lateral flow
+  integer, pointer :: surface_target_tunit(:,:) ! Local target topounit for one-way surface routing
   real(r8), pointer :: slp_tunit(:,:)  ! Topounit slope 
   integer, pointer :: asp_tunit(:,:)  ! Topounit aspect
   integer, pointer :: bog_tunit(:,:)  ! Bog flag: 1=bog, 0=non-bog

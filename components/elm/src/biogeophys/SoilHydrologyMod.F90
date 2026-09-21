@@ -424,8 +424,6 @@ contains
      real(r8) :: cfl_denom, max_flux                       ! explicit head-response limiter terms
      logical  :: surface_aquifer_connected                 ! ponded water is connected to the main water table
      real(r8), parameter :: lateral_head_relax_frac = 0.25_r8
-     logical  :: bog_nonbog_pair                           ! pair crosses bog/non-bog boundary
-     logical  :: spruce_three_topounit                     ! standalone fen/hollow/hummock configuration
      real(r8), parameter :: humhol_frozen_infil_min_imped = 0.05_r8
      !-----------------------------------------------------------------------
 
@@ -907,25 +905,12 @@ contains
              if (grc_pp%ntopounits(g) <= 1) cycle
              topi = grc_pp%topi(g)
              topf = grc_pp%topf(g)
-             spruce_three_topounit = .false.
-             if (grc_pp%ntopounits(g) == 3) then
-                spruce_three_topounit = &
-                     top_pp%active(topi) .and. top_pp%active(topi+1) .and. top_pp%active(topf) .and. &
-                     .not. top_pp%is_bog(topi) .and. top_pp%peat_depth(topi) > 0._r8 .and. &
-                     top_pp%is_bog(topi+1) .and. top_pp%peat_depth(topi+1) > 0._r8 .and. &
-                     top_pp%is_bog(topf) .and. top_pp%peat_depth(topf) > 0._r8
-             endif
-
              do t = topi, topf
                 t_ref = top_pp%regional_target_ti(t)
                 if (t_ref < topi .or. t_ref > topf .or. t_ref == t) cycle
                 if (natveg_col_top(t) == 0 .or. natveg_col_top(t_ref) == 0) cycle
                 if (top_pp%lateral_dist(t) <= 0._r8) cycle
                 if (top_pp%wtgcell(t) <= 0._r8 .or. top_pp%wtgcell(t_ref) <= 0._r8) cycle
-
-                bog_nonbog_pair = (top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8) .neqv. &
-                     (top_pp%is_bog(t_ref) .and. top_pp%peat_depth(t_ref) > 0._r8)
-                if (bog_nonbog_pair .and. .not. spruce_three_topounit) cycle
 
                 ka_src = ka_top(t)
                 ka_ref = ka_top(t_ref)

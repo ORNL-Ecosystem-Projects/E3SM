@@ -477,6 +477,7 @@ contains
                 write(iulog,*)'topounit grid weight      = ',top_pp%wtgcell(t)
                 write(iulog,*)'topounit lateral distance = ',top_pp%lateral_dist(t)
                 write(iulog,*)'topounit regional target  = ',top_pp%regional_target_ti(t)
+                write(iulog,*)'topounit surface target   = ',top_pp%downhill_ti(t)
                 write(iulog,*)'topounit bog flag         = ',top_pp%is_bog(t)
                 write(iulog,*)'topounit peat depth       = ',top_pp%peat_depth(t)
                 write(iulog,*)'topounit elevation        = ',top_pp%elevation(t)

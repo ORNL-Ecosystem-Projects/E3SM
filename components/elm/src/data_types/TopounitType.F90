@@ -26,7 +26,7 @@ module TopounitType
     integer , pointer :: topo_grc_ind(:) => null() ! index of topounit in the grid
     real(r8), pointer :: wtgcell     (:) => null() ! weight (relative to gridcell)
 
-    ! connections between topounits in a single gridcell, for IM2 hillslope hydrology
+    ! connections between topounits in a single gridcell for downhill surface routing
     ! downhill_ti value of -1 indicates that there is no downhill topounit
     ! uphill_wt is a temporary store for the sum of column weights receiving water from uphill
     integer , pointer :: downhill_ti (:) => null() ! topounit index for downhill topounit on this gridcell
