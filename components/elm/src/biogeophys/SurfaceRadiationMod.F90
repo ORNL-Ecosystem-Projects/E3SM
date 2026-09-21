@@ -7,7 +7,8 @@ module SurfaceRadiationMod
   ! !USES:
   use shr_kind_mod      , only : r8 => shr_kind_r8
   use shr_log_mod       , only : errMsg => shr_log_errMsg
-  use elm_varctl        , only : use_snicar_frc, use_fates, iulog, use_shrub_moss_shading
+  use elm_varctl        , only : use_snicar_frc, use_fates, iulog, use_shrub_moss_shading, &
+                                 use_surface_structure_shading
   use abortutils        , only : endrun
   use decompMod         , only : bounds_type
   use elm_varcon        , only : namec, spval, ispval
@@ -16,6 +17,7 @@ module SurfaceRadiationMod
   use SurfaceAlbedoType , only : surfalb_type
   use SolarAbsorbedType , only : solarabs_type
   use GridcellType      , only : grc_pp
+  use TopounitType      , only : top_pp
   use TopounitDataType  , only : top_af
   use LandunitType      , only : lun_pp
   use ColumnType        , only : col_pp
@@ -379,6 +381,7 @@ contains
      real(r8) :: sabg_oc(bounds%begp:bounds%endp)    ! solar radiation absorbed by ground without OC [W/m2]
      real(r8) :: sabg_dst(bounds%begp:bounds%endp)   ! solar radiation absorbed by ground without dust [W/m2]
      real(r8) :: parveg(bounds%begp:bounds%endp)     ! absorbed par by vegetation (W/m**2)
+     real(r8) :: ground_sw_scale                     ! structure reduction of ground shortwave absorption [-]
      !
      integer, parameter :: noonsec   = isecspday / 2 ! seconds at local noon
      !
@@ -520,6 +523,10 @@ contains
              l = veg_pp%landunit(p)
              t = veg_pp%topounit(p)
              g = veg_pp%gridcell(p)
+             if (use_surface_structure_shading) then
+                ground_sw_scale = 1._r8 - top_pp%structure_shade_frac(t) * &
+                     (1._r8 - top_pp%structure_light_trans(t))
+             end if
 
              ! Absorbed by canopy
 
@@ -541,10 +548,13 @@ contains
              ! Solar radiation absorbed by ground surface
              ! calculate absorbed solar by soil/snow separately
              absrad  = trd(p,ib)*(1._r8-albsod(c,ib)) + tri(p,ib)*(1._r8-albsoi(c,ib))
+             if (use_surface_structure_shading) absrad = absrad * ground_sw_scale
              sabg_soil(p) = sabg_soil(p) + absrad
              absrad  = trd(p,ib)*(1._r8-albsnd_hst(c,ib)) + tri(p,ib)*(1._r8-albsni_hst(c,ib))
+             if (use_surface_structure_shading) absrad = absrad * ground_sw_scale
              sabg_snow(p) = sabg_snow(p) + absrad
              absrad  = trd(p,ib)*(1._r8-albgrd(c,ib)) + tri(p,ib)*(1._r8-albgri(c,ib))
+             if (use_surface_structure_shading) absrad = absrad * ground_sw_scale
              sabg(p) = sabg(p) + absrad
              fsa(p)  = fsa(p)  + absrad
              if (veg_pp%is_on_soil_col(p) .or. veg_pp%is_on_crop_col(p)) then
@@ -563,18 +573,22 @@ contains
              if (use_snicar_frc) then
                 ! Solar radiation absorbed by ground surface without BC
                 absrad_bc = trd(p,ib)*(1._r8-albgrd_bc(c,ib)) + tri(p,ib)*(1._r8-albgri_bc(c,ib))
+                if (use_surface_structure_shading) absrad_bc = absrad_bc * ground_sw_scale
                 sabg_bc(p) = sabg_bc(p) + absrad_bc
 
                 ! Solar radiation absorbed by ground surface without OC
                 absrad_oc = trd(p,ib)*(1._r8-albgrd_oc(c,ib)) + tri(p,ib)*(1._r8-albgri_oc(c,ib))
+                if (use_surface_structure_shading) absrad_oc = absrad_oc * ground_sw_scale
                 sabg_oc(p) = sabg_oc(p) + absrad_oc
 
                 ! Solar radiation absorbed by ground surface without dust
                 absrad_dst = trd(p,ib)*(1._r8-albgrd_dst(c,ib)) + tri(p,ib)*(1._r8-albgri_dst(c,ib))
+                if (use_surface_structure_shading) absrad_dst = absrad_dst * ground_sw_scale
                 sabg_dst(p) = sabg_dst(p) + absrad_dst
 
                 ! Solar radiation absorbed by ground surface without any aerosols
                 absrad_pur = trd(p,ib)*(1._r8-albgrd_pur(c,ib)) + tri(p,ib)*(1._r8-albgri_pur(c,ib))
+                if (use_surface_structure_shading) absrad_pur = absrad_pur * ground_sw_scale
                 sabg_pur(p) = sabg_pur(p) + absrad_pur
              end if
 
@@ -587,6 +601,11 @@ contains
           p = filter_nourbanp(fp)
           c = veg_pp%column(p)
           l = veg_pp%landunit(p)
+          t = veg_pp%topounit(p)
+          if (use_surface_structure_shading) then
+             ground_sw_scale = 1._r8 - top_pp%structure_shade_frac(t) * &
+                  (1._r8 - top_pp%structure_light_trans(t))
+          end if
           sabg_snl_sum = 0._r8
 
           sub_surf_abs_SW(c) = 0._r8
@@ -603,6 +622,7 @@ contains
              do i = -nlevsno+1,1,1
                 sabg_lyr(p,i) = flx_absdv(c,i)*trd(p,1) + flx_absdn(c,i)*trd(p,2) + &
                      flx_absiv(c,i)*tri(p,1) + flx_absin(c,i)*tri(p,2)
+                if (use_surface_structure_shading) sabg_lyr(p,i) = sabg_lyr(p,i) * ground_sw_scale
                 ! summed radiation in active snow layers:
                 if (i >= snl(c)+1) then
                    sabg_snl_sum = sabg_snl_sum + sabg_lyr(p,i)
@@ -727,13 +747,24 @@ contains
        ! Radiation diagnostics
        do fp = 1,num_nourbanp
           p = filter_nourbanp(fp)
+          c = veg_pp%column(p)
           t = veg_pp%topounit(p)
           g = veg_pp%gridcell(p)
+          if (use_surface_structure_shading) then
+             ground_sw_scale = 1._r8 - top_pp%structure_shade_frac(t) * &
+                  (1._r8 - top_pp%structure_light_trans(t))
+          end if
 
           ! NDVI and reflected solar radiation
 
           rvis = albd(p,1)*forc_solad(t,1) + albi(p,1)*forc_solai(t,1)
           rnir = albd(p,2)*forc_solad(t,2) + albi(p,2)*forc_solai(t,2)
+          if (use_surface_structure_shading) then
+             rvis = rvis + (trd(p,1)*(1._r8-albgrd(c,1)) + tri(p,1)*(1._r8-albgri(c,1))) * &
+                  (1._r8-ground_sw_scale)
+             rnir = rnir + (trd(p,2)*(1._r8-albgrd(c,2)) + tri(p,2)*(1._r8-albgri(c,2))) * &
+                  (1._r8-ground_sw_scale)
+          end if
           fsr(p) = rvis + rnir
 
           fsds_vis_d(p) = forc_solad(t,1)
@@ -744,6 +775,12 @@ contains
           fsr_nir_d(p)  = albd(p,2)*forc_solad(t,2)
           fsr_vis_i(p)  = albi(p,1)*forc_solai(t,1)
           fsr_nir_i(p)  = albi(p,2)*forc_solai(t,2)
+          if (use_surface_structure_shading) then
+             fsr_vis_d(p) = fsr_vis_d(p) + trd(p,1)*(1._r8-albgrd(c,1))*(1._r8-ground_sw_scale)
+             fsr_nir_d(p) = fsr_nir_d(p) + trd(p,2)*(1._r8-albgrd(c,2))*(1._r8-ground_sw_scale)
+             fsr_vis_i(p) = fsr_vis_i(p) + tri(p,1)*(1._r8-albgri(c,1))*(1._r8-ground_sw_scale)
+             fsr_nir_i(p) = fsr_nir_i(p) + tri(p,2)*(1._r8-albgri(c,2))*(1._r8-ground_sw_scale)
+          end if
 
           solarabs_vars%fsr_vis_d_patch(p) = fsr_vis_d(p)
           solarabs_vars%fsr_vis_i_patch(p) = fsr_vis_i(p)
@@ -755,6 +792,10 @@ contains
              fsds_nir_d_ln(p) = forc_solad(t,2)
              fsr_vis_d_ln(p) = albd(p,1)*forc_solad(t,1)
              fsr_nir_d_ln(p) = albd(p,2)*forc_solad(t,2)
+             if (use_surface_structure_shading) then
+                fsr_vis_d_ln(p) = fsr_vis_d(p)
+                fsr_nir_d_ln(p) = fsr_nir_d(p)
+             end if
              fsds_vis_i_ln(p) = forc_solai(t,1)
              parveg_ln(p)     = parveg(p)
           else

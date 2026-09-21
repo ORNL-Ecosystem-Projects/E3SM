@@ -399,7 +399,8 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine add_topounit(ti, gi, wtgcell, elv, dist, slp, asp, topo_ind, is_tpu_active, &
-       is_bog, peat_depth, till_ksat, regional_target_ti)
+       is_bog, peat_depth, till_ksat, structure_shade_frac, structure_light_trans, &
+       regional_target_ti)
     !
     ! !DESCRIPTION:
     ! Add an entry in the topounit-level arrays. ti gives the index of the last topounit
@@ -419,6 +420,8 @@ contains
     logical , intent(in)    :: is_bog        ! true when this topounit represents a bog
     real(r8), intent(in)    :: peat_depth    ! peat depth above restrictive till (m)
     real(r8), intent(in)    :: till_ksat     ! restrictive till saturated conductivity (mm/s)
+    real(r8), intent(in)    :: structure_shade_frac ! area fraction covered by a shading structure [-]
+    real(r8), intent(in)    :: structure_light_trans ! structure shortwave transmissivity [-]
     integer , intent(in)    :: regional_target_ti ! topounit target for regional lateral flow
     !
     ! !LOCAL VARIABLES:
@@ -438,6 +441,8 @@ contains
     top_pp%is_bog(ti) = is_bog
     top_pp%peat_depth(ti) = peat_depth
     top_pp%till_ksat(ti) = till_ksat
+    top_pp%structure_shade_frac(ti) = structure_shade_frac
+    top_pp%structure_light_trans(ti) = structure_light_trans
     top_pp%regional_target_ti(ti) = regional_target_ti
     top_pp%downhill_ti(ti) = -1   ! initialized to no downhill neighbor state (-1)
     

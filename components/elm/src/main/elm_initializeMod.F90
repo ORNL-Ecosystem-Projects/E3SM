@@ -17,6 +17,7 @@ module elm_initializeMod
   use elm_varsur       , only : fert_cft, fert_p_cft, wt_polygon
   use elm_varsur       , only : wt_tunit, elv_tunit, dist_tunit, regional_target_tunit
   use elm_varsur       , only : slp_tunit, asp_tunit, bog_tunit, peat_depth_tunit, till_ksat_tunit
+  use elm_varsur       , only : structure_shade_frac_tunit, structure_light_trans_tunit
   use elm_varsur       , only : num_tunit_per_grd
   use perf_mod         , only : t_startf, t_stopf
   !use readParamsMod    , only : readParameters
@@ -332,12 +333,16 @@ contains
     allocate (bog_tunit (begg:endg,1:max_topounits  ))
     allocate (peat_depth_tunit(begg:endg,1:max_topounits))
     allocate (till_ksat_tunit (begg:endg,1:max_topounits))
+    allocate (structure_shade_frac_tunit(begg:endg,1:max_topounits))
+    allocate (structure_light_trans_tunit(begg:endg,1:max_topounits))
     allocate (num_tunit_per_grd (begg:endg))
     dist_tunit(:,:) = 1._r8
     regional_target_tunit(:,:) = 0
     bog_tunit(:,:) = 0
     peat_depth_tunit(:,:) = 0._r8
     till_ksat_tunit(:,:) = 0._r8
+    structure_shade_frac_tunit(:,:) = 0._r8
+    structure_light_trans_tunit(:,:) = 1._r8
     allocate (firrig  (begg:endg,1:max_topounits  ))
     allocate (f_surf  (begg:endg,1:max_topounits  ))
     allocate (f_grd  (begg:endg,1:max_topounits  ))
@@ -483,7 +488,8 @@ contains
     !deallocate (wt_lunit, wt_cft, wt_glc_mec)
     deallocate (wt_cft, wt_glc_mec)    !wt_lunit not deallocated because it is being used in CanopyHydrologyMod.F90
     deallocate (wt_tunit, elv_tunit, dist_tunit, regional_target_tunit, slp_tunit, asp_tunit, &
-         bog_tunit, peat_depth_tunit, till_ksat_tunit, num_tunit_per_grd)
+         bog_tunit, peat_depth_tunit, till_ksat_tunit, structure_shade_frac_tunit, &
+         structure_light_trans_tunit, num_tunit_per_grd)
     deallocate (wt_polygon) ! RF - might be used elsewhere, not sure if we want to deallocate here.
     call t_stopf('elm_init1')
 

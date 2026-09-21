@@ -101,7 +101,7 @@ module controlMod
                         use_snicar_frc, use_snicar_ad, use_firn_percolation_and_compaction, &
                         use_extrasnowlayers, use_T_rho_dependent_snowthk, &
                         use_vancouver, use_mexicocity, use_noio, use_finetop_rad, &
-                        use_shrub_moss_shading
+                        use_shrub_moss_shading, use_surface_structure_shading
   !
   ! !PUBLIC TYPES:
   implicit none
@@ -389,7 +389,8 @@ contains
          use_erosion, ero_ccycle
 
     namelist /elm_inparm/ &
-         use_top_solar_rad, use_finetop_rad, use_shrub_moss_shading
+         use_top_solar_rad, use_finetop_rad, use_shrub_moss_shading, &
+         use_surface_structure_shading
 
     namelist /elm_mosart/ &
          lnd_rof_coupling_nstep
@@ -974,6 +975,7 @@ contains
     call mpi_bcast (use_top_solar_rad, 1, MPI_LOGICAL, 0, mpicom, ier)  ! TOP solar radiation parameterization
     call mpi_bcast (use_finetop_rad, 1, MPI_LOGICAL, 0, mpicom, ier)  ! fineTOP radiation parameterization
     call mpi_bcast (use_shrub_moss_shading, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_surface_structure_shading, 1, MPI_LOGICAL, 0, mpicom, ier)
     
     ! glacier_mec variables
     call mpi_bcast (create_glacier_mec_landunit, 1, MPI_LOGICAL, 0, mpicom, ier)
@@ -1159,6 +1161,7 @@ contains
     write(iulog,*) '    use_fen_bog_drainage = ', use_fen_bog_drainage
     write(iulog,*) '    use_peatland_roots = ', use_peatland_roots
     write(iulog,*) '    use_shrub_moss_shading = ', use_shrub_moss_shading
+    write(iulog,*) '    use_surface_structure_shading = ', use_surface_structure_shading
     write(iulog,*) '    use_atm_downscaling_to_topunit = ', use_atm_downscaling_to_topunit
     write(iulog,*) '    precip_downscaling_method = ', precip_downscaling_method
     write(iulog,*) 'input data files:'

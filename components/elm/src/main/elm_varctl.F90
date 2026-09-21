@@ -404,6 +404,8 @@ module elm_varctl
   logical, public :: use_finetop_rad     = .false.  ! fineTOP : fine(grid)-scale topographic effect on surface radiation balance (longwave + shortwave)
   logical, public :: use_shrub_moss_shading = .false. ! apply shrub-canopy attenuation to moss PAR
   !$acc declare copyin(use_shrub_moss_shading)
+  logical, public :: use_surface_structure_shading = .false. ! apply topounit structure shading to ground SW
+  !$acc declare copyin(use_surface_structure_shading)
   
   !----------------------------------------------------------
   ! Fan controls (use_fan)

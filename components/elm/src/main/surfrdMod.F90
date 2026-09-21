@@ -1489,6 +1489,7 @@ contains
     use GridcellType    , only : grc_pp
     use elm_varsur      , only : wt_tunit, elv_tunit, dist_tunit, regional_target_tunit
     use elm_varsur      , only : slp_tunit, asp_tunit, bog_tunit, peat_depth_tunit, till_ksat_tunit
+    use elm_varsur      , only : structure_shade_frac_tunit, structure_light_trans_tunit
     use elm_varsur      , only : num_tunit_per_grd
     use topounit_varcon ,  only : max_topounits, has_topounit
     
@@ -1518,6 +1519,8 @@ contains
     integer ,pointer :: TopounitIsBog(:,:)       ! Bog flag: 1=bog, 0=non-bog
     real(r8),pointer :: TopounitPeatDepth(:,:)   ! Peat depth (m)
     real(r8),pointer :: TopounitTillKsat(:,:)    ! Restrictive till conductivity (mm/s)
+    real(r8),pointer :: TopounitStructureShadeFrac(:,:) ! Area fraction covered by a shading structure
+    real(r8),pointer :: TopounitStructureLightTrans(:,:) ! Structure shortwave transmissivity
     integer ,pointer :: num_topo_per_grid(:)      ! Topounit aspect
     real(r8),pointer :: GridElevation(:)      ! Topounit aspect
 !    integer ,pointer :: TopounitIndices(:,:)     ! Topounit indices in each grid
@@ -1537,6 +1540,8 @@ contains
     allocate(TopounitIsBog(begg:endg,max_topounits))
     allocate(TopounitPeatDepth(begg:endg,max_topounits))
     allocate(TopounitTillKsat(begg:endg,max_topounits))
+    allocate(TopounitStructureShadeFrac(begg:endg,max_topounits))
+    allocate(TopounitStructureLightTrans(begg:endg,max_topounits))
     allocate(num_topo_per_grid(begg:endg))
 !    allocate(TopounitIndices(begg:endg,max_topounits))
 
@@ -1545,6 +1550,8 @@ contains
     TopounitIsBog(:,:) = 0
     TopounitPeatDepth(:,:) = 0._r8
     TopounitTillKsat(:,:) = 0._r8
+    TopounitStructureShadeFrac(:,:) = 0._r8
+    TopounitStructureLightTrans(:,:) = 1._r8
     
     ! Read surface data
     call getfil( lfsurdat, locfn, 0 )
@@ -1621,6 +1628,35 @@ contains
        call ncd_io(ncid=ncid, varname='TopounitTillKsat', flag='read', data=TopounitTillKsat, &
          dim1name=grlnd, readvar=readvar)
     endif
+
+    call check_var(ncid=ncid, varname='TopounitStructureShadeFrac', vardesc=vardesc, readvar=readvar)
+    if (readvar) then
+       call ncd_io(ncid=ncid, varname='TopounitStructureShadeFrac', flag='read', &
+            data=TopounitStructureShadeFrac, dim1name=grlnd, readvar=readvar)
+    endif
+
+    call check_var(ncid=ncid, varname='TopounitStructureLightTrans', vardesc=vardesc, readvar=readvar)
+    if (readvar) then
+       call ncd_io(ncid=ncid, varname='TopounitStructureLightTrans', flag='read', &
+            data=TopounitStructureLightTrans, dim1name=grlnd, readvar=readvar)
+    endif
+
+    do n = begg,endg
+       do t = 1,max_topounits
+          if (TopounitStructureShadeFrac(n,t) < 0._r8 .or. &
+               TopounitStructureShadeFrac(n,t) > 1._r8) then
+             write(iulog,*) subname, ': invalid TopounitStructureShadeFrac at grid/topounit ', n, t, &
+                  TopounitStructureShadeFrac(n,t)
+             call endrun(msg='TopounitStructureShadeFrac must be in [0,1]'//errMsg(__FILE__, __LINE__))
+          endif
+          if (TopounitStructureLightTrans(n,t) < 0._r8 .or. &
+               TopounitStructureLightTrans(n,t) > 1._r8) then
+             write(iulog,*) subname, ': invalid TopounitStructureLightTrans at grid/topounit ', n, t, &
+                  TopounitStructureLightTrans(n,t)
+             call endrun(msg='TopounitStructureLightTrans must be in [0,1]'//errMsg(__FILE__, __LINE__))
+          endif
+       enddo
+    enddo
     
     call check_var(ncid=ncid, varname='topoPerGrid', vardesc=vardesc, readvar=readvar)
     if (readvar) then
@@ -1647,6 +1683,8 @@ contains
               bog_tunit(n,t) = TopounitIsBog(n,t)
               peat_depth_tunit(n,t) = TopounitPeatDepth(n,t)
               till_ksat_tunit(n,t) = TopounitTillKsat(n,t)
+              structure_shade_frac_tunit(n,t) = TopounitStructureShadeFrac(n,t)
+              structure_light_trans_tunit(n,t) = TopounitStructureLightTrans(n,t)
         !      slp_tunit(n,t) = TopounitSlope(n,t)
         !      asp_tunit(n,t) = TopounitAspect(n,t)              
            end do
@@ -1654,7 +1692,8 @@ contains
      endif	
     deallocate(maxTopoElv,TopounitFracArea,TopounitElv,TopounitLateralDist, &
          TopounitRegionalTarget,TopounitSlope,TopounitAspect,TopounitIsBog, &
-         TopounitPeatDepth,TopounitTillKsat,GridElevation)
+         TopounitPeatDepth,TopounitTillKsat,TopounitStructureShadeFrac, &
+         TopounitStructureLightTrans,GridElevation)
     
     call ncd_pio_closefile(ncid)
     

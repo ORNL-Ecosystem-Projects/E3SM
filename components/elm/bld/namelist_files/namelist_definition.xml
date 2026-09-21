@@ -772,6 +772,14 @@ If TRUE, attenuate PAR received by moss PFTs using a Beer-Lambert transmission
 calculated from the area-weighted LAI of shrub PFTs in the same topounit.
 </entry>
 
+<entry id="use_surface_structure_shading" type="logical" category="elm_physics"
+       group="elm_inparm" valid_values="" value=".false.">
+If TRUE, reduce ground shortwave absorption using the optional
+TopounitStructureShadeFrac and TopounitStructureLightTrans surface-data
+properties. This represents shading by boardwalks or other structures; it does
+not implement a structure canopy energy balance.
+</entry>
+
 <!-- ========================================================================================  -->
 <!-- Former CPP tokens -->
 <!-- ========================================================================================  -->

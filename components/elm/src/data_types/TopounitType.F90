@@ -62,6 +62,8 @@ module TopounitType
     logical , pointer :: is_bog     (:) => null() ! true when this topounit represents a bog
     real(r8), pointer :: peat_depth (:) => null() ! peat depth above restrictive till (m)
     real(r8), pointer :: till_ksat  (:) => null() ! restrictive till saturated conductivity (mm/s)
+    real(r8), pointer :: structure_shade_frac (:) => null() ! fraction covered by a shading structure [-]
+    real(r8), pointer :: structure_light_trans(:) => null() ! structure shortwave transmissivity [-]
     real(r8), pointer :: emissivity (:) => null() ! mean surface emissivity
     real(r8), pointer :: surfalb_dir(:,:) => null() ! (topunit,numrad) mean surface albedo (direct)
     real(r8), pointer :: surfalb_dif(:,:) => null() ! (topunit,numrad) mean surface albedo (diffuse)
@@ -111,6 +113,8 @@ module TopounitType
     allocate(this%is_bog      (begt:endt)) ; this%is_bog      (:) = .false.
     allocate(this%peat_depth  (begt:endt)) ; this%peat_depth  (:) = 0._r8
     allocate(this%till_ksat   (begt:endt)) ; this%till_ksat   (:) = 0._r8
+    allocate(this%structure_shade_frac(begt:endt)) ; this%structure_shade_frac(:) = 0._r8
+    allocate(this%structure_light_trans(begt:endt)); this%structure_light_trans(:) = 1._r8
     allocate(this%emissivity  (begt:endt)) ; this%emissivity  (:) = spval
     allocate(this%surfalb_dir (begt:endt,1:numrad)) ; this%surfalb_dir(:,:) = spval
     allocate(this%surfalb_dif (begt:endt,1:numrad)) ; this%surfalb_dif(:,:) = spval 
@@ -148,6 +152,8 @@ module TopounitType
     deallocate(this%is_bog      )
     deallocate(this%peat_depth  )
     deallocate(this%till_ksat   )
+    deallocate(this%structure_shade_frac)
+    deallocate(this%structure_light_trans)
     deallocate(this%emissivity  )
     deallocate(this%surfalb_dir )
     deallocate(this%surfalb_dif )

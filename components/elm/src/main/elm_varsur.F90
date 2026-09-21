@@ -59,6 +59,8 @@ module elm_varsur
   integer, pointer :: bog_tunit(:,:)  ! Bog flag: 1=bog, 0=non-bog
   real(r8), pointer :: peat_depth_tunit(:,:) ! Peat depth (m)
   real(r8), pointer :: till_ksat_tunit(:,:)  ! Restrictive till saturated conductivity (mm/s)
+  real(r8), pointer :: structure_shade_frac_tunit(:,:) ! Area fraction covered by a shading structure [-]
+  real(r8), pointer :: structure_light_trans_tunit(:,:) ! Structure shortwave transmissivity [-]
   
   real(r8),pointer :: firrig(:,:) 
   real(r8),pointer :: f_surf(:,:)  ! fraction of water withdraws from surfacewater

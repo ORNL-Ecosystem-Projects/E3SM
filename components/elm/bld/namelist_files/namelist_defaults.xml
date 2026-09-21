@@ -688,6 +688,8 @@ this mask will have smb calculated over the entire global land surface
 <use_finetop_rad>.false.</use_finetop_rad>
 <!-- Apply shrub-canopy attenuation to moss PAR -->
 <use_shrub_moss_shading>.false.</use_shrub_moss_shading>
+<!-- Apply topounit-resolved structure shading to ground shortwave -->
+<use_surface_structure_shading>.false.</use_surface_structure_shading>
 
 <!-- SNICAR (SNow, ICe, and Aerosol Radiative model) datasets -->
 <!--  ***********  Resolution independent:   ***********  -->
