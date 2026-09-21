@@ -11,7 +11,7 @@ module NitrogenDynamicsMod
   use shr_kind_mod        , only : r8 => shr_kind_r8
   use decompMod           , only : bounds_type
   use elm_varcon          , only : dzsoi_decomp, zisoi
-  use elm_varctl          , only : use_vertsoilc, use_fan
+  use elm_varctl          , only : use_vertsoilc, use_fan, use_humhol
   use subgridAveMod       , only : p2c, p2c_1d_filter
   use atm2lndType         , only : atm2lnd_type
   use CNStateType         , only : cnstate_type
@@ -26,6 +26,7 @@ module NitrogenDynamicsMod
   use elm_varctl          , only : use_fates
   use ELMFatesInterfaceMod  , only : hlm_fates_interface_type
   use FrictionVelocityType, only : frictionvel_type
+  use CanopyStateType     , only : canopystate_type
   use SoilStateType       , only : soilstate_type
   use FanUpdateMod        , only : fan_eval
 
@@ -114,7 +115,7 @@ contains
   end subroutine readNitrogenDynamicsParams
 
   !-----------------------------------------------------------------------
-  subroutine NitrogenDeposition( bounds, atm2lnd_vars )
+  subroutine NitrogenDeposition( bounds, atm2lnd_vars, canopystate_vars )
     !
     ! !DESCRIPTION:
     ! On the radiation time step, update the nitrogen deposition rate
@@ -126,14 +127,21 @@ contains
     ! !ARGUMENTS:
     type(bounds_type)  , intent(in)  :: bounds 
     type(atm2lnd_type) , intent(in)  :: atm2lnd_vars
+    type(canopystate_type), intent(in) :: canopystate_vars
     !
     ! !LOCAL VARIABLES:
-    integer :: g,c,fc                  ! indices
+    integer :: g,c,p                   ! indices
     integer :: begc, endc
+    real(r8) :: moss_column_lai
+    real(r8) :: moss_ndep_fraction
+    real(r8) :: total_ndep_flux
+    real(r8), parameter :: k_intercept = 1.2_r8
     !-----------------------------------------------------------------------
 
     associate(&
          forc_ndep     =>  atm2lnd_vars%forc_ndep_grc           , & ! Input:  [real(r8) (:)]  nitrogen deposition rate (gN/m2/s)
+         elai          =>  canopystate_vars%elai_patch          , & ! Input:  [real(r8) (:)] exposed leaf area index
+         ndep_to_npool =>  veg_nf%ndep_to_npool                 , & ! Output: [real(r8) (:)] intercepted atmospheric N deposition
          ndep_to_sminn =>  col_nf%ndep_to_sminn   & ! Output: [real(r8) (:)]
          )
       begc = bounds%begc
@@ -142,10 +150,38 @@ contains
       ! Loop through columns
       ! Note: why loop through all columns? adjusting to filter is nonBFB due to averaging, but ndep_to_sminn is only needed
       ! for active soil columns
-      !$acc parallel loop independent gang vector default(present)
       do c = begc, endc 
          g = col_pp%gridcell(c)
-         ndep_to_sminn(c) = forc_ndep(g)
+         total_ndep_flux = forc_ndep(g)
+         ndep_to_sminn(c) = total_ndep_flux
+
+         do p = col_pp%pfti(c), col_pp%pftf(c)
+            ndep_to_npool(p) = 0._r8
+         end do
+
+         if (use_humhol) then
+            moss_column_lai = 0._r8
+            do p = col_pp%pfti(c), col_pp%pftf(c)
+               if (veg_pp%active(p) .and. &
+                   nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+                  moss_column_lai = moss_column_lai + elai(p) * veg_pp%wtcol(p)
+               end if
+            end do
+
+            if (moss_column_lai > 0._r8) then
+               moss_ndep_fraction = 1._r8 - exp(-k_intercept * moss_column_lai)
+               ndep_to_sminn(c) = total_ndep_flux * (1._r8 - moss_ndep_fraction)
+               do p = col_pp%pfti(c), col_pp%pftf(c)
+                  if (veg_pp%active(p) .and. &
+                      nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+                     ! LAI-weighted patch flux; column weighting recovers the
+                     ! intercepted fraction exactly even with multiple moss PFTs.
+                     ndep_to_npool(p) = total_ndep_flux * moss_ndep_fraction * &
+                          elai(p) / moss_column_lai
+                  end if
+               end do
+            end if
+         end if
       end do
 
     end associate

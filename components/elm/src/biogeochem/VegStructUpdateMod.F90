@@ -7,7 +7,7 @@ module VegStructUpdateMod
   use shr_kind_mod         , only: r8 => shr_kind_r8
   use shr_sys_mod          , only : shr_sys_flush
   use shr_const_mod        , only : SHR_CONST_PI
-  use elm_varctl           , only : iulog
+  use elm_varctl           , only : iulog, use_humhol
   use VegetationPropertiesType     , only : veg_vp
   use FrictionVelocityType , only : frictionvel_type
   use CNStateType          , only : cnstate_type
@@ -61,6 +61,8 @@ contains
     integer  :: fp         ! lake filter indices
     real(r8) :: ol         ! thickness of canopy layer covered by snow (m)
     real(r8) :: fb         ! fraction of canopy layer covered by snow
+    real(r8) :: fb_snow    ! fraction of moss exposed above snow
+    real(r8) :: fb_water   ! fraction of moss exposed above surface water
     real(r8) :: tlai_old   ! for use in Zeng tsai formula
     real(r8) :: tsai_old   ! for use in Zeng tsai formula
     real(r8) :: tsai_min   ! PATCH derived minimum tsai
@@ -92,6 +94,7 @@ contains
          stocking           =>  veg_vp%stocking               ,       & ! Input:  [real(r8) (:) ] Stocking density [stems / hectare]
 
          snow_depth         =>  col_ws%snow_depth    ,       & ! Input:  [real(r8) (:) ] snow height (m)
+         h2osfc             =>  col_ws%h2osfc        ,       & ! Input:  [real(r8) (:) ] surface water storage (mm)
 
          forc_hgt_u_patch   =>  frictionvel_vars%forc_hgt_u_patch ,       & ! Input:  [real(r8) (:) ] observational height of wind at pft-level [m]
 
@@ -243,8 +246,15 @@ contains
             ol = min( max(snow_depth(c)-bendresist(ivt(p))*hbot(p), 0._r8), (bendresist(ivt(p))*(htop(p)-hbot(p)))**vegshape(ivt(p)))
             fb = (ol / max(1.e-06_r8, bendresist(ivt(p))*(htop(p)-hbot(p))**vegshape(ivt(p))))
          else
-            fb = max(min(snow_depth(c),0.2_r8),0._r8)/0.2_r8   ! 0.2m is assumed
-            !depth of snow required for complete burial of grasses
+            if (use_humhol .and. nint(veg_vp%nonvascular(ivt(p))) == 1) then
+               ! Moss has a 0.1 m photosynthetically active layer and can be
+               ! buried by either snow or ponded surface water.
+               fb_snow = 1._r8 - max(min(snow_depth(c), 0.1_r8), 0._r8)/0.1_r8
+               fb_water = 1._r8 - max(min(h2osfc(c)/1000._r8, 0.1_r8), 0._r8)/0.1_r8
+               fb = 1._r8 - min(fb_snow, fb_water)
+            else
+               fb = max(min(snow_depth(c),0.2_r8),0._r8)/0.2_r8
+            end if
          endif
 
          elai(p) = max(tlai(p)*(1._r8 - fb), 0.0_r8)

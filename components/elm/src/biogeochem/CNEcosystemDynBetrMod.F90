@@ -182,7 +182,7 @@ module CNEcosystemDynBetrMod
        ! --------------------------------------------------
 
        call t_startf('CNDeposition')
-       call NitrogenDeposition(bounds, atm2lnd_vars)
+       call NitrogenDeposition(bounds, atm2lnd_vars, canopystate_vars)
 
        if (use_fan) then
           call fan_eval(bounds, num_soilc, filter_soilc, &

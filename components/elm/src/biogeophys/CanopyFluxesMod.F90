@@ -13,13 +13,13 @@ module CanopyFluxesMod
   use shr_kind_mod          , only : r8 => shr_kind_r8
   use shr_log_mod           , only : errMsg => shr_log_errMsg
   use abortutils            , only : endrun
-  use elm_varctl            , only : iulog, use_cn, use_lch4, use_c13, use_c14, use_fates
+  use elm_varctl            , only : iulog, use_cn, use_lch4, use_c13, use_c14, use_fates, use_humhol
   use elm_varctl            , only : use_hydrstress, use_finetop_rad
   use elm_varpar            , only : nlevgrnd, nlevsno
   use elm_varcon            , only : namep
   use elm_varcon            , only : mm_epsilon
   use elm_varcon            , only : pa_to_kpa
-  use pftvarcon             , only : crop, nfixer
+  use pftvarcon             , only : crop, nfixer, blower_u0, blower_lambda
   use decompMod             , only : bounds_type
   use PhotosynthesisMod     , only : Photosynthesis, PhotosynthesisTotal, Fractionation, PhotoSynthesisHydraulicStress
   use SoilMoistStressMod    , only : calc_effective_soilporosity, calc_volumetric_h2oliq
@@ -98,8 +98,9 @@ contains
     use elm_varcon         , only : sb, cpair, hvap, vkc, grav, denice
     use elm_varcon         , only : denh2o, tfrz, csoilc, tlsai_crit, alpha_aero
     use elm_varcon         , only : isecspday, degpsec
-    use pftvarcon          , only : irrigated
+    use pftvarcon          , only : irrigated, slatop, vwc_moss_offset
     use elm_varcon         , only : c14ratio
+    use elm_time_manager   , only : get_curr_date
     use shr_const_mod      , only : SHR_CONST_PI
 
     !NEW
@@ -173,6 +174,7 @@ contains
     real(r8) :: zldis(bounds%begp:bounds%endp)       ! reference height "minus" zero displacement height [m]
     real(r8) :: wc                                   ! convective velocity [m/s]
     real(r8) :: ugust_total(bounds%begp:bounds%endp) ! gustiness including convective velocity [m/s]
+    real(r8) :: ublow(bounds%begp:bounds%endp)       ! treatment blower contribution [m/s]
     real(r8) :: dth(bounds%begp:bounds%endp)         ! diff of virtual temp. between ref. height and surface
     real(r8) :: dthv(bounds%begp:bounds%endp)        ! diff of vir. poten. temp. between ref. height and surface
     real(r8) :: dqh(bounds%begp:bounds%endp)         ! diff of humidity between ref. height and surface
@@ -315,6 +317,8 @@ contains
     real(r8) :: tau_diff(bounds%begp:bounds%endp) ! Difference from previous iteration tau
     real(r8) :: prev_tau(bounds%begp:bounds%endp) ! Previous iteration tau
     real(r8) :: prev_tau_diff(bounds%begp:bounds%endp) ! Previous difference in iteration tau
+    real(r8) :: liquid_vol_3, liquid_vol_4, vwc_moss
+    integer  :: yr, mon, day, sec
     real(r8) :: slope_rad, deg2rad
     character(len=64) :: event !! timing event
 
@@ -418,6 +422,8 @@ contains
          rh_ref2m_r           => veg_ws%rh_ref2m_r          , & ! Output: [real(r8) (:)   ]  Rural 2 m height surface relative humidity (%)
          rh_ref2m             => veg_ws%rh_ref2m            , & ! Output: [real(r8) (:)   ]  2 m height surface relative humidity (%)
          rhaf                 => veg_ws%rh_af               , & ! Output: [real(r8) (:)   ]  fractional humidity of canopy air [dimensionless]
+         h2o_moss_inter       => veg_ws%h2o_moss_inter      , & ! Output: [real(r8) (:)   ]  internal moss water content
+         h2o_moss_wc          => veg_ws%h2o_moss_wc         , & ! Output: [real(r8) (:)   ]  total moss water content
 
          !pgwgt                => veg_pp%wtgcell              , & ! Input:  [integer  (:)   ]  pft's weight in gridcell
          n_irrig_steps_left   => veg_wf%n_irrig_steps_left   , & ! Output: [integer  (:)   ]  number of time steps for which we still need to irrigate today
@@ -471,6 +477,7 @@ contains
       end if
       ! Determine step size
       dtime = dtime_mod
+      call get_curr_date(yr, mon, day, sec)
       !yr = year_curr; mon = mon_curr; day = day_curr;
       time = secs_curr;
 
@@ -730,17 +737,24 @@ contains
          qaf(p) = (forc_q(t)+qg(c))/2._r8
 
          ! Initialize winds for iteration.
+         ublow(p) = 0._r8
+         if (use_humhol .and. blower_u0 > 0._r8 .and. yr >= 2015) then
+            ublow(p) = blower_u0 * exp(-min(htop(p), &
+                 max(0._r8, forc_hgt_u_patch(p) - displa(p))) / &
+                 max(blower_lambda, 1.e-6_r8))
+         end if
          if (implicit_stress) then
             wind_speed0(p) = max(0.01_r8, hypot(forc_u(t), forc_v(t)))
             wind_speed_adj(p) = wind_speed0(p)
-            ur(p) = max(1.0_r8, sqrt(wind_speed_adj(p)**2 + ugust(t)**2))
+            ur(p) = max(1.0_r8, sqrt(wind_speed_adj(p)**2 + ugust(t)**2 + ublow(p)**2))
 
             prev_tau(p) = tau_est(t)
          else
-            ur(p) = max(1.0_r8,sqrt(forc_u(t)*forc_u(t)+forc_v(t)*forc_v(t)+ugust(t)*ugust(t)))
+            ur(p) = max(1.0_r8,sqrt(forc_u(t)*forc_u(t)+forc_v(t)*forc_v(t)+ &
+                 ugust(t)*ugust(t)+ublow(p)*ublow(p)))
          end if
          tau_diff(p) = 1.e100_r8
-         ugust_total(p) = ugust(t)
+         ugust_total(p) = sqrt(ugust(t)**2 + ublow(p)**2)
 
          dth(p) = thm(p)-taf(p)
          dqh(p) = forc_q(t)-qaf(p)
@@ -818,7 +832,7 @@ contains
                call shr_flux_update_stress(wind_speed0(p), wsresp(t), tau_est(t), &
                     tau(p), prev_tau(p), tau_diff(p), prev_tau_diff(p), &
                     wind_speed_adj(p))
-               ur(p) = max(1.0_r8, sqrt(wind_speed_adj(p)**2 + ugust(t)**2))
+               ur(p) = max(1.0_r8, sqrt(wind_speed_adj(p)**2 + ugust(t)**2 + ublow(p)**2))
             end if
 
             ! Bulk boundary layer resistance of leaves
@@ -877,6 +891,25 @@ contains
             svpts(p) = el(p)                         ! Pa
             eah(p) = forc_pbot(t) * qaf(p) / mm_epsilon   ! Pa
             rhaf(p) = eah(p)/svpts(p)
+
+            if (use_humhol .and. &
+                nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+               ! Sphagnum internal water is diagnosed from liquid water in
+               ! layers 3-4; intercepted canopy water supplies the external store.
+               liquid_vol_3 = h2osoi_liq(c,3) / (denh2o * col_pp%dz(c,3))
+               liquid_vol_4 = h2osoi_liq(c,4) / (denh2o * col_pp%dz(c,4))
+               vwc_moss = max(0._r8, min(0.25_r8, &
+                    0.5_r8 * (liquid_vol_3 + liquid_vol_4) - vwc_moss_offset))
+               h2o_moss_inter(p) = -18032._r8 * vwc_moss**4 + &
+                    7248.1_r8 * vwc_moss**3 - 591.74_r8 * vwc_moss**2 + &
+                    6.9031_r8 * vwc_moss + 0.4945_r8
+               if (elai(p) > 0._r8) then
+                  h2o_moss_wc(p) = h2o_moss_inter(p) + h2ocan(p) / &
+                       (elai(p) / slatop(veg_pp%itype(p)) * 2._r8 / 1000._r8)
+               else
+                  h2o_moss_wc(p) = 0._r8
+               end if
+            end if
 
             ! variables for history fields
             rah_above(p)  = rah(p,above_canopy)
@@ -1162,7 +1195,7 @@ contains
                zeta(p) = max(-100._r8,min(zeta(p),-0.01_r8))
                if ((.not. atm_gustiness) .or. force_land_gustiness) then
                   wc = beta*(-grav*ustar(p)*thvstar*zii/thv(c))**0.333_r8
-                  ugust_total(p) = sqrt(ugust(t)**2 + wc**2)
+                  ugust_total(p) = sqrt(ugust(t)**2 + wc**2 + ublow(p)**2)
                   um(p) = sqrt(ur(p)*ur(p)+wc*wc)
                else
                   um(p) = max(ur(p),0.1_r8)

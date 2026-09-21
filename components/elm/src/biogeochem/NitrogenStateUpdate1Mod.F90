@@ -344,6 +344,9 @@ contains
               veg_ns%npool(p)    = veg_ns%npool(p)    + veg_nf%retransn_to_npool(p)*dt
               veg_ns%retransn(p) = veg_ns%retransn(p) - veg_nf%retransn_to_npool(p)*dt
 
+              ! atmospheric deposition intercepted directly by nonvascular vegetation
+              veg_ns%npool(p) = veg_ns%npool(p) + veg_nf%ndep_to_npool(p)*dt
+
               ! allocation fluxes
               veg_ns%npool(p)           = veg_ns%npool(p)          - veg_nf%npool_to_leafn(p)*dt
               veg_ns%leafn(p)           = veg_ns%leafn(p)          + veg_nf%npool_to_leafn(p)*dt

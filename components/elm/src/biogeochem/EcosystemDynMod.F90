@@ -384,7 +384,7 @@ contains
 
     event = 'CNDeposition'
     call t_start_lnd(event)
-    call NitrogenDeposition(bounds, atm2lnd_vars)
+    call NitrogenDeposition(bounds, atm2lnd_vars, canopystate_vars)
     if (use_fan) then
       call fan_eval(bounds, num_soilc, filter_soilc, &
            atm2lnd_vars, soilstate_vars, frictionvel_vars)

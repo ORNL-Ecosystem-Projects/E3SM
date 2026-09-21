@@ -311,6 +311,11 @@ module pftvarcon
   real(r8)              :: peatland_fen_outlet_depth ! terminal fen outlet stage above ground (mm)
   real(r8)              :: peat_zsapric_depth       ! fibric-to-sapric hydraulic transition depth (m)
   real(r8)              :: hummock_acrotelm_depth   ! hummock surface offset applied to peat hydraulics (m)
+  real(r8)              :: vpd_max_moss             ! VPD for maximum moss stress (Pa)
+  real(r8)              :: vpd_min_moss             ! VPD below which moss is unstressed (Pa)
+  real(r8)              :: blower_u0                ! treatment blower wind at the surface (m/s)
+  real(r8)              :: blower_lambda            ! blower wind e-folding height (m)
+  real(r8)              :: vwc_moss_offset          ! offset applied to moss-layer volumetric water
   ! Soil erosion ground cover
   real(r8), allocatable :: gcbc_p(:)           !effectiveness of surface cover in reducing rainfall-driven erosion
   real(r8), allocatable :: gcbc_q(:)           !effectiveness of surface cover in reducing runoff-driven erosion
@@ -1050,6 +1055,22 @@ contains
     if (.not. readv) peat_zsapric_depth = 0.40_r8
     call ncd_io('hummock_acrotelm_depth', hummock_acrotelm_depth, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if (.not. readv) hummock_acrotelm_depth = 0.15_r8
+    call ncd_io('vpd_max_moss', vpd_max_moss, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) vpd_max_moss = 1500._r8
+    call ncd_io('vpd_min_moss', vpd_min_moss, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) vpd_min_moss = 1000._r8
+    call ncd_io('blower_u0', blower_u0, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) blower_u0 = 0._r8
+    call ncd_io('blower_lambda', blower_lambda, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) blower_lambda = 2._r8
+    call ncd_io('vwc_moss_offset', vwc_moss_offset, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) vwc_moss_offset = 0._r8
+    if (vpd_max_moss <= vpd_min_moss) then
+       call endrun(msg='vpd_max_moss must exceed vpd_min_moss'//errMsg(__FILE__,__LINE__))
+    end if
+    if (blower_lambda <= 0._r8) then
+       call endrun(msg='blower_lambda must be positive'//errMsg(__FILE__,__LINE__))
+    end if
     !if ( .not. readv) call endrun(msg='ERROR:  error in reading in pft data'//errMsg(__FILE__,__LINE__))
     call ncd_io('fnr', fnr, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if ( .not. readv) call endrun(msg='ERROR:  error in reading in pft data'//errMsg(__FILE__,__LINE__))

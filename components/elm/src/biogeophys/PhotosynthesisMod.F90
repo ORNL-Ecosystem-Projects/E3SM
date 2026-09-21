@@ -11,7 +11,7 @@ module  PhotosynthesisMod
   use shr_kind_mod        , only : r8 => shr_kind_r8
   use shr_log_mod         , only : errMsg => shr_log_errMsg
   use abortutils          , only : endrun
-  use elm_varctl          , only : iulog, use_c13, use_c14, use_cn, use_fates
+  use elm_varctl          , only : iulog, use_c13, use_c14, use_cn, use_fates, use_humhol
   use elm_varpar          , only : nlevcan
   use elm_varctl          , only : use_hydrstress
   use elm_varpar          , only : nvegwcs, mxpft_nc, mxpft
@@ -226,6 +226,7 @@ contains
     use elm_varcon     , only : rgas, tfrz
     use elm_varctl     , only : carbon_only
     use pftvarcon      , only : vcmax_np1, vcmax_np2, vcmax_np3, vcmax_np4, jmax_np1, jmax_np2, jmax_np3
+    use pftvarcon      , only : vpd_max_moss, vpd_min_moss
     !
     ! !ARGUMENTS:
     type(bounds_type)      , intent(in)    :: bounds
@@ -359,6 +360,7 @@ contains
     real(r8) :: sum_nscaler
     real(r8) :: total_lai
     integer  :: rad_layers_patch
+    real(r8) :: wcscaler, vpd_pa, vpd_stress
     !------------------------------------------------------------------------------
     ! Temperature and soil water response functions
 
@@ -368,7 +370,6 @@ contains
          flnr          => veg_vp%flnr                          , & ! Input:  [real(r8) (:)   ]  fraction of leaf N in the Rubisco enzyme (gN Rubisco / gN leaf)
          fnitr         => veg_vp%fnitr                         , & ! Input:  [real(r8) (:)   ]  foliage nitrogen limitation factor (-)
          slatop        => veg_vp%slatop                        , & ! Input:  [real(r8) (:)   ]  specific leaf area at top of canopy, projected area basis [m^2/gC]
-
          forc_pbot     => top_as%pbot                              , & ! Input:  [real(r8) (:)   ]  atmospheric pressure (Pa)
 
          t_veg         => veg_es%t_veg             , & ! Input:  [real(r8) (:)   ]  vegetation temperature (Kelvin)
@@ -406,7 +407,8 @@ contains
          leafp_storage => veg_ps%leafp_storage , &
          leafp_xfer    => veg_ps%leafp_xfer    , &
          i_vcmax       => veg_vp%i_vc                          , &
-         s_vcmax       => veg_vp%s_vc                            &
+         s_vcmax       => veg_vp%s_vc                          , &
+         h2o_moss_wc   => veg_ws%h2o_moss_wc                     &
          )
 
       if (phase == 'sun') then !sun
@@ -516,10 +518,39 @@ contains
             mbbopt(p)   = veg_vp%mbbopt(veg_pp%itype(p))   !4._r8
          end if
 
-         ! Soil water stress applied to Ball-Berry parameters
-
-         bbb(p) = max (bbbopt(p)*btran(p), 1._r8)
-         mbb(p) = mbbopt(p)
+         ! Soil water stress applied to Ball-Berry parameters. Nonvascular
+         ! moss uses a surface-conductance relation and tissue-water/VPD
+         ! limitation instead of vascular-root btran.
+         if (use_humhol .and. &
+             nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+            bbb(p) = (-0.195_r8 + 0.134_r8*(h2o_moss_wc(p)+1._r8) - &
+                 0.0256_r8*(h2o_moss_wc(p)+1._r8)**2 + &
+                 0.00228_r8*(h2o_moss_wc(p)+1._r8)**3 - &
+                 0.0000984_r8*(h2o_moss_wc(p)+1._r8)**4 + &
+                 0.00000168_r8*(h2o_moss_wc(p)+1._r8)**5) * 1.e6_r8/0.634_r8
+            bbb(p) = min(0.07_r8*1.e6_r8/0.634_r8, &
+                 max(0.005_r8*1.e6_r8/0.634_r8, bbb(p)))
+            if (h2o_moss_wc(p) > 0._r8) then
+               wcscaler = -0.656_r8 + 1.654_r8*log10(h2o_moss_wc(p))
+            else
+               wcscaler = 0._r8
+            end if
+            vpd_pa = max(0._r8, esat_tv(p) - eair(p))
+            if (vpd_pa <= vpd_min_moss) then
+               vpd_stress = 1._r8
+            else if (vpd_pa >= vpd_max_moss) then
+               vpd_stress = 0.1_r8
+            else
+               vpd_stress = 1._r8 - 0.9_r8 * &
+                    (vpd_pa-vpd_min_moss)/(vpd_max_moss-vpd_min_moss)
+            end if
+            wcscaler = max(0._r8, min(1._r8, wcscaler*vpd_stress))
+            bbb(p) = max(bbb(p)*wcscaler, 1._r8)
+            mbb(p) = 0._r8
+         else
+            bbb(p) = max(bbbopt(p)*btran(p), 1._r8)
+            mbb(p) = mbbopt(p)
+         end if
 
          ! kc, ko, cp, from: Bernacchi et al (2001) Plant, Cell and Environment 24:253-259
          !
@@ -767,6 +798,13 @@ contains
 
                vcmaxse = 668.39_r8 - 1.07_r8 * min(max((t10(p)-tfrz),11._r8),35._r8)
                jmaxse  = 659.70_r8 - 0.75_r8 * min(max((t10(p)-tfrz),11._r8),35._r8)
+               if (use_humhol .and. &
+                   nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+                  vcmaxse = 673.39_r8 - 0.54_r8 * &
+                       min(max(t10(p)-tfrz, 5._r8), 15._r8)
+                  jmaxse = 664.70_r8 - 0.65_r8 * &
+                       min(max(t10(p)-tfrz, 5._r8), 15._r8)
+               end if
                tpuse = vcmaxse
                vcmaxc = fth25 (vcmaxhd, vcmaxse)
                jmaxc  = fth25 (jmaxhd, jmaxse)
@@ -787,8 +825,14 @@ contains
 
             ! Adjust for soil water
 
-            vcmax_z(p,iv) = vcmax_z(p,iv) * btran(p)
-            lmr_z(p,iv) = lmr_z(p,iv) * btran(p)
+            if (use_humhol .and. &
+                nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+               vcmax_z(p,iv) = vcmax_z(p,iv) * wcscaler
+               lmr_z(p,iv) = lmr_z(p,iv) * wcscaler
+            else
+               vcmax_z(p,iv) = vcmax_z(p,iv) * btran(p)
+               lmr_z(p,iv) = lmr_z(p,iv) * btran(p)
+            end if
 
             ! output variable
             vcmax25_top(p) = vcmax25top
@@ -2338,6 +2382,13 @@ contains
 
                vcmaxse = 668.39_r8 - 1.07_r8 * min(max((t10(p)-tfrz),11._r8),35._r8)
                jmaxse  = 659.70_r8 - 0.75_r8 * min(max((t10(p)-tfrz),11._r8),35._r8)
+               if (use_humhol .and. &
+                   nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+                  vcmaxse = 673.39_r8 - 0.54_r8 * &
+                       min(max(t10(p)-tfrz, 5._r8), 15._r8)
+                  jmaxse = 664.70_r8 - 0.65_r8 * &
+                       min(max(t10(p)-tfrz, 5._r8), 15._r8)
+               end if
                tpuse = vcmaxse
                vcmaxc = fth25 (vcmaxhd, vcmaxse)
                jmaxc  = fth25 (jmaxhd, jmaxse)
