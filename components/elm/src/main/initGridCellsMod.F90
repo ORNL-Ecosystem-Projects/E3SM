@@ -255,7 +255,9 @@ contains
     ! Initialize each topounit for a gridcell.
     !
     ! !USES
-    use elm_varsur , only : wt_tunit, elv_tunit, slp_tunit, asp_tunit, num_tunit_per_grd 
+    use elm_varsur , only : wt_tunit, elv_tunit, dist_tunit, regional_target_tunit
+    use elm_varsur , only : slp_tunit, asp_tunit, bog_tunit, peat_depth_tunit, till_ksat_tunit
+    use elm_varsur , only : num_tunit_per_grd
     use elm_varctl , only : use_IM2_hillslope_hydrology
     use topounit_varcon   , only : max_topounits, has_topounit 
     ! !ARGUMENTS
@@ -264,11 +266,14 @@ contains
     integer, intent(in) :: num_tunits_per_grd
     ! !LOCAL VARIABLES
     integer :: topounit, ntopos,topo_ind, num_topo_tmp,tmp_tpu
-    real(r8) :: wttopounit2gridcell, elv, slp                  ! topounit weight on gridcell, elevation and slope
+    real(r8) :: wttopounit2gridcell, elv, dist, slp            ! topounit weight, elevation, distance and slope
+    real(r8) :: peat_depth, till_ksat                          ! peat depth and till conductivity
     integer :: asp                                             ! aspect
+    integer :: regional_target, regional_target_ti             ! regional lateral-flow target
     integer :: t1, t2, begt, endt, dn_index, min_index         ! local topounit indexing
     real(r8):: t1_elev, t2_elev, min_elev, dn_elev             ! for finding downhill neighbor
     logical :: is_tpu_active                                   ! Check if topounit is active
+    logical :: is_bog                                          ! true when this topounit represents a bog
      
     tmp_tpu = num_tunits_per_grd       ! Actual number of topounits per grid
     if(max_topounits > 1) then
@@ -294,10 +299,22 @@ contains
            endif                    
        endif
        elv = elv_tunit(gdc,topounit) !grc_pp%televation(gdc,topounit) 
+       dist = dist_tunit(gdc,topounit)
        slp = slp_tunit(gdc,topounit) !grc_pp%tslope(gdc,topounit) 
        asp = asp_tunit(gdc,topounit) !grc_pp%taspect(gdc,topounit) 
+       is_bog = bog_tunit(gdc,topounit) /= 0
+       peat_depth = peat_depth_tunit(gdc,topounit)
+       till_ksat = till_ksat_tunit(gdc,topounit)
+       regional_target = regional_target_tunit(gdc,topounit)
+       if (regional_target > 0 .and. regional_target <= ntopos .and. regional_target /= topounit) then
+          regional_target_ti = begt + regional_target - 1
+       else
+          regional_target_ti = -1
+       endif
        topo_ind = topounit
-       call add_topounit(ti=ti, gi=gdc, wtgcell=wttopounit2gridcell, elv=elv, slp=slp, asp=asp,topo_ind=topo_ind,is_tpu_active = is_tpu_active)
+       call add_topounit(ti=ti, gi=gdc, wtgcell=wttopounit2gridcell, elv=elv, dist=dist, slp=slp, &
+            asp=asp, topo_ind=topo_ind, is_tpu_active=is_tpu_active, is_bog=is_bog, &
+            peat_depth=peat_depth, till_ksat=till_ksat, regional_target_ti=regional_target_ti)
     end do
 
     ! Loop through topounits again to find its nearest downhill topounit on this gridcell
