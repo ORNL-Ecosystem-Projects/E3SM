@@ -980,6 +980,8 @@ contains
    cnstate_vars%onset_gddflag_patch(p)         = 0._r8
    cnstate_vars%onset_fdd_patch(p)             = 0._r8
    cnstate_vars%onset_gdd_patch(p)             = 0._r8
+   cnstate_vars%onset_chil_patch(p)            = 0._r8
+   cnstate_vars%dayl_temp(p)                   = 0._r8
    cnstate_vars%onset_swi_patch(p)             = 0._r8
    cnstate_vars%offset_flag_patch(p)           = 0._r8
    cnstate_vars%offset_counter_patch(p)        = 0._r8

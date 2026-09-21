@@ -33,6 +33,7 @@ module pftvarcon
   integer :: ndllf_evr_tmp_tree     !value for Needleleaf evergreen temperate tree
   integer :: ndllf_evr_brl_tree     !value for Needleleaf evergreen boreal tree
   integer :: ndllf_dcd_brl_tree     !value for Needleleaf deciduous boreal tree
+  integer :: npeat_ndllf_dcd_brl_tree = -1 !value for peatland Needleleaf deciduous boreal tree
   integer :: nbrdlf_evr_trp_tree    !value for Broadleaf evergreen tropical tree
   integer :: nbrdlf_evr_tmp_tree    !value for Broadleaf evergreen temperate tree
   integer :: nbrdlf_dcd_trp_tree    !value for Broadleaf deciduous tropical tree
@@ -42,6 +43,7 @@ module pftvarcon
   integer :: nbrdlf_evr_shrub       !value for Broadleaf evergreen shrub
   integer :: nbrdlf_dcd_tmp_shrub   !value for Broadleaf deciduous temperate shrub
   integer :: nbrdlf_dcd_brl_shrub   !value for Broadleaf deciduous boreal shrub
+  integer :: npeat_nbrdlf_dcd_brl_shrub = -1 !value for peatland Broadleaf deciduous boreal shrub
   integer :: nc3_arctic_grass       !value for C3 arctic grass
   integer :: nc3_nonarctic_grass    !value for C3 non-arctic grass
   integer :: nc4_grass              !value for C4 grass
@@ -295,6 +297,8 @@ module pftvarcon
   real(r8), allocatable :: mbbopt(:)           !Ball-Berry stomatal conductance slope
   real(r8), allocatable :: nstor(:)            !Nitrogen storage pool timescale
   real(r8), allocatable :: br_xr(:)            !Base rate for excess respiration
+  real(r8), allocatable :: crit_gdd1(:)        !Critical GDD intercept
+  real(r8), allocatable :: crit_gdd2(:)        !Critical GDD slope with MAT
   real(r8)              :: tc_stress           !Critial temperature for moisture stress
   real(r8), allocatable :: vcmax_np1(:)        !vcmax~np relationship coefficient
   real(r8), allocatable :: vcmax_np2(:)        !vcmax~np relationship coefficient
@@ -651,6 +655,8 @@ contains
     allocate( mbbopt             (0:mxpft) )
     allocate( nstor              (0:mxpft) )
     allocate( br_xr              (0:mxpft) )
+    allocate( crit_gdd1          (0:mxpft) )
+    allocate( crit_gdd2          (0:mxpft) )
     ! Ground cover for soil erosion
     allocate( gcbc_p             (0:mxpft) )
     allocate( gcbc_q             (0:mxpft) )
@@ -1113,6 +1119,10 @@ contains
     call ncd_io('br_xr', br_xr, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     !if ( .not. readv) call endrun(msg='ERROR:  error in reading in pft data'//errMsg(__FILE__,__LINE__))
     if (.not. readv) br_xr(:) = 0._r8
+    call ncd_io('crit_gdd1', crit_gdd1, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) crit_gdd1(:) = 4.8_r8
+    call ncd_io('crit_gdd2', crit_gdd2, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) crit_gdd2(:) = 0.13_r8
     call ncd_io('tc_stress', tc_stress, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if ( .not. readv) call endrun(msg='ERROR:  error in reading in pft data'//errMsg(__FILE__,__LINE__))
     call ncd_io('gcbc_p',gcbc_p, 'read', ncid, readvar=readv, posNOTonfile=.true.)
@@ -1233,6 +1243,13 @@ contains
     do i=0, mxpft
        if (temp_iscft(i) == 1._r8) iscft(i) = .true.
        if (temp_iscft(i) == 0._r8) iscft(i) = .false.
+    end do
+
+    npeat_ndllf_dcd_brl_tree = -1
+    npeat_nbrdlf_dcd_brl_shrub = -1
+    do i = 0, npft-1
+       if (trim(pftname(i)) == 'peatlnd_needleleaf_deciduous_boreal_tree') npeat_ndllf_dcd_brl_tree = i
+       if (trim(pftname(i)) == 'peatlnd_broadleaf_deciduous_boreal_shrub') npeat_nbrdlf_dcd_brl_shrub = i
     end do
 
    if ( PFT_DEFAULT ) then
