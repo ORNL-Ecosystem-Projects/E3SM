@@ -18,7 +18,7 @@ module SoilStateType
   use elm_varcon      , only : secspday, mu, denh2o, denice, grlnd
   use landunit_varcon , only : istice, istdlak, istwet, istsoil, istcrop, istice_mec
   use column_varcon   , only : icol_roof, icol_sunwall, icol_shadewall, icol_road_perv, icol_road_imperv
-  use elm_varctl      , only : use_cn, use_lch4,use_dynroot, use_fates
+  use elm_varctl      , only : use_cn, use_lch4,use_dynroot, use_fates, use_humhol
   use elm_varctl      , only : use_erosion
   use elm_varctl      , only : use_var_soil_thick
   use elm_varctl      , only : iulog, fsurdat, hist_wrtch4diag
@@ -26,6 +26,7 @@ module SoilStateType
   use LandunitType    , only : lun_pp                
   use ColumnType      , only : col_pp                
   use VegetationType  , only : veg_pp      
+  use TopounitType    , only : top_pp
   use topounit_varcon , only : max_topounits
   use GridcellType    , only : grc_pp   
   !
@@ -326,6 +327,7 @@ contains
     !
     ! !USES:
     use pftvarcon           , only : noveg, roota_par, rootb_par
+    use pftvarcon           , only : peat_zsapric_depth, hummock_acrotelm_depth
     use fileutils           , only : getfil
     use organicFileMod      , only : organicrd
     use SharedParamsMod   , only : ParamsShareInst
@@ -338,7 +340,8 @@ contains
     type(bounds_type), intent(in) :: bounds
     !
                                                         ! !LOCAL VARIABLES:
-    integer            :: p, lev, c, l, g, j,t,ti,topi            ! indices
+    integer            :: p, lev, c, l, g, j,t,ti,topi,tpeer      ! indices
+    integer            :: num_bog_topounits                       ! number of active bog peat topounits
     real(r8)           :: om_frac                       ! organic matter fraction
     real(r8)           :: om_tkm         = 0.25_r8      ! thermal conductivity of organic soil (Farouki, 1986) [W/m/K]
     real(r8)           :: om_watsat_lake = 0.9_r8       ! porosity of organic soil
@@ -352,6 +355,9 @@ contains
     real(r8)           :: om_tkd         = 0.05_r8      ! thermal conductivity of dry organic soil (Farouki, 1981)
     real(r8)           :: om_b                          ! Clapp Hornberger paramater for oragnic soil (Letts, 2000)
     real(r8)           :: zsapric        = 0.5_r8       ! depth (m) that organic matter takes on characteristics of sapric peat
+    real(r8)           :: zsapric_col                   ! column-local organic hydraulic transition depth (m)
+    real(r8)           :: organic_depth                 ! depth used by organic hydraulic functions (m)
+    real(r8)           :: max_bog_elevation             ! highest active bog-peat elevation in this gridcell (m)
     real(r8)           :: csol_bedrock   = 2.0e6_r8     ! vol. heat capacity of granite/sandstone  J/(m3 K)(Shabbir, 2000)
     real(r8)           :: pcalpha        = 0.5_r8       ! percolation threshold
     real(r8)           :: pcbeta         = 0.139_r8     ! percolation exponent
@@ -383,6 +389,8 @@ contains
     integer            :: ipedof
     integer            :: begc, endc
     integer            :: begg, endg
+    logical            :: use_bog_organic               ! apply peatland-specific organic hydraulics
+    logical            :: use_hummock_organic           ! topounit is the highest active bog peat surface
     real(r8), parameter :: min_liquid_pressure = -10132500._r8 ! Minimum soil liquid water pressure [mm]
     !-----------------------------------------------------------------------
     begc = bounds%begc; endc= bounds%endc
@@ -746,10 +754,38 @@ contains
                 call pedotransf(ipedof, sand, clay, &
                      this%watsat_col(c,lev), this%bsw_col(c,lev), this%sucsat_col(c,lev), xksat)
 
-                om_watsat         = max(0.93_r8 - 0.1_r8   *(zsoi(lev)/zsapric), 0.83_r8)
-                om_b              = min(2.7_r8  + 9.3_r8   *(zsoi(lev)/zsapric), 12.0_r8)
-                om_sucsat         = min(10.3_r8 - 0.2_r8   *(zsoi(lev)/zsapric), 10.1_r8)
-                om_hksat          = max(0.28_r8 - 0.2799_r8*(zsoi(lev)/zsapric), 0.0001_r8)
+                use_bog_organic = use_humhol .and. top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8
+                use_hummock_organic = .false.
+                if (use_bog_organic) then
+                   max_bog_elevation = -huge(1._r8)
+                   num_bog_topounits = 0
+                   do tpeer = grc_pp%topi(g), grc_pp%topf(g)
+                      if (top_pp%active(tpeer) .and. top_pp%is_bog(tpeer) .and. &
+                           top_pp%peat_depth(tpeer) > 0._r8) then
+                         max_bog_elevation = max(max_bog_elevation, top_pp%elevation(tpeer))
+                         num_bog_topounits = num_bog_topounits + 1
+                      end if
+                   end do
+                   use_hummock_organic = num_bog_topounits > 1 .and. &
+                        abs(top_pp%elevation(t) - max_bog_elevation) < 1.e-8_r8
+                end if
+
+                zsapric_col = zsapric
+                organic_depth = zsoi(lev)
+                if (use_bog_organic) zsapric_col = peat_zsapric_depth
+                if (use_hummock_organic) organic_depth = max(0._r8, zsoi(lev) - hummock_acrotelm_depth)
+
+                om_watsat         = max(0.93_r8 - 0.1_r8   *(organic_depth/zsapric_col), 0.83_r8)
+                om_b              = min(2.7_r8  + 9.3_r8   *(organic_depth/zsapric_col), 12.0_r8)
+                if (use_bog_organic) then
+                   ! Preserve the modern ELM calculation outside peatland topounits.
+                   ! For bog peat, follow the intended CLM-SPRUCE fibric-to-sapric
+                   ! profile: suction declines from 10.3 mm toward a 10.1 mm floor.
+                   om_sucsat      = max(10.3_r8 - 0.2_r8   *(organic_depth/zsapric_col), 10.1_r8)
+                else
+                   om_sucsat      = min(10.3_r8 - 0.2_r8   *(organic_depth/zsapric_col), 10.1_r8)
+                end if
+                om_hksat          = max(0.28_r8 - 0.2799_r8*(organic_depth/zsapric_col), 0.0001_r8)
 
                 this%bd_col(c,lev)        = (1._r8 - this%watsat_col(c,lev))*2.7e3_r8
                 this%watsat_col(c,lev)    = (1._r8 - om_frac) * this%watsat_col(c,lev) + om_watsat*om_frac

@@ -309,6 +309,8 @@ module pftvarcon
   real(r8)              :: humhol_ht                ! fallback hummock-hollow relief (m)
   real(r8)              :: qflx_h2osfc_surfrate     ! peat surface-water export coefficient (1/(mm s))
   real(r8)              :: peatland_fen_outlet_depth ! terminal fen outlet stage above ground (mm)
+  real(r8)              :: peat_zsapric_depth       ! fibric-to-sapric hydraulic transition depth (m)
+  real(r8)              :: hummock_acrotelm_depth   ! hummock surface offset applied to peat hydraulics (m)
   ! Soil erosion ground cover
   real(r8), allocatable :: gcbc_p(:)           !effectiveness of surface cover in reducing rainfall-driven erosion
   real(r8), allocatable :: gcbc_q(:)           !effectiveness of surface cover in reducing runoff-driven erosion
@@ -1044,6 +1046,10 @@ contains
     if (peatland_fen_outlet_depth < 0._r8) then
        call endrun(msg='peatland_fen_outlet_depth must be nonnegative'//errMsg(__FILE__,__LINE__))
     end if
+    call ncd_io('peat_zsapric_depth', peat_zsapric_depth, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) peat_zsapric_depth = 0.40_r8
+    call ncd_io('hummock_acrotelm_depth', hummock_acrotelm_depth, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) hummock_acrotelm_depth = 0.15_r8
     !if ( .not. readv) call endrun(msg='ERROR:  error in reading in pft data'//errMsg(__FILE__,__LINE__))
     call ncd_io('fnr', fnr, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if ( .not. readv) call endrun(msg='ERROR:  error in reading in pft data'//errMsg(__FILE__,__LINE__))
