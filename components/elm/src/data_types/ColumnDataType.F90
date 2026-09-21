@@ -26,6 +26,7 @@ module ColumnDataType
   use elm_varctl      , only : bound_h2osoi, use_cn, iulog, use_vertsoilc, spinup_state
   use elm_varctl      , only : ero_ccycle
   use elm_varctl      , only : use_elm_interface, use_pflotran, pf_cmode
+  use elm_varctl      , only : use_peatland_vertical_transport
   use elm_varctl      , only : hist_wrtch4diag, use_century_decomp
   use elm_varctl      , only : get_carbontag, override_bgc_restart_mismatch_dump
   use elm_varctl      , only : pf_hmode, nu_com
@@ -7740,9 +7741,11 @@ contains
          end if
        end do
 
-       if (use_pflotran .and. pf_cmode) then
-          ! note: the follwoing should be useful to non-pflotran-coupled, but seems cause 1 BFB test unmatching.
-          ! add up all vertical transport tendency terms and calculate total som leaching loss as the sum of these
+       if ((use_pflotran .and. pf_cmode) .or. use_peatland_vertical_transport) then
+          ! Add up all vertical transport tendency terms. Their column integral
+          ! is the net lower-boundary gain/loss that must be included in the
+          ! ecosystem C balance. Keep the standard non-PFLOTRAN path unchanged
+          ! unless peatland vertical transport is explicitly enabled.
           do l = 1, ndecomp_pools
              do fc = 1,num_soilc
                 c = filter_soilc(fc)

@@ -17,6 +17,7 @@ module CNCarbonFluxType
   use LandunitType           , only : lun_pp
   use elm_varctl             , only : nu_com
   use elm_varctl             , only : use_elm_interface, use_pflotran, pf_cmode, use_vertsoilc
+  use elm_varctl             , only : use_peatland_vertical_transport
   use AnnualFluxDribbler     , only : annual_flux_dribbler_type, annual_flux_dribbler_gridcell
   ! 
   ! !PUBLIC TYPES:
@@ -2270,9 +2271,11 @@ contains
          end if
        end do
 
-       if (use_pflotran .and. pf_cmode) then
-          ! note: the follwoing should be useful to non-pflotran-coupled, but seems cause 1 BFB test unmatching.
-          ! add up all vertical transport tendency terms and calculate total som leaching loss as the sum of these
+       if ((use_pflotran .and. pf_cmode) .or. use_peatland_vertical_transport) then
+          ! Add up all vertical transport tendency terms. Their column integral
+          ! is the net lower-boundary gain/loss that must be included in the
+          ! ecosystem C balance. Keep the standard non-PFLOTRAN path unchanged
+          ! unless peatland vertical transport is explicitly enabled.
           do l = 1, ndecomp_pools
              do fc = 1,num_soilc
                 c = filter_soilc(fc)
