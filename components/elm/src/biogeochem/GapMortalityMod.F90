@@ -32,8 +32,9 @@ module GapMortalityMod
   public :: readGapMortParams
 
   type, public :: CNGapMortParamsType
-      real(r8), pointer :: am     => null() ! mortality rate based on annual rate, fractional mortality (1/yr)
-      real(r8), pointer :: k_mort => null() ! coeff. of growth efficiency in mortality equation
+      real(r8), pointer :: am                   => null() ! default fractional mortality rate (1/yr)
+      real(r8), pointer :: am_peatland_shrub    => null() ! peatland deciduous shrub mortality rate (1/yr)
+      real(r8), pointer :: k_mort               => null() ! coeff. of growth efficiency in mortality equation
   end type CNGapMortParamsType
 
   type(CNGapMortParamsType),public ::  CNGapMortParamsInst
@@ -50,7 +51,8 @@ contains
       ! Read in parameters
       !
       ! !USES:
-      use ncdio_pio  , only : file_desc_t,ncd_io
+      use ncdio_pio  , only : file_desc_t, ncd_io, ncd_inqvdlen, ncd_inqvdname
+      use pftvarcon  , only : npeat_nbrdlf_dcd_brl_shrub
       !
       ! !ARGUMENTS:
       implicit none
@@ -61,14 +63,51 @@ contains
       character(len=100) :: errCode = '-Error reading in parameters file:'
       logical            :: readv ! has variable been read in or not
       real(r8)           :: tempr ! temporary to read in constant
+      real(r8), allocatable :: r_mort_pft(:) ! PFT-specific mortality rates
+      integer            :: inq_err ! parameter-dimension inquiry status
+      integer            :: r_mort_size ! length of the r_mort dimension
+      character(len=32)  :: r_mort_dim ! name of the r_mort dimension
       character(len=100) :: tString ! temp. var for reading
       !-----------------------------------------------------------------------
-      allocate(CNGapMortParamsInst%am, CNGapMortParamsInst%k_mort)
+      allocate(CNGapMortParamsInst%am, CNGapMortParamsInst%am_peatland_shrub, &
+           CNGapMortParamsInst%k_mort)
 
       tString='r_mort'
-      call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
-      if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
-      CNGapMortParamsInst%am=tempr
+      call ncd_inqvdname(ncid, varname=trim(tString), dimnum=1, &
+           dname=r_mort_dim, err_code=inq_err)
+      if (inq_err /= 0) then
+         call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+      end if
+
+      if (trim(r_mort_dim) == 'pft') then
+         call ncd_inqvdlen(ncid, varname=trim(tString), dimnum=1, &
+              dlen=r_mort_size, err_code=inq_err)
+         if (inq_err /= 0 .or. r_mort_size < 1) then
+            call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+         end if
+         allocate(r_mort_pft(0:r_mort_size-1))
+         call ncd_io(varname=trim(tString), data=r_mort_pft, flag='read', &
+              ncid=ncid, readvar=readv)
+         if (.not. readv) then
+            call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+         end if
+         CNGapMortParamsInst%am = r_mort_pft(0)
+         CNGapMortParamsInst%am_peatland_shrub = CNGapMortParamsInst%am
+         if (npeat_nbrdlf_dcd_brl_shrub >= 0 .and. &
+              npeat_nbrdlf_dcd_brl_shrub < r_mort_size) then
+            CNGapMortParamsInst%am_peatland_shrub = &
+                 r_mort_pft(npeat_nbrdlf_dcd_brl_shrub)
+         end if
+         deallocate(r_mort_pft)
+      else
+         call ncd_io(varname=trim(tString), data=tempr, flag='read', &
+              ncid=ncid, readvar=readv)
+         if (.not. readv) then
+            call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+         end if
+         CNGapMortParamsInst%am = tempr
+         CNGapMortParamsInst%am_peatland_shrub = tempr
+      end if
 
       tString='k_mort'
       call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
@@ -87,7 +126,7 @@ contains
     ! !USES:
     !$acc routine seq
     use elm_varcon       , only: secspday
-    use pftvarcon        , only: iscft
+    use pftvarcon        , only: iscft, npeat_nbrdlf_dcd_brl_shrub
     use elm_varctl       , only: spinup_state, spinup_mortality_factor
     !
     ! !ARGUMENTS:
@@ -114,8 +153,6 @@ contains
          )
 
       dayspyr = dayspyr_mod
-      ! set the mortality rate based on annual rate
-      am = CNGapMortParamsInst%am
       ! set coeff of growth efficiency in mortality equation
       k_mort = CNGapMortParamsInst%k_mort
 
@@ -128,8 +165,12 @@ contains
       do fp = 1,num_soilp
          p = filter_soilp(fp)
 
+         am = CNGapMortParamsInst%am
          if (nu_com .eq. 'RD') then
              am = cnstate_vars%r_mort_cal_patch(p)
+         end if
+         if (ivt(p) == npeat_nbrdlf_dcd_brl_shrub) then
+             am = CNGapMortParamsInst%am_peatland_shrub
          end if
 
 
