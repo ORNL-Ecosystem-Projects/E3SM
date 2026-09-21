@@ -70,7 +70,7 @@ module controlMod
                         vsfm_lateral_model_type, vsfm_include_seepage_bc, &
                         use_hydrstress, lateral_connectivity, domain_decomp_type, &
                         use_IM2_hillslope_hydrology, use_humhol, use_fen_bog_drainage, &
-                        use_petsc_thermal_model, &
+                        use_peatland_roots, use_petsc_thermal_model, &
                         do_budgets, budget_inst, budget_daily, budget_month, &
                         budget_ann, budget_ltann, budget_ltend, &
                         use_lnd_rof_two_way, use_ocn_lnd_one_way, &
@@ -372,7 +372,7 @@ contains
     namelist /elm_inparm/ &
          use_IM2_hillslope_hydrology
 
-    namelist /elm_inparm/ use_humhol, use_fen_bog_drainage
+    namelist /elm_inparm/ use_humhol, use_fen_bog_drainage, use_peatland_roots
 
     namelist /elm_inparm/ &
          use_petsc_thermal_model
@@ -1024,9 +1024,15 @@ contains
     call mpi_bcast (use_IM2_hillslope_hydrology, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_humhol, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_fen_bog_drainage, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_peatland_roots, 1, MPI_LOGICAL, 0, mpicom, ier)
 
     if (use_fen_bog_drainage .and. .not. use_humhol) then
        call endrun(msg=' ERROR: use_fen_bog_drainage=.true. requires '//&
+            'use_humhol=.true.'//errMsg(__FILE__, __LINE__))
+    end if
+
+    if (use_peatland_roots .and. .not. use_humhol) then
+       call endrun(msg=' ERROR: use_peatland_roots=.true. requires '//&
             'use_humhol=.true.'//errMsg(__FILE__, __LINE__))
     end if
 
@@ -1149,6 +1155,7 @@ contains
     write(iulog,*) '    use_IM2_hillslope_hydrology = ', use_IM2_hillslope_hydrology
     write(iulog,*) '    use_humhol = ', use_humhol
     write(iulog,*) '    use_fen_bog_drainage = ', use_fen_bog_drainage
+    write(iulog,*) '    use_peatland_roots = ', use_peatland_roots
     write(iulog,*) '    use_atm_downscaling_to_topunit = ', use_atm_downscaling_to_topunit
     write(iulog,*) '    precip_downscaling_method = ', precip_downscaling_method
     write(iulog,*) 'input data files:'

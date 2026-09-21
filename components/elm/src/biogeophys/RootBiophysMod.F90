@@ -13,6 +13,7 @@ module RootBiophysMod
   public :: init_vegrootfr
   public :: init_rootprof
   integer, parameter :: zeng_2001_root = 0 !the zeng 2001 root profile function
+  integer, parameter :: peatland_root = 1  !linear root profile for peatland topounits
 
   integer :: root_prof_method              !select the type of root profile parameterization   
   !-------------------------------------------------------------------------------------- 
@@ -27,6 +28,9 @@ contains
     implicit none
 
     root_prof_method = zeng_2001_root
+    ! init_vegrootfr retains the standard Zeng profile outside peatland
+    ! topounits and selects the peatland profile at runtime when use_humhol
+    ! and use_peatland_roots are enabled.
 
   end subroutine init_rootprof
 
@@ -42,6 +46,8 @@ contains
     use shr_log_mod    , only : errMsg => shr_log_errMsg
     use decompMod      , only : bounds_type
     use abortutils     , only : endrun         
+    use TopounitType   , only : top_pp
+    use VegetationType , only : veg_pp
     !
     ! !ARGUMENTS:
     implicit none
@@ -53,13 +59,29 @@ contains
     !
     ! !LOCAL VARIABLES:
     character(len=32) :: subname = 'init_vegrootfr'  ! subroutine name
+    real(r8) :: rootfr_zeng(bounds%begp:bounds%endp, 1:nlevsoi)
+    real(r8) :: rootfr_peatland(bounds%begp:bounds%endp, 1:nlevsoi)
+    integer  :: p, t
     !------------------------------------------------------------------------
 
     SHR_ASSERT_ALL((ubound(rootfr) == (/bounds%endp, nlevgrnd/)), errMsg(__FILE__, __LINE__))
+    rootfr(bounds%begp:bounds%endp, 1:nlevgrnd) = 0._r8
 
     select case (root_prof_method)
     case (zeng_2001_root)
-       rootfr(bounds%begp:bounds%endp, 1 : nlevsoi) = zeng2001_rootfr(bounds, nlevsoi, nlev2bed)
+       rootfr_zeng(bounds%begp:bounds%endp, 1:nlevsoi) = zeng2001_rootfr(bounds, nlevsoi, nlev2bed)
+       rootfr_peatland(bounds%begp:bounds%endp, 1:nlevsoi) = peatland_rootfr(bounds, nlevsoi, nlev2bed)
+       do p = bounds%begp, bounds%endp
+          if (veg_pp%wtcol(p) <= 0._r8) cycle
+          t = veg_pp%topounit(p)
+          if (is_peatland_topounit(t)) then
+             rootfr(p,1:nlevsoi) = rootfr_peatland(p,1:nlevsoi)
+          else
+             rootfr(p,1:nlevsoi) = rootfr_zeng(p,1:nlevsoi)
+          end if
+       end do
+    case (peatland_root)
+       rootfr(bounds%begp:bounds%endp, 1:nlevsoi) = peatland_rootfr(bounds, nlevsoi, nlev2bed)
 
        !case (jackson_1996_root)
        !jackson root, 1996, to be defined later
@@ -70,9 +92,87 @@ contains
     case default
        call endrun(subname // ':: a root fraction function must be specified!')   
     end select
-    rootfr(bounds%begp:bounds%endp,nlevsoi+1:nlevgrnd)=0._r8   
+
+    call check_rootfr(bounds, nlevsoi, rootfr, subname)
 
   end subroutine init_vegrootfr
+
+  !--------------------------------------------------------------------------------------
+  subroutine check_rootfr(bounds, nlevsoi, rootfr, context)
+    !
+    ! DESCRIPTION
+    ! Fail early when a root parameter set produces an invalid layer profile.
+    ! In particular, Zeng parameters accidentally supplied to the linear
+    ! peatland equation can produce negative fractions or totals above one.
+    !
+    use shr_kind_mod   , only : r8 => shr_kind_r8
+    use decompMod      , only : bounds_type
+    use abortutils     , only : endrun
+    use elm_varctl     , only : iulog
+    use elm_varcon     , only : namep
+    use shr_infnan_mod , only : isnan => shr_infnan_isnan
+    use VegetationType , only : veg_pp
+    use TopounitType   , only : top_pp
+    !
+    ! !ARGUMENTS:
+    implicit none
+    type(bounds_type), intent(in) :: bounds
+    integer,          intent(in) :: nlevsoi
+    real(r8),         intent(in) :: rootfr(bounds%begp: , 1: )
+    character(len=*), intent(in) :: context
+    !
+    ! !LOCAL VARIABLES:
+    integer  :: p, lev, t
+    real(r8) :: profile_sum
+    logical  :: invalid_profile
+    !------------------------------------------------------------------------
+
+    do p = bounds%begp, bounds%endp
+       if (veg_pp%wtcol(p) <= 0._r8) cycle
+       profile_sum = sum(rootfr(p,1:nlevsoi))
+       invalid_profile = profile_sum > 1._r8 + 1.e-10_r8
+       do lev = 1, nlevsoi
+          invalid_profile = invalid_profile .or. rootfr(p,lev) < 0._r8
+          invalid_profile = invalid_profile .or. isnan(rootfr(p,lev))
+       end do
+       if (invalid_profile) then
+          t = veg_pp%topounit(p)
+          write(iulog,*) 'invalid root fraction profile diagnostic'
+          write(iulog,*) 'patch index               = ', p
+          write(iulog,*) 'column index              = ', veg_pp%column(p)
+          write(iulog,*) 'topounit index            = ', t
+          write(iulog,*) 'topounit topo_grc_ind     = ', top_pp%topo_grc_ind(t)
+          write(iulog,*) 'patch weight in column    = ', veg_pp%wtcol(p)
+          write(iulog,*) 'pft type                  = ', veg_pp%itype(p)
+          write(iulog,*) 'root fraction sum         = ', profile_sum
+          write(iulog,*) 'root fraction profile     = ', rootfr(p,1:nlevsoi)
+          write(iulog,*) 'topounit peat_depth       = ', top_pp%peat_depth(t)
+          call endrun(decomp_index=p, elmlevel=namep, &
+               msg=trim(context)//':: negative, NaN, or greater-than-unity root profile')
+       end if
+    end do
+  end subroutine check_rootfr
+
+  !--------------------------------------------------------------------------------------
+  logical function is_peatland_topounit(t)
+    !
+    ! DESCRIPTION
+    ! Select the peatland root profile only where peatland physics is enabled
+    ! and the topounit carries a positive peat depth. This keeps non-peatland
+    ! topounits bit-for-bit on the standard Zeng path.
+    !
+    use shr_kind_mod, only : r8 => shr_kind_r8
+    use elm_varctl  , only : use_humhol, use_peatland_roots
+    use TopounitType, only : top_pp
+    !
+    ! !ARGUMENTS:
+    implicit none
+    integer, intent(in) :: t
+    !------------------------------------------------------------------------
+
+    is_peatland_topounit = use_humhol .and. use_peatland_roots .and. &
+         top_pp%peat_depth(t) > 0._r8
+  end function is_peatland_topounit
 
   !--------------------------------------------------------------------------------------   
   function zeng2001_rootfr(bounds, ubj, njbed) result(rootfr)
@@ -110,6 +210,8 @@ contains
     ! Y(d =0.1m) = 1-beta^(10 cm) and Y(d=d_obs)=0.99 with
     ! beta & d_obs given in Zeng et al. (1998).   
 
+    rootfr(bounds%begp:bounds%endp, 1:ubj) = 0._r8
+
     do p = bounds%begp,bounds%endp   
 
        if (veg_pp%itype(p) /= noveg .and. .not.veg_pp%is_fates(p)) then
@@ -144,5 +246,99 @@ contains
     return
 
   end function zeng2001_rootfr
+
+  !--------------------------------------------------------------------------------------
+  function peatland_rootfr(bounds, ubj, njbed) result(rootfr)
+    !
+    ! DESCRIPTION
+    ! Compute the linear cumulative root profile developed from SPRUCE field
+    ! observations. The implementation is named for its model domain rather
+    ! than the calibration site so it can be used by any peatland topounit.
+    ! For this profile, roota_par is the slope (1/m) and rootb_par is the
+    ! dimensionless intercept of cumulative root fraction.
+    !
+    ! USES
+    use shr_kind_mod   , only : r8 => shr_kind_r8
+    use decompMod      , only : bounds_type
+    use pftvarcon      , only : noveg, roota_par, rootb_par, graminoid, pftname
+    use elm_varctl     , only : use_var_soil_thick
+    use VegetationType , only : veg_pp
+    use ColumnType     , only : col_pp
+    !
+    ! !ARGUMENTS:
+    implicit none
+    type(bounds_type), intent(in) :: bounds
+    integer,           intent(in) :: ubj
+    integer,           intent(in) :: njbed(bounds%begc: )
+    !
+    ! !RESULT
+    real(r8) :: rootfr(bounds%begp:bounds%endp, 1:ubj)
+    !
+    ! !LOCAL VARIABLES:
+    integer  :: p, lev, c, nlevbed, ivt, reference_ivt
+    real(r8) :: totrootfr
+    real(r8) :: cumdist, cumdist_last, roota_slope, rootb_intercept
+    !------------------------------------------------------------------------
+
+    rootfr(bounds%begp:bounds%endp, 1:ubj) = 0._r8
+
+    ! Prefer an explicitly named peatland needleleaf PFT when the expanded
+    ! table is present; otherwise use the standard boreal needleleaf PFT.
+    ! Looking up by name avoids assuming that either table uses fixed indices.
+    reference_ivt = -1
+    do ivt = lbound(pftname,1), ubound(pftname,1)
+       if (trim(pftname(ivt)) == 'needleleaf_evergreen_boreal_tree') then
+          reference_ivt = ivt
+       else if (trim(pftname(ivt)) == 'peatlnd_needleleaf_evergreen_boreal_tree') then
+          reference_ivt = ivt
+          exit
+       end if
+    end do
+
+    do p = bounds%begp, bounds%endp
+       if (veg_pp%itype(p) /= noveg .and. .not. veg_pp%is_fates(p)) then
+          c = veg_pp%column(p)
+          rootb_intercept = rootb_par(veg_pp%itype(p))
+          roota_slope = roota_par(veg_pp%itype(p))
+
+          if (trim(pftname(veg_pp%itype(p))) == 'broadleaf_deciduous_boreal_tree' .and. &
+               reference_ivt >= 0) then
+             ! The original SPRUCE parameterization used the calibrated
+             ! peatland needleleaf profile for this tree PFT.
+             rootb_intercept = rootb_par(reference_ivt)
+             roota_slope = roota_par(reference_ivt)
+          else if (graminoid(veg_pp%itype(p)) == 1._r8) then
+             ! Standard graminoid roota/rootb values belong to the Zeng
+             ! equation, so use a one-metre, zero-intercept linear profile.
+             rootb_intercept = 0._r8
+             roota_slope = 1._r8
+          end if
+
+          nlevbed = njbed(c)
+          totrootfr = 0._r8
+          cumdist_last = rootb_intercept
+          do lev = 1, ubj
+             cumdist = min(cumdist_last + col_pp%dz(c,lev) * roota_slope, 1._r8)
+             if (cumdist > 0._r8) then
+                rootfr(p,lev) = max(cumdist, 0._r8) - max(cumdist_last, 0._r8)
+             end if
+             if (lev == 1 .and. rootb_intercept > 0._r8) then
+                rootfr(p,lev) = rootfr(p,lev) + rootb_intercept
+             end if
+             cumdist_last = cumdist
+             if (lev <= nlevbed) totrootfr = totrootfr + rootfr(p,lev)
+          end do
+
+          ! Adjust layer root fractions if nlev2bed < nlevsoi.
+          if (use_var_soil_thick .and. nlevbed < ubj) then
+             if (totrootfr > 0._r8) then
+                rootfr(p,1:nlevbed) = rootfr(p,1:nlevbed) / totrootfr
+             end if
+             rootfr(p,nlevbed+1:ubj) = 0._r8
+          end if
+       end if
+    end do
+
+  end function peatland_rootfr
 
 end module RootBiophysMod

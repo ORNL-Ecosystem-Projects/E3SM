@@ -268,7 +268,7 @@ contains
     !
     ! !USES:
       !$acc routine seq
-    use elm_varctl           , only : use_var_soil_thick, use_humhol, iulog
+    use elm_varctl           , only : use_var_soil_thick, use_humhol, use_peatland_roots, iulog
     use shr_kind_mod         , only : r8 => shr_kind_r8
     use shr_const_mod        , only : SHR_CONST_TKFRZ, SHR_CONST_LATICE, SHR_CONST_G
     use decompMod            , only : bounds_type
@@ -352,6 +352,7 @@ contains
     real(r8) :: dsmpds                                       !temporary variable
     real(r8) :: dhkds                                        !temporary variable
     real(r8) :: hktmp                                        !temporary variable
+    real(r8) :: root_demand_below_wt                         ! positive demand remapped to water-table layer (mm/s)
     real(r8) :: h2osoi_liq_before(bounds%begc:bounds%endc,1:nlevgrnd)
     real(r8) :: h2osoi_liq_after_implicit(bounds%begc:bounds%endc,1:nlevgrnd)
     real(r8) :: h2osoi_liq_after_solve(bounds%begc:bounds%endc,1:nlevgrnd)
@@ -488,6 +489,27 @@ contains
          endif
 
       end do
+
+      ! Peatland roots may extend below the diagnosed water table, but those
+      ! roots cannot independently extract liquid from multiple saturated
+      ! layers. Preserve the total positive transpiration sink while moving
+      ! all demand strictly below the water-table-containing layer into that
+      ! layer. Negative root fluxes (hydraulic redistribution) are unchanged.
+      do fc = 1, num_hydrologyc
+         c = filter_hydrologyc(fc)
+         t = col_pp%topounit(c)
+         nlevbed = nlev2bed(c)
+         if (.not. (use_humhol .and. use_peatland_roots .and. &
+              top_pp%peat_depth(t) > 0._r8)) cycle
+         if (jwt(c) >= nlevbed) cycle
+         root_demand_below_wt = 0._r8
+         do j = jwt(c)+2, nlevbed
+            root_demand_below_wt = root_demand_below_wt + max(0._r8,qflx_rootsoi_col(c,j))
+            qflx_rootsoi_col(c,j) = min(0._r8,qflx_rootsoi_col(c,j))
+         enddo
+         qflx_rootsoi_col(c,jwt(c)+1) = qflx_rootsoi_col(c,jwt(c)+1) + &
+              root_demand_below_wt
+      enddo
 
       ! calculate the equilibrium water content based on the water table depth
 

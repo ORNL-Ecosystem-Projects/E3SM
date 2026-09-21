@@ -5,6 +5,7 @@ module VerticalProfileMod
   !
   ! !USES:
   use shr_kind_mod    , only: r8 => shr_kind_r8
+  use shr_infnan_mod  , only: isnan => shr_infnan_isnan
   use shr_log_mod     , only : errMsg => shr_log_errMsg
   use decompMod       , only : bounds_type
   use abortutils      , only : endrun
@@ -330,6 +331,11 @@ contains
          leaf_prof_sum = 0._r8
          stem_prof_sum = 0._r8
          do j = 1, nlevdecomp
+            if (froot_prof(p,j) < 0._r8 .or. isnan(froot_prof(p,j))) then
+               write(iulog, *) 'invalid fine-root profile at p, j: ', p, j
+               write(iulog, *) 'froot_prof(p,:): ', froot_prof(p,:)
+               call endrun(msg=' ERROR: negative or NaN fine-root profile'//errMsg(__FILE__, __LINE__))
+            end if
             froot_prof_sum = froot_prof_sum + froot_prof(p,j) *  dzsoi_decomp(j)
             croot_prof_sum = croot_prof_sum + croot_prof(p,j) *  dzsoi_decomp(j)
             leaf_prof_sum = leaf_prof_sum + leaf_prof(p,j) *  dzsoi_decomp(j)

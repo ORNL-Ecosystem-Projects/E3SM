@@ -12,6 +12,7 @@ module AllocationMod
   use elm_varctl          , only : use_c13, use_c14, spinup_state
   use elm_varctl          , only : nyears_ad_carbon_only
   use elm_varctl          , only : use_fates
+  use elm_varctl          , only : use_peatland_roots
   use abortutils          , only : endrun
   use decompMod           , only : bounds_type
   use subgridAveMod       , only : p2c
@@ -23,6 +24,7 @@ module AllocationMod
   use VegetationPropertiesType      , only : veg_vp
   use LandunitType        , only : lun_pp
   use ColumnType          , only : col_pp
+  use TopounitType        , only : top_pp
   use ColumnDataType      , only : col_ws
   use ColumnDataType      , only : col_cf, c13_col_cf, c14_col_cf
   use ColumnDataType      , only : col_ns, col_nf, col_ps, col_pf
@@ -1114,6 +1116,8 @@ contains
    real(r8), parameter :: cn_stoich_var=0.2    ! variability of CN ratio
    real(r8), parameter :: cp_stoich_var=0.4    ! variability of CP ratio
    real(r8) :: sum1,sum2,sum_immob_no3,sum_immob_nh4,sum_immob_p,sum_pot_immob_p
+   real(r8) :: adaptive_profile_sum, adaptive_weight, uptake_fraction
+   logical  :: use_adaptive_patch_profile, adaptive_profile_has_n
    integer :: begc, endc 
 
    !-----------------------------------------------------------------------
@@ -1167,6 +1171,7 @@ contains
         plant_nh4demand_vr_patch     => veg_nf%plant_nh4demand_vr            , &
         plant_no3demand_vr_patch     => veg_nf%plant_no3demand_vr            , &
         plant_ndemand_vr_patch       => veg_nf%plant_ndemand_vr              , &
+        plant_ndemand                => veg_nf%plant_ndemand                 , &
         plant_pdemand_vr_patch       => veg_pf%plant_pdemand_vr            , &
         pnup_pfrootc                 => veg_ns%pnup_pfrootc                 , &
         isoilorder                   => cnstate_vars%isoilorder                               , &
@@ -1216,6 +1221,7 @@ contains
         actual_immob_p_vr            => col_pf%actual_immob_p_vr           , & ! Output: [real(r8) (:,:) ]
         bd                           => soilstate_vars%bd_col                               , &
         h2osoi_vol                   => col_ws%h2osoi_vol                      , &
+        watsat                       => soilstate_vars%watsat_col              , &
         pmnf_decomp_cascade          => col_nf%pmnf_decomp_cascade               , &
         pmpf_decomp_cascade          => col_pf%pmpf_decomp_cascade             , &
         leafc_storage                => veg_cs%leafc_storage                , &
@@ -1335,6 +1341,83 @@ contains
                  col_plant_pdemand_vr(c,j) = plant_pdemand_col(c) * puptake_prof(fc,j)
               end do
             end do
+
+            if (use_peatland_roots) then
+               ! Resolve demand by PFT so that the adaptive increment can be
+               ! restricted to vascular plants.  The weighted sum over patches
+               ! replaces, rather than supplements, the existing column demand.
+               !$acc parallel loop independent gang private(p,c,adaptive_profile_sum, &
+               !$acc& adaptive_weight,use_adaptive_patch_profile,adaptive_profile_has_n) default(present)
+               do fp = 1, num_soilp
+                  p = filter_soilp(fp)
+                  c = veg_pp%column(p)
+                  adaptive_profile_sum = 0._r8
+                  adaptive_profile_has_n = .false.
+                  use_adaptive_patch_profile = top_pp%peat_depth(col_pp%topounit(c)) > 0._r8 .and. &
+                       veg_pp%active(p) .and. ivt(p) /= noveg .and. veg_vp%nonvascular(ivt(p)) < 0.5_r8
+
+                  if (top_pp%peat_depth(col_pp%topounit(c)) > 0._r8 .and. &
+                       veg_pp%active(p) .and. ivt(p) /= noveg) then
+                     !$acc loop vector reduction(+:adaptive_profile_sum)
+                     do j = 1, nlevdecomp
+                        if (use_adaptive_patch_profile) then
+                           adaptive_weight = 0._r8
+                           if (watsat(c,j) > 0._r8 .and. &
+                                h2osoi_vol(c,j) < watsat(c,j) - 100._r8 * epsilon(watsat(c,j))) then
+                              adaptive_weight = max(froot_prof(p,j), 0._r8) * &
+                                   max(smin_no3_vr(c,j) + smin_nh4_vr(c,j), 0._r8)
+                           end if
+                        else
+                           ! Mosses and lichens retain their prescribed profile;
+                           ! they do not follow deep mineral-N redistribution.
+                           adaptive_weight = max(froot_prof(p,j), 0._r8)
+                        end if
+                        plant_ndemand_vr_patch(p,j) = adaptive_weight
+                        adaptive_profile_sum = adaptive_profile_sum + adaptive_weight * dzsoi_decomp(j)
+                     end do
+
+                     adaptive_profile_has_n = adaptive_profile_sum > tiny(1._r8)
+                     if (use_adaptive_patch_profile .and. .not. adaptive_profile_has_n) then
+                        adaptive_profile_sum = 0._r8
+                        !$acc loop vector reduction(+:adaptive_profile_sum)
+                        do j = 1, nlevdecomp
+                           plant_ndemand_vr_patch(p,j) = max(froot_prof(p,j), 0._r8)
+                           adaptive_profile_sum = adaptive_profile_sum + &
+                                plant_ndemand_vr_patch(p,j) * dzsoi_decomp(j)
+                        end do
+                     end if
+
+                     if (adaptive_profile_sum > tiny(1._r8)) then
+                        !$acc loop vector
+                        do j = 1, nlevdecomp
+                           plant_ndemand_vr_patch(p,j) = plant_ndemand(p) * &
+                                plant_ndemand_vr_patch(p,j) / adaptive_profile_sum
+                        end do
+                     else
+                        !$acc loop vector
+                        do j = 1, nlevdecomp
+                           plant_ndemand_vr_patch(p,j) = 0._r8
+                        end do
+                     end if
+                  end if
+               end do
+
+               !$acc parallel loop independent gang collapse(2) private(c,p) default(present)
+               do j = 1, nlevdecomp
+                  do fc = 1, num_soilc
+                     c = filter_soilc(fc)
+                     if (top_pp%peat_depth(col_pp%topounit(c)) > 0._r8) then
+                        col_plant_ndemand_vr(c,j) = 0._r8
+                        do p = col_pp%pfti(c), col_pp%pftf(c)
+                           if (veg_pp%active(p) .and. ivt(p) /= noveg) then
+                              col_plant_ndemand_vr(c,j) = col_plant_ndemand_vr(c,j) + &
+                                   plant_ndemand_vr_patch(p,j) * veg_pp%wtcol(p)
+                           end if
+                        end do
+                     end if
+                  end do
+               end do
+            end if
          else
 
            do fc=1,num_soilc
@@ -1861,6 +1944,33 @@ contains
         sminp_to_plant(c) = sum2
      end do !col_loop
 
+     if (use_peatland_roots .and. nu_com == 'RD' .and. .not. use_fates) then
+        ! Attribute the layer-resolved column uptake back to each PFT using
+        ! the same fulfillment fraction applied by RD competition.  This
+        ! conserves the column uptake while preventing nonvascular PFTs from
+        ! sharing the vascular adaptive profile.
+        !$acc parallel loop independent gang private(p,c,uptake_fraction,sum1) default(present)
+        do fp = 1, num_soilp
+           p = filter_soilp(fp)
+           c = veg_pp%column(p)
+           if (top_pp%peat_depth(col_pp%topounit(c)) > 0._r8 .and. &
+                veg_pp%active(p) .and. ivt(p) /= noveg) then
+              sum1 = 0._r8
+              !$acc loop vector reduction(+:sum1)
+              do j = 1, nlevdecomp
+                 if (col_plant_ndemand_vr(c,j) > tiny(1._r8)) then
+                    uptake_fraction = min(1._r8, max(0._r8, &
+                         sminn_to_plant_vr(c,j) / col_plant_ndemand_vr(c,j)))
+                 else
+                    uptake_fraction = 0._r8
+                 end if
+                 sum1 = sum1 + plant_ndemand_vr_patch(p,j) * uptake_fraction * dzsoi_decomp(j)
+              end do
+              sminn_to_plant_patch(p) = sum1
+           end if
+        end do
+     end if
+
      ! update column plant N/P demand, pft level plant NP uptake for ECA and MIC mode
      eca_filter: if (nu_com .eq. 'ECA' .or. nu_com .eq. 'MIC') then
 
@@ -2259,6 +2369,7 @@ contains
          smin_nh4_to_plant_vr         => col_nf%smin_nh4_to_plant_vr            , & ! Output: [real(r8) (:,:) ]
          smin_nh4_to_plant_patch      => veg_nf%smin_nh4_to_plant             , &
          smin_no3_to_plant_patch      => veg_nf%smin_no3_to_plant             , &
+         sminn_to_plant_patch         => veg_nf%sminn_to_plant                 , &
          sminp_to_plant_patch         => veg_pf%sminp_to_plant              , &
 
 
@@ -2285,7 +2396,12 @@ contains
          !$acc loop vector reduction(+:n_uptake_sum,p_uptake_sum)
          do p = col_pp%pfti(c), col_pp%pftf(c)
          if (veg_pp%active(p) .and. (veg_pp%itype(p) .ne. noveg)) then
-            n_uptake_sum = n_uptake_sum + plant_ndemand(p) * fpg(c)*veg_pp%wtcol(p)
+            if (use_peatland_roots .and. nu_com == 'RD' .and. .not. use_fates .and. &
+                 top_pp%peat_depth(col_pp%topounit(c)) > 0._r8) then
+               n_uptake_sum = n_uptake_sum + sminn_to_plant_patch(p) * veg_pp%wtcol(p)
+            else
+               n_uptake_sum = n_uptake_sum + plant_ndemand(p) * fpg(c)*veg_pp%wtcol(p)
+            end if
             p_uptake_sum= p_uptake_sum + plant_pdemand(p) * fpg_p(c)*veg_pp%wtcol(p)
          end if
 
@@ -3455,6 +3571,7 @@ contains
         npool_to_grainn_storage      => veg_nf%npool_to_grainn_storage     , & ! Output: [real(r8) (:)   ]  allocation to grain N storage (gN/m2/s)
         retransn_to_npool            => veg_nf%retransn_to_npool           , & ! Output: [real(r8) (:)   ]  deployment of retranslocated N (gN/m2/s)
         sminn_to_npool               => veg_nf%sminn_to_npool              , & ! Output: [real(r8) (:)   ]  deployment of soil mineral N uptake (gN/m2/s)
+        sminn_to_plant_patch         => veg_nf%sminn_to_plant              , & ! Input:  [real(r8) (:)   ]  realized patch N uptake (gN/m2/s)
 
         npool_to_leafn               => veg_nf%npool_to_leafn              , & ! Output: [real(r8) (:)   ]  allocation to leaf N (gN/m2/s)
         npool_to_leafn_storage       => veg_nf%npool_to_leafn_storage      , & ! Output: [real(r8) (:)   ]  allocation to leaf N storage (gN/m2/s)
@@ -3555,7 +3672,12 @@ contains
 
             if (veg_vp%nstor(ivt) > 1e-6_r8) then
               !N pool modification
-              sminn_to_npool(p) = plant_ndemand(p) * min(fpg(c), fpg_p(c))
+              if (use_peatland_roots .and. nu_com == 'RD' .and. .not. use_fates .and. &
+                   top_pp%peat_depth(col_pp%topounit(c)) > 0._r8) then
+                 sminn_to_npool(p) = min(sminn_to_plant_patch(p), plant_ndemand(p) * fpg_p(c))
+              else
+                 sminn_to_npool(p) = plant_ndemand(p) * min(fpg(c), fpg_p(c))
+              end if
               sminp_to_ppool(p) = plant_pdemand(p) * min(fpg(c), fpg_p(c))
 
               rc   = veg_vp%nstor(ivt) * max(annsum_npp(p) * n_allometry(p) / c_allometry(p), 0.01_r8)
@@ -3576,7 +3698,12 @@ contains
               plant_palloc(p) = (plant_pdemand(p) + retransp_to_ppool(p)) / r
 
             else
-              sminn_to_npool(p) = plant_ndemand(p) * fpg(c)
+              if (use_peatland_roots .and. nu_com == 'RD' .and. .not. use_fates .and. &
+                   top_pp%peat_depth(col_pp%topounit(c)) > 0._r8) then
+                 sminn_to_npool(p) = sminn_to_plant_patch(p)
+              else
+                 sminn_to_npool(p) = plant_ndemand(p) * fpg(c)
+              end if
               sminp_to_ppool(p) = plant_pdemand(p) * fpg_p(c)
 
               plant_nalloc(p) = sminn_to_npool(p) + retransn_to_npool(p)

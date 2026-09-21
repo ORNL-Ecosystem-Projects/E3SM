@@ -831,6 +831,16 @@ It requires use_humhol and is disabled by default; regional cases must opt in
 explicitly rather than being classified by their number of active topounits.
 </entry>
 
+<entry id="use_peatland_roots" type="logical" category="physics"
+       group="elm_inparm" valid_values="" value=".false.">
+If TRUE, use the linear peatland root profile on peat-bearing topounits. With
+native ELM vegetation and RD nutrient competition, also redistribute vascular
+plant N demand among rooted, unsaturated peat layers according to local
+mineral N. Nonvascular PFTs retain their ordinary root-profile access. This
+option requires use_humhol and defaults to TRUE when use_humhol is enabled.
+Set it explicitly to FALSE to run peatland hydrology with standard roots.
+</entry>
+
 <entry id="use_crop" type="logical" category="physics"
        group="elm_inparm" valid_values="" value=".false.">
 Toggle to turn on the prognostic crop model
