@@ -40,7 +40,8 @@ module EcosystemBalanceCheckMod
   use ColumnDataType      , only : column_nitrogen_state, column_nitrogen_flux
   use ColumnDataType      , only : column_phosphorus_state, column_phosphorus_flux
   use VegetationType      , only : veg_pp
-  use VegetationDataType  , only : veg_cf, veg_nf, veg_pf
+  use VegetationDataType  , only : veg_cs, veg_cf, veg_nf, veg_pf
+  use SoilStateType       , only : soilstate_type
 
   use timeinfoMod
 
@@ -87,18 +88,34 @@ contains
     !
     ! !LOCAL VARIABLES:
     integer :: c     ! indices
-    integer :: fc   ! lake filter indices
+    integer :: p     ! patch index
+    integer :: fc    ! lake filter indices
     !-----------------------------------------------------------------------
 
-    associate(                                        &
-         totcolc   =>  col_cs%totcolc , & ! Input:  [real(r8) (:)]  (gC/m2) total column carbon, incl veg and cpool
-         col_begcb =>  col_cs%begcb     & ! Output: [real(r8) (:)]  carbon mass, beginning of time step (gC/m**2)
+    associate(                                           &
+         totcolc       => col_cs%totcolc       , & ! Input:  total column carbon, including vegetation and cpool
+         totpftc       => col_cs%totpftc       , & ! Input:  patch carbon averaged to the column
+         cwdc          => col_cs%cwdc          , & ! Input:  coarse woody debris carbon
+         totlitc       => col_cs%totlitc       , & ! Input:  litter carbon
+         totsomc       => col_cs%totsomc       , & ! Input:  soil organic matter carbon
+         col_begcb     => col_cs%begcb         , & ! Output: beginning total column carbon
+         totpftc_beg   => col_cs%totpftc_beg   , & ! Output: beginning vegetation carbon
+         cwdc_beg      => col_cs%cwdc_beg      , & ! Output: beginning coarse woody debris carbon
+         totlitc_beg   => col_cs%totlitc_beg   , & ! Output: beginning litter carbon
+         totsomc_beg   => col_cs%totsomc_beg     & ! Output: beginning soil organic matter carbon
          )
 
       ! calculate beginning column-level carbon balance, for mass conservation check
       do fc = 1,num_soilc
          c = filter_soilc(fc)
          col_begcb(c) = totcolc(c)
+         totpftc_beg(c) = totpftc(c)
+         cwdc_beg(c) = cwdc(c)
+         totlitc_beg(c) = totlitc(c)
+         totsomc_beg(c) = totsomc(c)
+         do p = col_pp%pfti(c), col_pp%pftf(c)
+            veg_cs%begcb(p) = veg_cs%totpftc(p)
+         end do
       end do
 
     end associate
@@ -181,7 +198,7 @@ contains
   !-----------------------------------------------------------------------
   subroutine ColCBalanceCheck(bounds, &
        num_soilc, filter_soilc, &
-       col_cs, col_cf)
+       col_cs, col_cf, soilstate_vars)
     !
     ! !DESCRIPTION:
     ! On the radiation time step, perform carbon mass conservation check for column and pft
@@ -192,17 +209,37 @@ contains
     integer                   , intent(in)    :: filter_soilc(:) ! filter for soil columns
     type(column_carbon_state) , intent(inout) :: col_cs
     type(column_carbon_flux)  , intent(in)    :: col_cf
+    type(soilstate_type)      , intent(in)    :: soilstate_vars
     !
     ! !LOCAL VARIABLES:
-    integer  :: c,err_index    ! indices
+    integer  :: c,err_index,p,j ! indices
     integer  :: fc             ! lake filter indices
     logical  :: err_found      ! error flag
     real(r8) :: dt             ! radiation time step (seconds)
+    real(r8) :: patch_delta
+    real(r8) :: patch_litter_source
+    real(r8) :: patch_product_source
+    real(r8) :: phen_litter_sink
+    real(r8) :: phen_litter_source
     integer  :: nstep
     !-----------------------------------------------------------------------
 
     associate(                                                                           &
          totcolc                   =>    col_cs%totcolc                  , & ! Input:  [real(r8) (:) ]  (gC/m2)   total column carbon, incl veg and cpool
+         col_totpftc               =>    col_cs%totpftc                  , & ! Input:  patch carbon averaged to column
+         col_cwdc                  =>    col_cs%cwdc                     , & ! Input:  coarse woody debris carbon
+         col_totlitc               =>    col_cs%totlitc                  , & ! Input:  litter carbon
+         col_totsomc               =>    col_cs%totsomc                  , & ! Input:  soil organic matter carbon
+         col_prod1c                =>    col_cs%prod1c                   , & ! Input:  crop product carbon
+         col_ctrunc                =>    col_cs%ctrunc                   , & ! Input:  truncation carbon sink
+         col_totpftc_beg           =>    col_cs%totpftc_beg              , & ! Input:  beginning vegetation carbon
+         col_cwdc_beg              =>    col_cs%cwdc_beg                 , & ! Input:  beginning coarse woody debris carbon
+         col_totlitc_beg           =>    col_cs%totlitc_beg              , & ! Input:  beginning litter carbon
+         col_totsomc_beg           =>    col_cs%totsomc_beg              , & ! Input:  beginning soil organic matter carbon
+         col_totpftc_end           =>    col_cs%totpftc_end              , & ! Output: ending vegetation carbon
+         col_cwdc_end              =>    col_cs%cwdc_end                 , & ! Output: ending coarse woody debris carbon
+         col_totlitc_end           =>    col_cs%totlitc_end              , & ! Output: ending litter carbon
+         col_totsomc_end           =>    col_cs%totsomc_end              , & ! Output: ending soil organic matter carbon
          gpp                       =>    col_cf%gpp                       , & ! Input:  [real(r8) (:) ]  (gC/m2/s) gross primary production
          er                        =>    col_cf%er                        , & ! Input:  [real(r8) (:) ]  (gC/m2/s) total ecosystem respiration, autotrophic + heterotrophic
          col_fire_closs            =>    col_cf%fire_closs                , & ! Input:  [real(r8) (:) ]  (gC/m2/s) total column-level fire C loss
@@ -213,6 +250,9 @@ contains
          som_c_leached             =>    col_cf%som_c_leached             , & ! Input:  [real(r8) (:) ]  (gC/m^2/s)total SOM C loss from vertical transport
          som_c_yield               =>    col_cf%somc_yield                , & ! Input:  [real(r8) (:) ]  (gC/m^2/s)total SOM C loss by erosion
          col_decompc_delta         =>    col_cf%externalc_to_decomp_delta , & ! Input:  [real(r8) (:) ]  (gC/m2/s) summarized net change of whole column C i/o to decomposing pool bwtn time-step
+         phen_c_to_litr_met        =>    col_cf%phenology_c_to_litr_met_c , & ! Input: phenology C flux to metabolic litter
+         phen_c_to_litr_cel        =>    col_cf%phenology_c_to_litr_cel_c , & ! Input: phenology C flux to cellulose litter
+         phen_c_to_litr_lig        =>    col_cf%phenology_c_to_litr_lig_c , & ! Input: phenology C flux to lignin litter
          col_cinputs               =>    col_cf%cinputs                   , & ! Output: [real(r8) (:)]  column-level C inputs (gC/m2/s)
          col_coutputs              =>    col_cf%coutputs                  , & ! Output: [real(r8) (:)]  column-level C outputs (gC/m2/s)
          col_begcb                 =>    col_cs%begcb                    , & ! Output: [real(r8) (:) ]  carbon mass, beginning of time step (gC/m**2)
@@ -234,6 +274,10 @@ contains
 
          ! calculate the total column-level carbon storage, for mass conservation check
          col_endcb(c) = totcolc(c)
+         col_totpftc_end(c) = col_totpftc(c)
+         col_cwdc_end(c) = col_cwdc(c)
+         col_totlitc_end(c) = col_totlitc(c)
+         col_totsomc_end(c) = col_totsomc(c)
 
          ! FATES also checks to see if input fluxes match
          ! a change in the total stock. So hwere we assume that
@@ -304,6 +348,50 @@ contains
           write(iulog,*)'endcb                 = ',col_endcb(c),col_cs%totsomc(c)
           write(iulog,*)'totsomc               = ',col_cs%totsomc(c)
           write(iulog,*)'delta store           = ',col_endcb(c)-col_begcb(c)
+
+          phen_litter_sink = 0._r8
+          do j = 1, nlevdecomp
+             phen_litter_sink = phen_litter_sink + &
+                  (phen_c_to_litr_met(c,j) + phen_c_to_litr_cel(c,j) + &
+                   phen_c_to_litr_lig(c,j)) * dzsoi_decomp(j) * dt
+          end do
+          phen_litter_source = 0._r8
+          do p = col_pp%pfti(c), col_pp%pftf(c)
+             if (veg_pp%active(p) .and. veg_pp%itype(p) /= noveg) then
+                phen_litter_source = phen_litter_source + veg_pp%wtcol(p) * &
+                     (veg_cf%leafc_to_litter(p) + veg_cf%frootc_to_litter(p) + &
+                      veg_cf%livestemc_to_litter(p)) * dt
+             end if
+          end do
+          write(iulog,*)'component deltas      = ', &
+               col_totpftc_end(c)-col_totpftc_beg(c), col_cwdc_end(c)-col_cwdc_beg(c), &
+               col_totlitc_end(c)-col_totlitc_beg(c), col_totsomc_end(c)-col_totsomc_beg(c)
+          write(iulog,*)'component end states  = ', &
+               col_totpftc(c), col_cwdc(c), col_totlitc(c), col_totsomc(c), col_prod1c(c), col_ctrunc(c)
+          write(iulog,*)'phen litter src/sink  = ',phen_litter_source,phen_litter_sink
+          write(iulog,*)'patch carbon diagnostics for failing column'
+          do p = col_pp%pfti(c), col_pp%pftf(c)
+             if (veg_pp%active(p) .and. veg_pp%itype(p) /= noveg) then
+                veg_cs%endcb(p) = veg_cs%totpftc(p)
+                patch_delta = veg_cs%endcb(p) - veg_cs%begcb(p)
+                patch_litter_source = &
+                     (veg_cf%leafc_to_litter(p) + veg_cf%frootc_to_litter(p) + &
+                      veg_cf%livestemc_to_litter(p)) * dt
+                patch_product_source = &
+                     (veg_cf%hrv_leafc_to_prod1c(p) + veg_cf%hrv_livestemc_to_prod1c(p) + &
+                      veg_cf%hrv_grainc_to_prod1c(p) + veg_cf%hrv_deadstemc_to_prod10c(p) + &
+                      veg_cf%hrv_deadstemc_to_prod100c(p)) * dt
+                write(iulog,*)'  patch balance = ',p,veg_pp%itype(p),veg_pp%wtcol(p), &
+                     veg_cs%begcb(p),veg_cs%endcb(p),patch_delta,patch_delta*veg_pp%wtcol(p), &
+                     patch_litter_source,patch_litter_source*veg_pp%wtcol(p),patch_product_source
+                write(iulog,*)'  patch fluxes  = ',p,veg_cf%ar(p)*dt,veg_cf%mr(p)*dt, &
+                     veg_cf%gr(p)*dt,veg_cf%xr(p)*dt,veg_cf%gpp(p)*dt,veg_cf%npp(p)*dt
+                write(iulog,*)'  patch pools   = ',p,veg_cs%cpool(p),veg_cs%xsmrpool(p), &
+                     veg_cs%totpftc(p),veg_cs%totvegc(p),veg_cs%leafc(p),veg_cs%frootc(p), &
+                     veg_cs%livestemc(p),veg_cs%livecrootc(p),veg_cs%deadstemc(p),veg_cs%deadcrootc(p)
+                write(iulog,*)'  root profile  = ',p,(soilstate_vars%rootfr_patch(p,j),j=1,nlevdecomp)
+             end if
+          end do
 
           if (ero_ccycle) then
              write(iulog,*)'erosion               = ',som_c_yield(c)*dt

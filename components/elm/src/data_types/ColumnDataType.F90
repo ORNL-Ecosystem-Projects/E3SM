@@ -5910,6 +5910,10 @@ contains
           avgflag='A', long_name='infiltration', &
            ptr_col=this%qflx_infl, c2l_scale_type='urbanf')
 
+    call hist_addfld2d (fname='QFLX_ROOTSOI', units='mm/s', type2d='levgrnd', &
+         avgflag='A', long_name='root and soil water exchange; positive uptake into roots', &
+         ptr_col=this%qflx_rootsoi, default='inactive')
+
     this%qflx_surf(begc:endc) = spval
      call hist_addfld1d (fname='QOVER',  units='mm/s',  &
           avgflag='A', long_name='surface runoff', &
