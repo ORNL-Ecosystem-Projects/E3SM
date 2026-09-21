@@ -235,6 +235,7 @@ contains
           qflx_floodc                =>    col_wf%qflx_floodc             , & ! Input:  [real(r8) (:)   ]  total runoff due to flooding
           qflx_from_uphill           =>    col_wf%qflx_from_uphill        , & ! Input:  [real(r8) (:)   ]  received from uphill topounit
           qflx_to_downhill           =>    col_wf%qflx_to_downhill        , & ! Input:  [real(r8) (:)   ]  sent to downhill topounit
+          qflx_lat_aqu               =>    col_wf%qflx_lat_aqu            , & ! Input:  [real(r8) (:)   ]  lateral aquifer exchange (positive into column)
           qflx_h2osfc_surf           =>    col_wf%qflx_h2osfc_surf        , & ! Input:  [real(r8) (:)   ]  surface water runoff (mm/s)
           qflx_snow_melt             =>    col_wf%qflx_snow_melt          , & ! Input:  [real(r8) (:)   ]  snow melt (net)
           qflx_surf                  =>    col_wf%qflx_surf               , & ! Input:  [real(r8) (:)   ]  surface runoff (mm H2O /s)
@@ -334,7 +335,7 @@ contains
           ! add qflx_from_uphill and qflx_to_downhill
           if (col_pp%active(c)) then
              errh2o(c) = endwb(c) - begwb(c) &
-                  - (forc_rain_col(c) + forc_snow_col(c)  + qflx_floodc(c) + qflx_from_uphill(c) &
+                  - (forc_rain_col(c) + forc_snow_col(c)  + qflx_floodc(c) + qflx_from_uphill(c) + qflx_lat_aqu(c) &
                   + qflx_surf_irrig_col(c) + qflx_over_supply_col(c) &
                   - qflx_evap_tot(c) - qflx_surf(c)  - qflx_h2osfc_surf(c) - qflx_to_downhill(c) &
                   - qflx_qrgwl(c) - qflx_drain(c) - qflx_drain_perched(c) - qflx_snwcp_ice(c) - qflx_ice_runoff_xs(c) &
@@ -995,6 +996,7 @@ contains
           qflx_floodc                =>    col_wf%qflx_floodc             , & ! Input:  [real(r8) (:)   ]  total runoff due to flooding
           qflx_from_uphill           =>    col_wf%qflx_from_uphill        , & ! Input:  [real(r8) (:)   ]  received from uphill topounit (mm/s)
           qflx_to_downhill           =>    col_wf%qflx_to_downhill        , & ! Input:  [real(r8) (:)   ]  sent to downhill topounit (mm/s)
+          qflx_lat_aqu               =>    col_wf%qflx_lat_aqu            , & ! Input:  [real(r8) (:)   ]  lateral aquifer exchange (positive into column)
           qflx_h2osfc_surf           =>    col_wf%qflx_h2osfc_surf        , & ! Input:  [real(r8) (:)   ]  surface water runoff (mm/s)
           qflx_snow_melt             =>    col_wf%qflx_snow_melt          , & ! Input:  [real(r8) (:)   ]  snow melt (net)
           qflx_surf                  =>    col_wf%qflx_surf               , & ! Input:  [real(r8) (:)   ]  surface runoff (mm H2O /s)
@@ -1088,7 +1090,7 @@ contains
          if (col_pp%active(c)) then
 
             qflx_net_col(c) = &
-                 - forc_rain_col(c) - forc_snow_col(c)  - qflx_floodc(c) - qflx_from_uphill(c) - qflx_irrig(c) &
+                 - forc_rain_col(c) - forc_snow_col(c)  - qflx_floodc(c) - qflx_from_uphill(c) - qflx_lat_aqu(c) - qflx_irrig(c) &
                  + qflx_evap_tot(c) + qflx_surf(c)  + qflx_h2osfc_surf(c) + qflx_to_downhill(c) &
                  + qflx_qrgwl(c) + qflx_drain(c) + qflx_drain_perched(c) + qflx_snwcp_ice(c) &
                  + qflx_lateral(c)

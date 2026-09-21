@@ -21,6 +21,7 @@ module ColumnDataType
   use elm_varcon      , only : watmin, bdsno, bdfirn, zsoi, zisoi, dzsoi_decomp
   use elm_varcon      , only : c13ratio, c14ratio, secspday
   use elm_varctl      , only : use_fates, use_fates_planthydro, create_glacier_mec_landunit, use_IM2_hillslope_hydrology
+  use elm_varctl      , only : use_humhol
   use elm_varctl      , only : use_hydrstress, use_crop
   use elm_varctl      , only : bound_h2osoi, use_cn, iulog, use_vertsoilc, spinup_state
   use elm_varctl      , only : ero_ccycle
@@ -534,6 +535,9 @@ module ColumnDataType
     real(r8), pointer :: qflx_h2oocn_drain    (:)   => null() ! drainage from coastal inundation volume (mm H2O/s)
     real(r8), pointer :: qflx_from_uphill     (:)   => null() ! input to top soil layer from uphill topounit(s) (mm H2O/s))
     real(r8), pointer :: qflx_to_downhill     (:)   => null() ! output from column to the downhill topounit (mm H2O/s))
+    real(r8), pointer :: qflx_lat_aqu         (:)   => null() ! realized lateral aquifer exchange (mm H2O/s; positive into column)
+    real(r8), pointer :: qflx_lat_aqu_layer   (:,:) => null() ! timestep-integrated lateral aquifer exchange by layer (mm H2O)
+    real(r8), pointer :: qflx_surf_input      (:)   => null() ! adjacent-topounit surface-water input (mm H2O/s; reserved for surface routing)
 
     real(r8), pointer :: mflx_infl_1d         (:)   => null() ! infiltration source in top soil control volume (kg H2O /s)
     real(r8), pointer :: mflx_dew_1d          (:)   => null() ! liquid+snow dew source in top soil control volume (kg H2O /s)
@@ -5858,6 +5862,9 @@ contains
     allocate(this%qflx_h2oocn_drain      (begc:endc))             ; this%qflx_h2oocn_drain    (:)   = spval
     allocate(this%qflx_from_uphill       (begc:endc))             ; this%qflx_from_uphill     (:)   = spval
     allocate(this%qflx_to_downhill       (begc:endc))             ; this%qflx_to_downhill     (:)   = spval
+    allocate(this%qflx_lat_aqu           (begc:endc))             ; this%qflx_lat_aqu         (:)   = 0._r8
+    allocate(this%qflx_lat_aqu_layer     (begc:endc,1:nlevgrnd))  ; this%qflx_lat_aqu_layer   (:,:) = 0._r8
+    allocate(this%qflx_surf_input        (begc:endc))             ; this%qflx_surf_input      (:)   = 0._r8
 
     !VSFM variables
     ncells = endc - begc + 1
@@ -5985,7 +5992,7 @@ contains
           avgflag='A', long_name='column-integrated snow freezing rate', &
            ptr_col=this%qflx_snofrz, set_lake=spval, c2l_scale_type='urbanf')
 
-    if (use_IM2_hillslope_hydrology) then
+    if (use_IM2_hillslope_hydrology .or. use_humhol) then
       call hist_addfld1d (fname='QFROM_UPHILL',  units='mm/s',  &
             avgflag='A', long_name='input to top layer soil from uphill topounit(s)', &
             ptr_col=this%qflx_from_uphill, c2l_scale_type='urbanf')
@@ -5993,6 +6000,20 @@ contains
       call hist_addfld1d (fname='QTO_DOWNHILL',  units='mm/s',  &
             avgflag='A', long_name='output from column to downhill topounit', &
             ptr_col=this%qflx_to_downhill, c2l_scale_type='urbanf')
+    endif
+
+    if (use_humhol) then
+      call hist_addfld1d (fname='QFLX_LAT_AQU', units='mm/s', &
+           avgflag='A', long_name='realized lateral aquifer exchange; positive into column', &
+           ptr_col=this%qflx_lat_aqu, c2l_scale_type='urbanf')
+
+      call hist_addfld2d (fname='QFLX_LAT_AQU_LAYER', units='mm', type2d='levgrnd', &
+           avgflag='A', long_name='timestep-integrated lateral aquifer exchange by layer', &
+           ptr_col=this%qflx_lat_aqu_layer, default='inactive')
+
+      call hist_addfld1d (fname='QFLX_SURF_INPUT', units='mm/s', &
+           avgflag='A', long_name='adjacent-topounit surface-water input; zero until surface routing is enabled', &
+           ptr_col=this%qflx_surf_input, c2l_scale_type='urbanf')
     endif
    
     if (create_glacier_mec_landunit) then
@@ -6062,6 +6083,9 @@ contains
 
     this%qflx_from_uphill(begc:endc) = 0._r8
     this%qflx_to_downhill(begc:endc) = 0._r8
+    this%qflx_lat_aqu(begc:endc) = 0._r8
+    this%qflx_lat_aqu_layer(begc:endc,:) = 0._r8
+    this%qflx_surf_input(begc:endc) = 0._r8
 
     ! needed for CNNLeaching
     do c = begc, endc
@@ -6138,6 +6162,9 @@ contains
       c = filter(fc)
       this%qflx_snow2topsoi     (c)   = 0._r8
       this%qflx_h2osfc2topsoi   (c)   = 0._r8
+      this%qflx_lat_aqu          (c)   = 0._r8
+      this%qflx_lat_aqu_layer    (c,:) = 0._r8
+      this%qflx_surf_input       (c)   = 0._r8
     enddo
 
   end subroutine col_wf_reset

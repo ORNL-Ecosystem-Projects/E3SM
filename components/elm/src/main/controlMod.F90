@@ -69,7 +69,7 @@ module controlMod
                         use_vsfm, vsfm_satfunc_type, vsfm_use_dynamic_linesearch, &
                         vsfm_lateral_model_type, vsfm_include_seepage_bc, &
                         use_hydrstress, lateral_connectivity, domain_decomp_type, &
-                        use_IM2_hillslope_hydrology, use_petsc_thermal_model, &
+                        use_IM2_hillslope_hydrology, use_humhol, use_petsc_thermal_model, &
                         do_budgets, budget_inst, budget_daily, budget_month, &
                         budget_ann, budget_ltann, budget_ltend, &
                         use_lnd_rof_two_way, use_ocn_lnd_one_way, &
@@ -370,6 +370,8 @@ contains
 
     namelist /elm_inparm/ &
          use_IM2_hillslope_hydrology
+
+    namelist /elm_inparm/ use_humhol
 
     namelist /elm_inparm/ &
          use_petsc_thermal_model
@@ -1019,6 +1021,7 @@ contains
 
     ! hillslope connectivity via topounits
     call mpi_bcast (use_IM2_hillslope_hydrology, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_humhol, 1, MPI_LOGICAL, 0, mpicom, ier)
 
     ! bgc & pflotran interface
     call mpi_bcast (use_elm_interface, 1, MPI_LOGICAL, 0, mpicom, ier)
@@ -1137,6 +1140,7 @@ contains
     write(iulog,*) '    use_noio = ', use_noio
     write(iulog,*) '    use_betr = ', use_betr
     write(iulog,*) '    use_IM2_hillslope_hydrology = ', use_IM2_hillslope_hydrology
+    write(iulog,*) '    use_humhol = ', use_humhol
     write(iulog,*) '    use_atm_downscaling_to_topunit = ', use_atm_downscaling_to_topunit
     write(iulog,*) '    precip_downscaling_method = ', precip_downscaling_method
     write(iulog,*) 'input data files:'

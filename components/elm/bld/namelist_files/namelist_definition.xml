@@ -815,6 +815,13 @@ Toggle to turn on the VIC hydrologic parameterizations
 (vichydro=".true." is EXPERIMENTAL NOT SUPPORTED!)
 </entry>
 
+<entry id="use_humhol" type="logical" category="physics"
+       group="elm_inparm" valid_values="" value=".false.">
+If TRUE, enable peatland topounit lateral water exchange. This option is
+disabled by default so standard ELM configurations retain their existing
+behavior.
+</entry>
+
 <entry id="use_crop" type="logical" category="physics"
        group="elm_inparm" valid_values="" value=".false.">
 Toggle to turn on the prognostic crop model

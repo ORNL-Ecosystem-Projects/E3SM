@@ -480,6 +480,7 @@ module elm_varctl
   ! Subgrid hillslope hydrologic connectivity (through topounits)
   !-----------------------------------------------------------------------
   logical, public            :: use_IM2_hillslope_hydrology  = .false.
+  logical, public            :: use_humhol                   = .false.
  
   !-----------------------------------------------------------------------
   ! flux limiter for phenology flux calculation
