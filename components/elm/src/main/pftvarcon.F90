@@ -306,6 +306,9 @@ module pftvarcon
   real(r8)              :: laimax
   ! Hydrology
   real(r8)              :: rsub_top_globalmax
+  real(r8)              :: humhol_ht                ! fallback hummock-hollow relief (m)
+  real(r8)              :: qflx_h2osfc_surfrate     ! peat surface-water export coefficient (1/(mm s))
+  real(r8)              :: peatland_fen_outlet_depth ! terminal fen outlet stage above ground (mm)
   ! Soil erosion ground cover
   real(r8), allocatable :: gcbc_p(:)           !effectiveness of surface cover in reducing rainfall-driven erosion
   real(r8), allocatable :: gcbc_q(:)           !effectiveness of surface cover in reducing runoff-driven erosion
@@ -1032,6 +1035,15 @@ contains
     end if
     call ncd_io('rsub_top_globalmax', rsub_top_globalmax, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if (.not. readv) rsub_top_globalmax = 10._r8
+    call ncd_io('humhol_ht', humhol_ht, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) humhol_ht = 0.15_r8
+    call ncd_io('qflx_h2osfc_surfrate', qflx_h2osfc_surfrate, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) qflx_h2osfc_surfrate = 8.9192395533995e-8_r8
+    call ncd_io('peatland_fen_outlet_depth', peatland_fen_outlet_depth, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) peatland_fen_outlet_depth = 0._r8
+    if (peatland_fen_outlet_depth < 0._r8) then
+       call endrun(msg='peatland_fen_outlet_depth must be nonnegative'//errMsg(__FILE__,__LINE__))
+    end if
     !if ( .not. readv) call endrun(msg='ERROR:  error in reading in pft data'//errMsg(__FILE__,__LINE__))
     call ncd_io('fnr', fnr, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if ( .not. readv) call endrun(msg='ERROR:  error in reading in pft data'//errMsg(__FILE__,__LINE__))
@@ -1630,4 +1642,3 @@ contains
   end subroutine set_num_cfts_known_to_model
 
 end module pftvarcon
-

@@ -119,6 +119,7 @@ attributes from the config_cache.xml file (with keys converted to upper-case).
 <use_lake_wat_storage>.false.</use_lake_wat_storage>
 <!-- Enable peatland topounit lateral water exchange -->
 <use_humhol>.false.</use_humhol>
+<use_fen_bog_drainage>.false.</use_fen_bog_drainage>
 
 <!-- ================================================================== -->
 <!-- The default filenames are given relative to the root directory

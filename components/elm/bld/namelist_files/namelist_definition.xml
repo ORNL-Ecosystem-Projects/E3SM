@@ -822,6 +822,15 @@ disabled by default so standard ELM configurations retain their existing
 behavior.
 </entry>
 
+<entry id="use_fen_bog_drainage" type="logical" category="physics"
+       group="elm_inparm" valid_values="" value=".false.">
+If TRUE, peat-bearing non-bog topounits use the perched-bog baseflow geometry,
+including the missing-upland reference offset used by standalone SPRUCE. This
+does not change bog identity, saturated fraction, or lateral-routing topology.
+It requires use_humhol and is disabled by default; regional cases must opt in
+explicitly rather than being classified by their number of active topounits.
+</entry>
+
 <entry id="use_crop" type="logical" category="physics"
        group="elm_inparm" valid_values="" value=".false.">
 Toggle to turn on the prognostic crop model

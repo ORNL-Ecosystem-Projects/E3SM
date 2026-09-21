@@ -7,10 +7,10 @@ module SoilHydrologyMod
   use shr_kind_mod      , only : r8 => shr_kind_r8
   use shr_log_mod       , only : errMsg => shr_log_errMsg
   use decompMod         , only : bounds_type
-  use elm_varctl        , only : iulog, use_vichydro, use_humhol
+  use elm_varctl        , only : iulog, use_vichydro, use_humhol, use_fen_bog_drainage
   use elm_varctl        , only : use_lnd_rof_two_way, lnd_rof_coupling_nstep
   use elm_varctl        , only : use_modified_infil, use_ocn_lnd_one_way
-  use elm_varcon        , only : e_ice, denh2o, denice, rpi
+  use elm_varcon        , only : e_ice, denh2o, denice, rpi, spval
   use EnergyFluxType    , only : energyflux_type
   use SoilHydrologyType , only : soilhydrology_type
   use SoilStateType     , only : soilstate_type
@@ -56,6 +56,8 @@ contains
     use elm_varpar      , only : nlevsoi, nlevgrnd, maxpatch_pft
     use elm_varpar      , only : nlayer, nlayert
     use elm_varctl      , only : use_var_soil_thick, use_IM2_hillslope_hydrology
+    use pftvarcon       , only : humhol_ht
+    use landunit_varcon , only : istsoil
     use SoilWaterMovementMod, only : zengdecker_2009_with_var_soil_thick
     !
     ! !ARGUMENTS:
@@ -69,7 +71,7 @@ contains
     real(r8), intent(in)  :: dtime
     !
     ! !LOCAL VARIABLES:
-    integer  :: c,j,fc,g,l,t,i                             !indices
+    integer  :: c,j,fc,g,l,t,i,tpair                       !indices
     integer  :: nlevbed                                    !# levels to bedrock
     real(r8) :: xs(bounds%begc:bounds%endc)                !excess soil water above urban ponding limit
     real(r8) :: vol_ice(bounds%begc:bounds%endc,1:nlevgrnd) !partial volume of ice lens in layer
@@ -80,6 +82,7 @@ contains
     real(r8) :: qinmax                                     !maximum infiltration capacity (mm/s)
     real(r8) :: A(bounds%begc:bounds%endc)                 !fraction of the saturated area
     real(r8) :: ex(bounds%begc:bounds%endc)                !temporary variable (exponent)
+    real(r8) :: humhol_ht_eff                              ! local hummock-hollow relief (m)
     real(r8) :: top_moist(bounds%begc:bounds%endc)         !temporary, soil moisture in top VIC layers
     real(r8) :: top_max_moist(bounds%begc:bounds%endc)     !temporary, maximum soil moisture in top VIC layers
     real(r8) :: top_ice(bounds%begc:bounds%endc)           !temporary, ice len in top VIC layers
@@ -153,6 +156,18 @@ contains
       do fc = 1, num_hydrologyc
          c = filter_hydrologyc(fc)
          g = col_pp%gridcell(c)
+         t = col_pp%topounit(c)
+         humhol_ht_eff = humhol_ht
+         if (use_humhol .and. top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8) then
+            do tpair = grc_pp%topi(g), grc_pp%topf(g)
+               if (tpair /= t .and. top_pp%active(tpair) .and. top_pp%is_bog(tpair) .and. &
+                    top_pp%peat_depth(tpair) > 0._r8) then
+                  humhol_ht_eff = abs(top_pp%elevation(tpair) - top_pp%elevation(t))
+                  exit
+               end if
+            end do
+            if (humhol_ht_eff <= 0._r8) humhol_ht_eff = humhol_ht
+         end if
          fff(c) = fover(g)
          if (zengdecker_2009_with_var_soil_thick) then
             nlevbed = nlev2bed(c)
@@ -177,6 +192,9 @@ contains
          else
             fsat(c) = wtfact(c) * exp(-0.5_r8*fff(c)*zwt(c))
          end if
+         if (use_humhol .and. top_pp%peat_depth(t) > 0._r8) then
+            fsat(c) = exp(-3._r8*zwt(c)/humhol_ht_eff)
+         end if
 
          ! use perched water table to determine fsat (if present)
          if ( frost_table(c) > zwt(c)) then
@@ -185,10 +203,16 @@ contains
             else
                fsat(c) = wtfact(c) * exp(-0.5_r8*fff(c)*zwt(c))
             end if
+            if (use_humhol .and. top_pp%peat_depth(t) > 0._r8) then
+               fsat(c) = exp(-3._r8*zwt(c)/humhol_ht_eff)
+            end if
          else
             if ( frost_table(c) > zwt_perched(c)) then
                fsat(c) = wtfact(c) * exp(-0.5_r8*fff(c)*zwt_perched(c))!*( frost_table(c) - zwt_perched(c))/4.0
             endif
+            if (use_humhol .and. top_pp%peat_depth(t) > 0._r8) then
+               fsat(c) = exp(-3._r8*zwt(c)/humhol_ht_eff)
+            end if
          endif
          if (origflag == 1) then
             if (use_vichydro) then
@@ -206,17 +230,23 @@ contains
       do fc = 1, num_hydrologyc
          c = filter_hydrologyc(fc)
          l = col_pp%landunit(c)
+         g = col_pp%gridcell(c)
+         t = col_pp%topounit(c)
          ! no qflx_surf in polygonal ground
          if (lun_pp%ispolygon(l)) then
             qflx_surf(c) = 0._r8
+         else if (use_humhol .and. top_pp%peat_depth(t) > 0._r8 .and. &
+              grc_pp%ntopounits(g) > 1 .and. &
+              (top_pp%topo_grc_ind(t) == 1 .or. top_pp%topo_grc_ind(t) == 2)) then
+            ! Fen/lagg and hollow retain fast runoff as surface water;
+            ! this peatland behavior is independent of the legacy origflag.
+            qflx_surf(c) = 0._r8
+         else if (origflag == 1) then
+            ! Legacy formulation uses the ice-adjusted impermeable fraction.
+            qflx_surf(c) = fcov(c) * qflx_top_soil(c)
          else
-            ! assume qinmax large relative to qflx_top_soil in control
-            if (origflag == 1) then
-               qflx_surf(c) =  fcov(c) * qflx_top_soil(c)
-            else
-               ! only send fast runoff directly to streams
-               qflx_surf(c) =   fsat(c) * qflx_top_soil(c)
-            endif
+            ! Modern ELM sends saturation-excess runoff directly to streams.
+            qflx_surf(c) = fsat(c) * qflx_top_soil(c)
          endif
       end do
 
@@ -261,7 +291,7 @@ contains
       ! when using the subgrid hillslope lateral flow mechanism (IM2 from NGEE Arctic):
       ! 1. calculate fraction of topounit flow that goes to each column
       ! 2. Calculate the weighted flux from uphill (qflx_from_uphill) and add to qflx_top_soil 
-      if (use_IM2_hillslope_hydrology) then
+      if (use_IM2_hillslope_hydrology .or. use_humhol) then
          ! calculate the sum of column weights on each topounit for columns in the hydrologyc filter
          ! This will be the istsoil, istcrop, and icol_road_perv subset of urban columns
          ! First zero the topounit sum of weights. This zeros some multiple times, but no harm done.
@@ -281,8 +311,17 @@ contains
          do fc = 1, num_hydrologyc
             c = filter_hydrologyc(fc)
             t = col_pp%topounit(c)
-            qflx_from_uphill(c) = (col_pp%wttopounit(c)/top_pp%uphill_wt(t)) * (frac_from_uphill * top_ws%from_uphill(t)) / dtime
-            qflx_top_soil(c) = qflx_top_soil(c) + qflx_from_uphill(c)
+            if (top_pp%uphill_wt(t) > 0._r8) then
+               if (use_humhol .and. top_pp%peat_depth(t) > 0._r8) then
+                  qflx_from_uphill(c) = (col_pp%wttopounit(c)/top_pp%uphill_wt(t)) * top_ws%from_uphill(t) / dtime
+               else
+                  qflx_from_uphill(c) = (col_pp%wttopounit(c)/top_pp%uphill_wt(t)) * &
+                       (frac_from_uphill * top_ws%from_uphill(t)) / dtime
+               end if
+               qflx_top_soil(c) = qflx_top_soil(c) + qflx_from_uphill(c)
+            else
+               qflx_from_uphill(c) = 0._r8
+            end if
          end do
       endif
 
@@ -307,6 +346,7 @@ contains
      use column_varcon    , only : icol_roof, icol_road_imperv, icol_sunwall, icol_shadewall, icol_road_perv
      use landunit_varcon  , only : istsoil, istcrop, ilowcenpoly, iflatcenpoly, ihighcenpoly
      use elm_time_manager , only : get_step_size, get_nstep
+     use pftvarcon        , only : qflx_h2osfc_surfrate, peatland_fen_outlet_depth
      use atm2lndType      , only : atm2lnd_type ! land river two way coupling
      use ocn2lndType      , only : ocn2lnd_type
      use lnd2atmType      , only : lnd2atm_type
@@ -364,6 +404,8 @@ contains
      real(r8) :: top_icefrac                                ! temporary, ice fraction in top VIC layers
      real(r8) :: h2osoi_left_vol1                           ! temporary, available volume in the first soil layer
      real(r8) :: pc                                         ! temporary, threhold for surface water storage to outflow
+     real(r8) :: infil_ice_imped(1:3)                       ! frozen-soil impedance in infiltration layers
+     real(r8) :: h2osfc_runoff_depth                        ! ponded water available for peat runoff (mm)
      integer  :: jwt(bounds%begc:bounds%endc)               ! layer immediately above the water table
      integer  :: natveg_col_top(bounds%begt:bounds%endt)    ! natural vegetation column for each topounit
      real(r8) :: dzmm(bounds%begc:bounds%endc,1:nlevgrnd)   ! layer thickness (mm)
@@ -384,6 +426,7 @@ contains
      real(r8), parameter :: lateral_head_relax_frac = 0.25_r8
      logical  :: bog_nonbog_pair                           ! pair crosses bog/non-bog boundary
      logical  :: spruce_three_topounit                     ! standalone fen/hollow/hummock configuration
+     real(r8), parameter :: humhol_frozen_infil_min_imped = 0.05_r8
      !-----------------------------------------------------------------------
 
      associate(                                                    &
@@ -468,6 +511,7 @@ contains
           c  = filter_hydrologyc(fc)
           g  = cgridcell(c)
           l = col_pp%landunit(c)
+          t = col_pp%topounit(c)
           pc = pc_grid(g)
           
           ! partition moisture fluxes between soil and h2osfc
@@ -543,10 +587,14 @@ contains
                 rsurf_vic = min(qflx_in_soil(c), rsurf_vic)
                 qinmax = (1._r8 - fsat(c)) * 10._r8**(-e_ice*top_icefrac)*(qflx_in_soil(c) - rsurf_vic)
              else
+                infil_ice_imped(1:3) = 10._r8**(-e_ice*icefrac(c,1:3))
+                if (use_humhol .and. top_pp%peat_depth(t) > 0._r8) then
+                   infil_ice_imped(1:3) = max(infil_ice_imped(1:3), humhol_frozen_infil_min_imped)
+                end if
                 if ( use_modified_infil ) then
-                  qinmax=minval(10._r8**(-e_ice*(icefrac(c,1:3)))*hksat(c,1:3))
+                  qinmax=minval(infil_ice_imped(1:3)*hksat(c,1:3))
                 else
-                  qinmax=(1._r8 - fsat(c)) * minval(10._r8**(-e_ice*(icefrac(c,1:3)))*hksat(c,1:3))
+                  qinmax=(1._r8 - fsat(c)) * minval(infil_ice_imped(1:3)*hksat(c,1:3))
                 end if
              end if
              
@@ -617,7 +665,24 @@ contains
                 
              else
                 ! limit runoff to value of storage above S(pc)
-                if(h2osfc(c) >= h2osfc_thresh(c) .and. h2osfcflag/=0) then
+                if (use_humhol .and. top_pp%peat_depth(t) > 0._r8) then
+                   ! Internal peatland links retain the original zero-stage routing.
+                   ! At the terminal fen outlet, retain ponded water below the
+                   ! prescribed outlet stage before exporting it from the gridcell.
+                   if (top_pp%downhill_ti(t) == -1 .and. .not. top_pp%is_bog(t)) then
+                      h2osfc_runoff_depth = max(0._r8, h2osfc(c) - peatland_fen_outlet_depth)
+                   else
+                      h2osfc_runoff_depth = max(0._r8, h2osfc(c))
+                   end if
+                   if (h2osfc_runoff_depth > 0._r8 .and. h2osfcflag /= 0) then
+                      qflx_h2osfc_surf(c) = qflx_h2osfc_surfrate*h2osfc_runoff_depth**2
+                      qflx_h2osfc_surf(c) = min(qflx_h2osfc_surf(c), h2osfc_runoff_depth/dtime)
+                   else
+                      qflx_h2osfc_surf(c) = 0._r8
+                   end if
+                else if (use_humhol) then
+                   qflx_h2osfc_surf(c) = 0._r8
+                else if(h2osfc(c) >= h2osfc_thresh(c) .and. h2osfcflag/=0) then
                    ! spatially variable k_wet
                    k_wet=1.0_r8 * sin((rpi/180._r8) * col_pp%topo_slope(c))
                    qflx_h2osfc_surf(c) = k_wet * frac_infclust * (h2osfc(c) - h2osfc_thresh(c))
@@ -920,7 +985,7 @@ contains
      real(r8), intent(in)  :: dtime
      !
      ! !LOCAL VARIABLES:
-     integer  :: c,j,fc,i,l,g                            ! indices
+     integer  :: c,j,fc,i,l,g,t                          ! indices
      integer  :: nlevbed                                 ! # layers to bedrock
      real(r8) :: xs(bounds%begc:bounds%endc)             ! water needed to bring soil moisture to watmin (mm)
      real(r8) :: dzmm(bounds%begc:bounds%endc,1:nlevgrnd) ! layer thickness (mm)
@@ -964,6 +1029,7 @@ contains
      real(r8) :: aquifer_excess                           ! aquifer water above the supported store (mm)
      real(r8) :: vol_ice_layer                            ! volumetric ice content capped at porosity (-)
      logical  :: surface_aquifer_connected                ! ponded water is connected to the main water table
+     logical  :: disable_peat_perched                     ! suppress standard perched-table physics in peat columns
      !-----------------------------------------------------------------------
 
      associate(                                                            &
@@ -1255,6 +1321,8 @@ contains
        do fc = 1, num_hydrologyc
           c = filter_hydrologyc(fc)
           nlevbed = nlev2bed(c)
+          t = col_pp%topounit(c)
+          disable_peat_perched = use_humhol .and. top_pp%peat_depth(t) > 0._r8
 
           ! define frost table as first frozen layer with unfrozen layer above it
           if(t_soisno(c,1) > tfrz) then
@@ -1274,10 +1342,12 @@ contains
 
           ! initialize perched water table to frost table, and qflx_drain_perched(c) to zero
           zwt_perched(c)=frost_table(c)
+          if (disable_peat_perched) zwt_perched(c) = spval
 
           !===================  water table above frost table  =============================
           ! if water table is above frost table, do not use topmodel baseflow formulation
-          if (zwt(c) < frost_table(c) .and. t_soisno(c,k_frz) <= tfrz &
+          if (.not. disable_peat_perched .and. &
+               zwt(c) < frost_table(c) .and. t_soisno(c,k_frz) <= tfrz &
                .and. origflag == 0) then
           else
              !===================  water table below frost table  =============================
@@ -1301,7 +1371,7 @@ contains
              if (t_soisno(c,k_frz) > tfrz) k_perch=k_frz
 
              ! if perched water table exists
-             if (k_frz > k_perch) then
+             if (.not. disable_peat_perched .and. k_frz > k_perch) then
                 ! interpolate between k_perch and k_perch+1 to find perched water table height
                 s1 = (h2osoi_liq(c,k_perch)/(dz(c,k_perch)*denh2o) &
                      + h2osoi_ice(c,k_perch)/(dz(c,k_perch)*denice))/watsat(c,k_perch)
@@ -1395,7 +1465,7 @@ contains
      !
      ! !LOCAL VARIABLES:
      !character(len=32) :: subname = 'Drainage'           ! subroutine name
-     integer  :: c,g,l,j,fc,i                            ! indices
+     integer  :: c,g,l,j,fc,i,t,tpeer,topi,topf          ! indices
      integer  :: nlevbed                                 ! # layers to bedrock
      real(r8) :: xs(bounds%begc:bounds%endc)             ! water needed to bring soil moisture to watmin (mm)
      real(r8) :: dzmm(bounds%begc:bounds%endc,1:nlevgrnd) ! layer thickness (mm)
@@ -1420,6 +1490,8 @@ contains
      real(r8) :: dza                                     ! fff*(zwt-z(jwt)) (-)
      real(r8) :: available_h2osoi_liq                    ! available soil liquid water in a layer
      real(r8) :: rsub_top_max
+     real(r8) :: rsub_top_zwt                            ! water-table depth used for regional drainage (m)
+     real(r8) :: rsub_top_ref_elev                       ! drainage reference elevation (m)
      real(r8) :: h2osoi_vol
      real(r8) :: imped
      real(r8) :: rsub_top_tot
@@ -1448,6 +1520,9 @@ contains
      real(r8) :: f                        ! e-folding length representing the complexity of sediment-bedrock profile (Zeng et al., 2016) (m)
      integer  :: jtran                    ! from jth layer to count for transmissivity
      real(r8) :: dz_jtran                 
+     logical  :: use_bog_drainage                       ! apply perched-bog regional drainage geometry
+     logical  :: disable_peat_perched                   ! suppress standard perched-table physics in peat columns
+     real(r8), parameter :: aquifer_water_tol = 1.e-8_r8 ! tolerance for aquifer baseline overflow (mm)
      !-----------------------------------------------------------------------
 
      associate(                                                            &
@@ -1558,6 +1633,8 @@ contains
        do fc = 1, num_hydrologyc
           c = filter_hydrologyc(fc)
           nlevbed = nlev2bed(c)
+          t = col_pp%topounit(c)
+          disable_peat_perched = use_humhol .and. top_pp%peat_depth(t) > 0._r8
 
           !  specify maximum drainage rate
           q_perch_max = 1.e-5_r8 * sin(col_pp%topo_slope(c) * (rpi/180._r8))
@@ -1583,12 +1660,14 @@ contains
 
           ! initialize perched water table to frost table, and qflx_drain_perched(c) to zero
           zwt_perched(c)=frost_table(c)
+          if (disable_peat_perched) zwt_perched(c) = spval
           qflx_drain_perched(c) = 0._r8
 
           !===================  water table above frost table  =============================
           ! if water table is above frost table, do not use topmodel baseflow formulation
 
-          if (zwt(c) < frost_table(c) .and. t_soisno(c,k_frz) <= tfrz &
+          if (.not. disable_peat_perched .and. &
+               zwt(c) < frost_table(c) .and. t_soisno(c,k_frz) <= tfrz &
                .and. origflag == 0) then
              ! compute drainage from perched saturated region
              wtsub = 0._r8
@@ -1662,7 +1741,7 @@ contains
              if (t_soisno(c,k_frz) > tfrz) k_perch=k_frz
 
              ! if perched water table exists
-             if (k_frz > k_perch) then
+             if (.not. disable_peat_perched .and. k_frz > k_perch) then
                 ! interpolate between k_perch and k_perch+1 to find perched water table height
                 s1 = (h2osoi_liq(c,k_perch)/(dz(c,k_perch)*denh2o) &
                      + h2osoi_ice(c,k_perch)/(dz(c,k_perch)*denice))/watsat(c,k_perch)
@@ -1746,6 +1825,31 @@ contains
                    rsub_top_max = min(10._r8 * sin((rpi/180.) * col_pp%topo_slope(c)), rsub_top_globalmax)
                 end if
              endif
+
+             ! Bog baseflow is controlled by depth below the surrounding
+             ! regional surface, rather than depth below each microtopographic
+             ! surface independently. A configured fen can share this drainage
+             ! geometry without being relabeled as a bog for saturation or
+             ! lateral-routing behavior.
+             g = col_pp%gridcell(c)
+             t = col_pp%topounit(c)
+             use_bog_drainage = use_humhol .and. top_pp%peat_depth(t) > 0._r8 .and. &
+                  (top_pp%is_bog(t) .or. use_fen_bog_drainage)
+             rsub_top_zwt = zwt(c)
+             if (use_bog_drainage .and. grc_pp%ntopounits(g) > 1) then
+                topi = grc_pp%topi(g)
+                topf = grc_pp%topf(g)
+                rsub_top_ref_elev = top_pp%elevation(t)
+                do tpeer = topi, topf
+                   if (top_pp%active(tpeer)) then
+                      rsub_top_ref_elev = max(rsub_top_ref_elev, top_pp%elevation(tpeer))
+                   end if
+                end do
+                ! Standalone configurations using fen-as-bog drainage omit the
+                ! surrounding upland reference surface.
+                if (use_fen_bog_drainage) rsub_top_ref_elev = rsub_top_ref_elev + 3._r8
+                rsub_top_zwt = max(0._r8, zwt(c) + rsub_top_ref_elev - top_pp%elevation(t))
+             end if
              if (use_vichydro) then
                 ! ARNO model for the bottom soil layer (based on bottom soil layer
                 ! moisture from previous time step
@@ -1765,7 +1869,7 @@ contains
                 if (jwt(c) == nlevbed .and. zengdecker_2009_with_var_soil_thick) then
                    rsub_top(c)    = 0._r8
                 else
-                   rsub_top(c)    = imped * rsub_top_max* exp(-fff(c)*zwt(c))
+                   rsub_top(c)    = imped * rsub_top_max* exp(-fff(c)*rsub_top_zwt)
                 end if
 
              end if
@@ -1783,7 +1887,11 @@ contains
                  if (-1._r8 * smp_l(c,nlevbed) < 0.5_r8 * dzmm(c,nlevbed)) then
                     zwt(c) = z(c,nlevbed) - (smp_l(c,nlevbed) / 1000._r8)
                  end if
-                 rsub_top(c) = imped * rsub_top_max * exp(-fff(c) * zwt(c))
+                 rsub_top_zwt = zwt(c)
+                 if (use_bog_drainage .and. grc_pp%ntopounits(g) > 1) then
+                    rsub_top_zwt = max(0._r8, zwt(c) + rsub_top_ref_elev - top_pp%elevation(t))
+                 end if
+                 rsub_top(c) = imped * rsub_top_max * exp(-fff(c) * rsub_top_zwt)
                  rsub_top_tot = - rsub_top(c) * dtime
                  s_y = watsat(c,nlevbed) &
                      * ( 1. - (1.+1.e3*zwt(c)/sucsat(c,nlevbed))**(-1./bsw(c,nlevbed)))
@@ -2292,7 +2400,7 @@ contains
      !
      ! !LOCAL VARIABLES:
      character(len=32) :: subname = 'Drainage'           ! subroutine name
-     integer  :: c,j,fc,i                                ! indices
+     integer  :: c,j,fc,i,t                              ! indices
      real(r8) :: xs(bounds%begc:bounds%endc)             ! water needed to bring soil moisture to watmin (mm)
      real(r8) :: dzmm(bounds%begc:bounds%endc,1:nlevgrnd) ! layer thickness (mm)
      integer  :: jwt(bounds%begc:bounds%endc)            ! index of the soil layer right above the water table (-)
@@ -2340,6 +2448,7 @@ contains
      real(r8) :: rel_moist                ! relative moisture, temporary variable
      real(r8) :: wtsub_vic                ! summation of hk*dzmm for layers in the third VIC layer
      integer  :: idx                      ! 1D index for VSFM
+     logical  :: disable_peat_perched     ! suppress standard perched-table physics in peat columns
      !-----------------------------------------------------------------------
 
      associate(                                                            &
@@ -2441,6 +2550,8 @@ contains
        ! perched water table code
        do fc = 1, num_hydrologyc
           c = filter_hydrologyc(fc)
+          t = col_pp%topounit(c)
+          disable_peat_perched = use_humhol .and. top_pp%peat_depth(t) > 0._r8
 
           !  specify maximum drainage rate
           q_perch_max = 1.e-5_r8 * sin(col_pp%topo_slope(c) * (rpi/180._r8))
@@ -2466,11 +2577,13 @@ contains
 
           ! initialize perched water table to frost table, and qflx_drain_perched(c) to zero
           zwt_perched(c)=frost_table(c)
+          if (disable_peat_perched) zwt_perched(c) = spval
           qflx_drain_perched(c) = 0._r8
 
           !===================  water table above frost table  =============================
           ! if water table is above frost table, do not use topmodel baseflow formulation
-          if (zwt(c) < frost_table(c) .and. t_soisno(c,k_frz) <= tfrz &
+          if (.not. disable_peat_perched .and. &
+               zwt(c) < frost_table(c) .and. t_soisno(c,k_frz) <= tfrz &
                .and. origflag == 0) then
 
              ! compute drainage from perched saturated region
@@ -2540,7 +2653,7 @@ contains
              if (t_soisno(c,k_frz) > tfrz) k_perch=k_frz
 
              ! if perched water table exists
-             if (k_frz > k_perch) then
+             if (.not. disable_peat_perched .and. k_frz > k_perch) then
 
                 ! interpolate between k_perch and k_perch+1 to find perched water table height
                 s1 = (h2osoi_liq(c,k_perch)/(dz(c,k_perch)*denh2o) &

@@ -899,7 +899,8 @@ contains
      namelist / elm_soilhydrology_inparm / h2osfcflag, origflag
 
 
-     ! preset values
+     ! Retain modern ELM hydrology by default. The legacy formulation remains
+     ! available by setting origflag=1 explicitly in elm_soilhydrology_inparm.
      origflag = 0
      h2osfcflag = 1
 

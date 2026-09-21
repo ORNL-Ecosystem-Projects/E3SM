@@ -168,7 +168,7 @@ contains
      use column_varcon     , only : icol_roof, icol_sunwall, icol_shadewall
      use column_varcon     , only : icol_road_perv, icol_road_imperv
      use landunit_varcon   , only : istice_mec, istice, istdlak, istsoil,istcrop,istwet
-     use elm_varctl        , only : create_glacier_mec_landunit, use_IM2_hillslope_hydrology
+     use elm_varctl        , only : create_glacier_mec_landunit, use_IM2_hillslope_hydrology, use_humhol
      use elm_initializeMod , only : surfalb_vars  
      use CanopyStateType   , only : canopystate_type
      use subgridAveMod
@@ -319,7 +319,7 @@ contains
           ! when using fraction_from_uphill < 1.0, this state can get very small during recession
           ! which can lead to negative state from roundoff error. Trap this with a max(), and force to zero
           ! when the state gets too small.
-          if (use_IM2_hillslope_hydrology) then
+          if (use_IM2_hillslope_hydrology .or. use_humhol) then
             top_ws%from_uphill(t) = max(0._r8, top_ws%from_uphill(t) - (col_wf%qflx_from_uphill(c) * dtime))
             if (top_ws%from_uphill(t) < 1.e-20_r8) then
                top_ws%from_uphill(t) = 0._r8

@@ -268,12 +268,12 @@ contains
     !
     ! !USES:
       !$acc routine seq
-    use elm_varctl           , only : use_var_soil_thick
+    use elm_varctl           , only : use_var_soil_thick, use_humhol, iulog
     use shr_kind_mod         , only : r8 => shr_kind_r8
     use shr_const_mod        , only : SHR_CONST_TKFRZ, SHR_CONST_LATICE, SHR_CONST_G
     use decompMod            , only : bounds_type
     use elm_varcon           , only : wimp,grav,hfus,tfrz
-    use elm_varcon           , only : e_ice,denh2o, denice
+    use elm_varcon           , only : e_ice,denh2o, denice, watmin
     use elm_varpar           , only : nlevsoi, max_patch_per_col, nlevgrnd
     use elm_time_manager     , only : get_step_size
     use column_varcon        , only : icol_roof, icol_road_imperv
@@ -282,6 +282,9 @@ contains
     use SoilHydrologyType    , only : soilhydrology_type
     use VegetationType       , only : veg_pp
     use ColumnType           , only : col_pp
+    use GridcellType         , only : grc_pp
+    use TopounitType         , only : top_pp
+    use timeinfoMod          , only : nstep_mod
     !
     ! !ARGUMENTS:
     implicit none
@@ -296,7 +299,9 @@ contains
 
     !
     ! !LOCAL VARIABLES:
-    integer  :: p,c,fc,j                                     ! do loop indices
+    integer  :: p,c,fc,j,g,t                                 ! do loop indices
+    integer  :: k_sat                                        ! top layer in continuous saturated block
+    integer  :: layer_liq_min_j, layer_excess_max_j          ! diagnostic layer indices
     integer  :: nlevbed                                      ! number of layers to bedrock
     integer  :: jtop(bounds%begc:bounds%endc)                ! top level at each column
     integer  :: jbot(bounds%begc:bounds%endc)                ! bottom level at each column
@@ -321,11 +326,13 @@ contains
     real(r8) :: s_node                                       ! soil wetness
     real(r8) :: s1                                           ! "s" at interface of layer
     real(r8) :: s2                                           ! k*s**(2b+2)
+    real(r8) :: s_y                                          ! specific yield for aquifer correction
     real(r8) :: smp(bounds%begc:bounds%endc,1:nlevgrnd)       ! soil matrix potential [mm]
     real(r8) :: sdamp                                        ! extrapolates soiwat dependence of evaporation
     integer  :: pi                                           ! pft index
     real(r8) :: temp(bounds%begc:bounds%endc)                ! accumulator for rootr weighting
     integer  :: jwt(bounds%begc:bounds%endc)                 ! index of the soil layer right above the water table (-)
+    integer  :: jwt_solve(bounds%begc:bounds%endc)           ! water-table interface used by implicit solve
     real(r8) :: smp1,dsmpdw1,wh,wh_zwt,ka
     real(r8) :: dwat2(bounds%begc:bounds%endc,1:nlevgrnd+1)
     real(r8) :: dzq                                          ! used in calculating qin, qout (difference in equilbirium matric potential)
@@ -345,6 +352,31 @@ contains
     real(r8) :: dsmpds                                       !temporary variable
     real(r8) :: dhkds                                        !temporary variable
     real(r8) :: hktmp                                        !temporary variable
+    real(r8) :: h2osoi_liq_before(bounds%begc:bounds%endc,1:nlevgrnd)
+    real(r8) :: h2osoi_liq_after_implicit(bounds%begc:bounds%endc,1:nlevgrnd)
+    real(r8) :: h2osoi_liq_after_solve(bounds%begc:bounds%endc,1:nlevgrnd)
+    real(r8) :: layer_capacity, layer_liq_min, layer_excess_max
+    real(r8) :: sat_liq, sat_frac                            ! liquid saturation relative to effective porosity
+    real(r8) :: zwt_layer_top, zwt_layer_bot                 ! layer bounds for profile-derived water table (m)
+    real(r8) :: zwt_profile                                  ! water table inferred from post-solve saturation (m)
+    real(r8) :: implicit_layer_liq_min, implicit_layer_excess_max
+    real(r8) :: liq_deficit, liq_deficit_correction, liq_deficit_from_aquifer
+    real(r8) :: liq_excess, liq_excess_correction, liq_excess_to_aquifer
+    real(r8) :: soilwater_store_beg(bounds%begc:bounds%endc)
+    real(r8) :: soilwater_store_end
+    real(r8) :: soilwater_actual_delta
+    real(r8) :: soilwater_expected_delta
+    real(r8) :: soilwater_resid_with_qcharge
+    real(r8) :: soilwater_qcharge_storage_delta
+    real(r8) :: soilwater_root_sink(bounds%begc:bounds%endc)
+    logical  :: soilwater_aquifer_layer_active(bounds%begc:bounds%endc)
+    logical  :: used_explicit_fallback
+    logical  :: peat_ice_barrier                             ! frozen pore-space barrier above connected saturation
+    real(r8), parameter :: peat_zwt_interp_min = 0.90_r8
+    real(r8), parameter :: peat_zwt_sat_threshold = 0.99_r8
+    real(r8), parameter :: soilwater_liq_min_abort = -100._r8
+    real(r8), parameter :: soilwater_liq_excess_abort = 1000._r8
+    real(r8), parameter :: soilwater_balance_abort = 0.5_r8
     !-----------------------------------------------------------------------
 
     associate(&
@@ -354,6 +386,7 @@ contains
          nlev2bed          =>    col_pp%nlevbed                        , & ! Input:  [integer  (:)   ]  number of layers to bedrock
 
          origflag          =>    soilhydrology_vars%origflag        , & ! Input:  constant
+         wa                =>    soilhydrology_vars%wa_col          , & ! Input/Output:  [real(r8) (:)   ] aquifer water (mm)
          qcharge           =>    soilhydrology_vars%qcharge_col     , & ! Input:  [real(r8) (:)   ]  aquifer recharge rate (mm/s)
          zwt               =>    soilhydrology_vars%zwt_col         , & ! Input:  [real(r8) (:)   ]  water table depth (m)
          fracice           =>    soilhydrology_vars%fracice_col     , & ! Input:  [real(r8) (:,:) ]  fractional impermeability (-)
@@ -387,6 +420,8 @@ contains
       do fc = 1, num_hydrologyc
         c = filter_hydrologyc(fc)
         nlevbed = nlev2bed(c)
+        soilwater_store_beg(c) = wa(c)
+        soilwater_root_sink(c) = 0._r8
         do j = 1, nlevbed
             zmm(c,j) = z(c,j)*1.e3_r8
             dzmm(c,j) = dz(c,j)*1.e3_r8
@@ -396,6 +431,8 @@ contains
             vol_ice(c,j) = min(watsat(c,j), h2osoi_ice(c,j)/(dz(c,j)*denice))
             icefrac(c,j) = min(1._r8,vol_ice(c,j)/watsat(c,j))
             vwc_liq(c,j) = max(h2osoi_liq(c,j),1.0e-6_r8)/(dz(c,j)*denh2o)
+            soilwater_store_beg(c) = soilwater_store_beg(c) + h2osoi_liq(c,j)
+            soilwater_root_sink(c) = soilwater_root_sink(c) + qflx_rootsoi_col(c,j)
          end do
       end do
 
@@ -429,6 +466,8 @@ contains
                end if
             end if
          enddo
+         soilwater_aquifer_layer_active(c) = .not. use_var_soil_thick .and. jwt(c) >= nlevbed
+         jwt_solve(c) = jwt(c)
 
          ! compute vwc at water table depth (mainly for case when t < tfrz)
          !     this will only be used when zwt is below the soil column
@@ -447,6 +486,7 @@ contains
                endif
             enddo
          endif
+
       end do
 
       ! calculate the equilibrium water content based on the water table depth
@@ -748,8 +788,217 @@ contains
          c = filter_hydrologyc(fc)
          nlevbed = nlev2bed(c)
          do j = 1, nlevbed
-            h2osoi_liq(c,j) = h2osoi_liq(c,j) + dwat2(c,j)*dzmm(c,j)
+            h2osoi_liq_before(c,j) = h2osoi_liq(c,j)
+            h2osoi_liq_after_implicit(c,j) = h2osoi_liq(c,j) + dwat2(c,j)*dzmm(c,j)
+            h2osoi_liq_after_solve(c,j) = h2osoi_liq_after_implicit(c,j)
          end do
+
+         implicit_layer_liq_min = huge(1._r8)
+         implicit_layer_excess_max = -huge(1._r8)
+         do j = 1, nlevbed
+            layer_capacity = eff_porosity(c,j)*dzmm(c,j)
+            implicit_layer_liq_min = min(implicit_layer_liq_min, h2osoi_liq_after_implicit(c,j))
+            implicit_layer_excess_max = max(implicit_layer_excess_max, &
+                 h2osoi_liq_after_implicit(c,j) - layer_capacity)
+         end do
+
+         ! Restore the old peatland branch's conservative post-solve path. If
+         ! the linearized implicit increment is badly non-monotone, retain the
+         ! timestep budget with an explicit flux-divergence update instead.
+         used_explicit_fallback = use_humhol .and. &
+              (implicit_layer_liq_min < soilwater_liq_min_abort .or. &
+              implicit_layer_excess_max > soilwater_liq_excess_abort)
+         if (used_explicit_fallback) then
+            do j = 1, nlevbed
+               h2osoi_liq_after_solve(c,j) = h2osoi_liq_before(c,j) + rmx(c,j)*dtime
+            end do
+         end if
+
+         do j = 1, nlevbed
+            h2osoi_liq(c,j) = h2osoi_liq_after_solve(c,j)
+         end do
+
+         if (use_humhol) then
+         ! Correct ice-limited overshoots conservatively: borrow a deficit
+         ! from the layer below (then the aquifer), and pass excess downward
+         ! (then to the aquifer). This keeps the layer state and ZWT storage
+         ! response synchronized before qcharge is diagnosed.
+         liq_deficit_correction = 0._r8
+         liq_deficit_from_aquifer = 0._r8
+         liq_excess_correction = 0._r8
+         liq_excess_to_aquifer = 0._r8
+         do j = 1, nlevbed-1
+            if (h2osoi_liq(c,j) < watmin) then
+               liq_deficit = watmin - h2osoi_liq(c,j)
+               h2osoi_liq(c,j) = h2osoi_liq(c,j) + liq_deficit
+               h2osoi_liq(c,j+1) = h2osoi_liq(c,j+1) - liq_deficit
+               liq_deficit_correction = liq_deficit_correction + liq_deficit
+            end if
+         end do
+         j = nlevbed
+         if (h2osoi_liq(c,j) < watmin) then
+            liq_deficit = watmin - h2osoi_liq(c,j)
+            h2osoi_liq(c,j) = h2osoi_liq(c,j) + liq_deficit
+            wa(c) = wa(c) - liq_deficit
+            liq_deficit_correction = liq_deficit_correction + liq_deficit
+            liq_deficit_from_aquifer = liq_deficit
+         end if
+         if (liq_deficit_from_aquifer > 0._r8) then
+            s_y = watsat(c,nlevbed) * &
+                 (1._r8 - (1._r8 + 1.e3_r8*zwt(c)/sucsat(c,nlevbed))**(-1._r8/bsw(c,nlevbed)))
+            s_y = max(s_y,0.02_r8)
+            zwt(c) = zwt(c) + liq_deficit_from_aquifer/1000._r8/s_y
+            zwt(c) = max(0._r8,min(80._r8,zwt(c)))
+         end if
+         do j = 1, nlevbed-1
+            layer_capacity = max(watmin, eff_porosity(c,j)*dzmm(c,j))
+            if (h2osoi_liq(c,j) > layer_capacity) then
+               liq_excess = h2osoi_liq(c,j) - layer_capacity
+               h2osoi_liq(c,j) = h2osoi_liq(c,j) - liq_excess
+               h2osoi_liq(c,j+1) = h2osoi_liq(c,j+1) + liq_excess
+               liq_excess_correction = liq_excess_correction + liq_excess
+            end if
+         end do
+         j = nlevbed
+         layer_capacity = max(watmin, eff_porosity(c,j)*dzmm(c,j))
+         if (h2osoi_liq(c,j) > layer_capacity) then
+            liq_excess = h2osoi_liq(c,j) - layer_capacity
+            h2osoi_liq(c,j) = h2osoi_liq(c,j) - liq_excess
+            wa(c) = wa(c) + liq_excess
+            liq_excess_correction = liq_excess_correction + liq_excess
+            liq_excess_to_aquifer = liq_excess
+         end if
+         if (liq_excess_to_aquifer > 0._r8) then
+            s_y = watsat(c,nlevbed) * &
+                 (1._r8 - (1._r8 + 1.e3_r8*zwt(c)/sucsat(c,nlevbed))**(-1._r8/bsw(c,nlevbed)))
+            s_y = max(s_y,0.02_r8)
+            zwt(c) = zwt(c) - liq_excess_to_aquifer/1000._r8/s_y
+            zwt(c) = max(0._r8,min(80._r8,zwt(c)))
+         end if
+         do j = 1, nlevbed
+            h2osoi_vol(c,j) = h2osoi_liq(c,j)/(dz(c,j)*denh2o) &
+                 + h2osoi_ice(c,j)/(dz(c,j)*denice)
+         end do
+         end if
+
+         ! The standalone SPRUCE fen can be saturated through the profile while
+         ! its prognostic ZWT lags much deeper. Restore the old branch safeguard:
+         ! align an overly deep fen ZWT with the shallowest continuous bottom-up
+         ! saturated block before diagnosing qcharge and lateral hydraulic head.
+         t = col_pp%topounit(c)
+         if (use_humhol .and. top_pp%topo_grc_ind(t) == 1 .and. &
+             top_pp%peat_depth(t) > 0._r8 .and. .not. top_pp%is_bog(t) .and. &
+             .not. soilwater_aquifer_layer_active(c)) then
+            k_sat = nlevbed + 1
+            peat_ice_barrier = .false.
+            do j = nlevbed, 1, -1
+               ! Do not diagnose the regional water table through a layer that
+               ! ELM already considers water-impermeable. Snowmelt can still
+               ! infiltrate through the peatland minimum-impedance pathway,
+               ! but the connected water table remains below the ice barrier.
+               if (eff_porosity(c,j) < wimp) then
+                  peat_ice_barrier = .true.
+                  exit
+               end if
+               layer_capacity = max(watmin, eff_porosity(c,j)*dzmm(c,j))
+               sat_liq = h2osoi_liq(c,j) / layer_capacity
+               if (sat_liq >= peat_zwt_sat_threshold) then
+                  k_sat = j
+               else
+                  exit
+               end if
+            end do
+
+            if (peat_ice_barrier) then
+               if (k_sat <= nlevbed) then
+                  zwt_profile = zi(c,k_sat-1)
+               else
+                  zwt_profile = zwt(c)
+               end if
+            else if (k_sat == 1) then
+               zwt_profile = 0._r8
+            else
+               j = min(k_sat-1, nlevbed)
+               if (j >= 1) then
+                  layer_capacity = max(watmin, eff_porosity(c,j)*dzmm(c,j))
+                  sat_liq = h2osoi_liq(c,j) / layer_capacity
+                  if (sat_liq >= peat_zwt_interp_min) then
+                     if (j == 1) then
+                        zwt_layer_top = 0._r8
+                     else
+                        zwt_layer_top = zi(c,j-1)
+                     end if
+                     zwt_layer_bot = zi(c,j)
+                     sat_frac = (sat_liq - peat_zwt_interp_min) / &
+                          (peat_zwt_sat_threshold - peat_zwt_interp_min)
+                     sat_frac = max(0._r8, min(1._r8, sat_frac))
+                     zwt_profile = zwt_layer_bot - sat_frac*(zwt_layer_bot-zwt_layer_top)
+                  else if (k_sat <= nlevbed) then
+                     zwt_profile = zi(c,k_sat-1)
+                  else
+                     ! Without a connected saturated boundary, retain the
+                     ! prior diagnostic rather than creating a threshold-
+                     ! driven jump to the bottom of the resolved profile.
+                     zwt_profile = zwt(c)
+                  end if
+               else
+                  zwt_profile = zwt(c)
+               end if
+            end if
+
+            if (zwt_profile < zwt(c)) then
+               zwt(c) = max(0._r8,zwt_profile)
+               zwtmm(c) = zwt(c)*1.e3_r8
+               jwt(c) = nlevbed
+               do j = 1, nlevbed
+                  if (use_var_soil_thick) then
+                     if (zwt(c) <= zi(c,j) .and. zwt(c) < zi(c,nlevbed)) then
+                        jwt(c) = j-1
+                        exit
+                     end if
+                  else
+                     if (zwt(c) <= zi(c,j)) then
+                        jwt(c) = j-1
+                        exit
+                     end if
+                  end if
+               end do
+            end if
+         end if
+
+         if (use_humhol .and. soilwater_aquifer_layer_active(c)) then
+            zwt(c) = max(zwt(c),zi(c,nlevbed)+1.e-9_r8)
+            zwtmm(c) = zwt(c)*1.e3_r8
+            jwt(c) = nlevbed
+         end if
+
+         layer_liq_min = huge(1._r8)
+         layer_excess_max = -huge(1._r8)
+         layer_liq_min_j = 1
+         layer_excess_max_j = 1
+         do j = 1, nlevbed
+            layer_capacity = eff_porosity(c,j)*dzmm(c,j)
+            if (h2osoi_liq(c,j) < layer_liq_min) then
+               layer_liq_min = h2osoi_liq(c,j)
+               layer_liq_min_j = j
+            end if
+            if (h2osoi_liq(c,j)-layer_capacity > layer_excess_max) then
+               layer_excess_max = h2osoi_liq(c,j)-layer_capacity
+               layer_excess_max_j = j
+            end if
+         end do
+         if (use_humhol .and. (layer_liq_min < soilwater_liq_min_abort .or. &
+              layer_excess_max > soilwater_liq_excess_abort)) then
+            g = col_pp%gridcell(c)
+            t = col_pp%topounit(c)
+            write(iulog,*) 'soilwater post-solve bounds diagnostic', nstep_mod, c, g, t
+            write(iulog,*) 'minimum liquid/layer', layer_liq_min, layer_liq_min_j
+            write(iulog,*) 'maximum excess/layer', layer_excess_max, layer_excess_max_j
+            write(iulog,*) 'implicit min/max/fallback', implicit_layer_liq_min, &
+                 implicit_layer_excess_max, used_explicit_fallback
+            call endrun(msg='SoilWaterMovement vertical solve produced out-of-bounds layer water'&
+                 //errMsg(__FILE__, __LINE__))
+         end if
 
          ! calculate qcharge for case jwt < nlevsoi
          if (use_var_soil_thick) then
@@ -790,7 +1039,11 @@ contains
                qcharge(c) = 0._r8
             endif
           else
-            if (jwt(c) < nlevbed) then
+            if (soilwater_aquifer_layer_active(c)) then
+               ! This solve included the extra aquifer layer. Preserve that
+               ! storage transfer even if profile reconciliation changed jwt.
+               qcharge(c) = dwat2(c,nlevsoi+1)*dzmm(c,nlevsoi+1)/dtime
+            else if (jwt(c) < nlevbed) then
                wh_zwt = 0._r8   !since wh_zwt = -sucsat - zq_zwt, where zq_zwt = -sucsat
 
                ! Recharge rate qcharge to groundwater (positive to aquifer)
@@ -823,10 +1076,30 @@ contains
                qcharge(c) = max(-10.0_r8/dtime,qcharge(c))
                qcharge(c) = min( 10.0_r8/dtime,qcharge(c))
             else
-            ! if water table is below soil column, compute qcharge from dwat2(11)
-               qcharge(c) = dwat2(c,nlevsoi+1)*dzmm(c,nlevsoi+1)/dtime
+               qcharge(c) = 0._r8
             endif
          endif
+
+         ! For an in-profile peat water table, diagnose recharge from the
+         ! flux that actually entered the implicit layer-water solve. The
+         ! legacy post-solve hydraulic-gradient expression is evaluated with
+         ! a reconstructed ZWT and stale pre-solve potentials, which can pin
+         ! QCHARGE at its limiter and obscure precipitation-driven recharge.
+         ! When the water table is in the first layer, infiltration crosses
+         ! directly into the saturated region. Otherwise use the linearized
+         ! Darcy flux across the last-unsaturated/first-saturated interface.
+         t = col_pp%topounit(c)
+         if (use_humhol .and. top_pp%peat_depth(t) > 0._r8 .and. &
+              .not. soilwater_aquifer_layer_active(c) .and. jwt_solve(c) < nlevbed) then
+            if (jwt_solve(c) == 0) then
+               qcharge(c) = qflx_infl(c)
+            else
+               qcharge(c) = qout(c,jwt_solve(c)) + &
+                    dqodw1(c,jwt_solve(c))*dwat2(c,jwt_solve(c)) + &
+                    dqodw2(c,jwt_solve(c))*dwat2(c,jwt_solve(c)+1)
+            endif
+         endif
+
       end do
 
       ! compute the water deficit and reset negative liquid water content
@@ -840,6 +1113,43 @@ contains
                qflx_deficit(c) = qflx_deficit(c) - h2osoi_liq(c,j)
             endif
          enddo
+      enddo
+
+      ! Retain the old branch's post-solve conservation check. For a solve
+      ! that included the extra aquifer layer, derive qcharge from the actual
+      ! soil-plus-aquifer storage transfer so the later drainage update uses
+      ! the same conserved amount.
+      do fc = 1, num_hydrologyc
+         c = filter_hydrologyc(fc)
+         nlevbed = nlev2bed(c)
+         soilwater_store_end = wa(c)
+         do j = 1, nlevbed
+            soilwater_store_end = soilwater_store_end + h2osoi_liq(c,j)
+         enddo
+         soilwater_actual_delta = soilwater_store_end-soilwater_store_beg(c)
+         soilwater_expected_delta = (qflx_infl(c)-soilwater_root_sink(c))*dtime
+         soilwater_qcharge_storage_delta = 0._r8
+         if (use_humhol .and. soilwater_aquifer_layer_active(c)) then
+            soilwater_qcharge_storage_delta = soilwater_expected_delta-soilwater_actual_delta
+            qcharge(c) = soilwater_qcharge_storage_delta/dtime
+         end if
+         soilwater_resid_with_qcharge = soilwater_actual_delta - &
+              (soilwater_expected_delta-soilwater_qcharge_storage_delta)
+         if (use_humhol .and. abs(soilwater_resid_with_qcharge) > soilwater_balance_abort) then
+            g = col_pp%gridcell(c)
+            t = col_pp%topounit(c)
+            write(iulog,*) 'soilwater post-solve conservation diagnostic', nstep_mod, c, g, t
+            write(iulog,*) 'storage begin/end', soilwater_store_beg(c), soilwater_store_end
+            write(iulog,*) 'actual/expected delta', soilwater_actual_delta, soilwater_expected_delta
+            write(iulog,*) 'qcharge storage delta/residual', soilwater_qcharge_storage_delta, &
+                 soilwater_resid_with_qcharge
+            write(iulog,*) 'infiltration/root sink', qflx_infl(c)*dtime, &
+                 soilwater_root_sink(c)*dtime
+            write(iulog,*) 'deficit/excess corrections', liq_deficit_correction, &
+                 liq_excess_correction
+            call endrun(msg='SoilWaterMovement vertical solve water balance residual'&
+                 //errMsg(__FILE__, __LINE__))
+         endif
       enddo
 
     end associate

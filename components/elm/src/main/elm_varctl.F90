@@ -481,6 +481,7 @@ module elm_varctl
   !-----------------------------------------------------------------------
   logical, public            :: use_IM2_hillslope_hydrology  = .false.
   logical, public            :: use_humhol                   = .false.
+  logical, public            :: use_fen_bog_drainage         = .false.
  
   !-----------------------------------------------------------------------
   ! flux limiter for phenology flux calculation

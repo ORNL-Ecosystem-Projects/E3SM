@@ -258,7 +258,7 @@ contains
     use elm_varsur , only : wt_tunit, elv_tunit, dist_tunit, regional_target_tunit
     use elm_varsur , only : slp_tunit, asp_tunit, bog_tunit, peat_depth_tunit, till_ksat_tunit
     use elm_varsur , only : num_tunit_per_grd
-    use elm_varctl , only : use_IM2_hillslope_hydrology
+    use elm_varctl , only : use_IM2_hillslope_hydrology, use_humhol
     use topounit_varcon   , only : max_topounits, has_topounit 
     ! !ARGUMENTS
     integer, intent(in) :: gdc
@@ -317,9 +317,9 @@ contains
             peat_depth=peat_depth, till_ksat=till_ksat, regional_target_ti=regional_target_ti)
     end do
 
-    ! Loop through topounits again to find its nearest downhill topounit on this gridcell
-    ! part of the IM2 hillslope hydrology implementation
-    if (ntopos > 1 .and. use_IM2_hillslope_hydrology) then
+    ! Find the nearest lower active topounit for IM2 and peatland surface routing.
+    ! The use_humhol branch is intentionally generic in the number of topounits.
+    if (ntopos > 1 .and. (use_IM2_hillslope_hydrology .or. use_humhol)) then
       ! find the minimum elevation over all topounits on the gridcell
       min_elev = top_pp%elevation(begt)
       min_index = begt
@@ -330,13 +330,13 @@ contains
          endif
       end do
       ! find the closest downhill neighbor for each topounit
-      dn_index = -1  ! value of -1 indicates no downhill neighbor
       do t1 = begt, endt
          t1_elev = top_pp%elevation(t1)
          dn_elev = min_elev
+         dn_index = -1  ! value of -1 indicates no downhill neighbor
          do t2 = begt, endt
             t2_elev = top_pp%elevation(t2)
-            if ((t2_elev < t1_elev) .and. (t2_elev >= dn_elev)) then
+            if ((t2_elev < t1_elev) .and. (t2_elev >= dn_elev) .and. top_pp%active(t2)) then
                dn_elev = t2_elev
                dn_index = t2
             endif

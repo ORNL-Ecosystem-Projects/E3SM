@@ -59,7 +59,7 @@ contains
     use ocn2lndType      , only : ocn2lnd_type
     use elm_varpar       , only : nlevgrnd, nlevurb, nlevsoi
     use SoilHydrologyMod , only : ELMVICMap, Drainage
-    use elm_varctl       , only : use_vsfm, use_IM2_hillslope_hydrology
+    use elm_varctl       , only : use_vsfm, use_IM2_hillslope_hydrology, use_humhol
     !
     ! !ARGUMENTS:
     type(bounds_type)        , intent(in)    :: bounds
@@ -81,6 +81,8 @@ contains
     ! !LOCAL VARIABLES:
     real(r8) :: dtime
     real(r8) :: temp_to_downhill, temp_mass
+    real(r8) :: downhill_routing_scale
+    real(r8), parameter :: min_full_downhill_receiver_frac = 0.10_r8
     integer  :: g,t,l,c,j,fc,tpu_ind, downhill_t              ! indices
     !-----------------------------------------------------------------------
 
@@ -306,21 +308,27 @@ contains
          ! if using topounit hillslope hydrology, fractions of qflx_surf, qflx_drain_perched, and qflx_h2osfc
          ! are passed to the from_uphill water state on the downhill topounit, via qflx_to_downhill
          ! only shift positive fluxes, and only set fluxes if there is a downhill topounit
-         if (use_IM2_hillslope_hydrology) then
+         if (use_IM2_hillslope_hydrology .or. use_humhol) then
             downhill_t = top_pp%downhill_ti(t)
             if (downhill_t /= -1) then
+               downhill_routing_scale = 1._r8
+               if (use_humhol .and. top_pp%wtgcell(downhill_t) < min_full_downhill_receiver_frac) then
+                  downhill_routing_scale = max(0._r8, min(1._r8, &
+                       top_pp%wtgcell(downhill_t)/min_full_downhill_receiver_frac))
+               end if
+
                ! shift a fixed fraction of qflx_surf
-               temp_to_downhill = max(0._r8, frac_to_downhill * qflx_surf(c))
+               temp_to_downhill = max(0._r8, downhill_routing_scale * frac_to_downhill * qflx_surf(c))
                qflx_to_downhill(c) = temp_to_downhill
                qflx_surf(c) = qflx_surf(c) - temp_to_downhill
-               
+
                ! shift a fixed fraction of qflx_drain_perched
-               temp_to_downhill = max(0._r8, frac_to_downhill * qflx_drain_perched(c))
+               temp_to_downhill = max(0._r8, downhill_routing_scale * frac_to_downhill * qflx_drain_perched(c))
                qflx_to_downhill(c) = qflx_to_downhill(c) + temp_to_downhill
                qflx_drain_perched(c) = qflx_drain_perched(c) - temp_to_downhill
                
                ! shift a fixed fraction of qflx_h2osfc_surf
-               temp_to_downhill = max(0._r8, frac_to_downhill * qflx_h2osfc_surf(c))
+               temp_to_downhill = max(0._r8, downhill_routing_scale * frac_to_downhill * qflx_h2osfc_surf(c))
                qflx_to_downhill(c) = qflx_to_downhill(c) + temp_to_downhill
                qflx_h2osfc_surf(c) = qflx_h2osfc_surf(c) - temp_to_downhill
 
