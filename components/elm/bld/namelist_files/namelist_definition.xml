@@ -2054,6 +2054,30 @@ If TRUE, apply harvest from flanduse_timeseries file.
 (Also, only valid for use_cn = true.)
 </entry>
 
+<entry id="use_cn_harvest_pulse" type="logical" category="physics"
+       group="dynamic_subgrid" valid_values="" >
+If TRUE, apply each annual non-FATES CN harvest fraction in one timestep rather
+than distributing it uniformly through the year. This has an effect only when
+do_harvest is TRUE and defaults to FALSE. The pulse date and time are controlled by
+cn_harvest_pulse_month, cn_harvest_pulse_day, and cn_harvest_pulse_tod.
+</entry>
+
+<entry id="cn_harvest_pulse_month" type="integer" category="physics"
+       group="dynamic_subgrid" valid_values="" >
+Month of the annual CN harvest pulse. The default is 1 (January).
+</entry>
+
+<entry id="cn_harvest_pulse_day" type="integer" category="physics"
+       group="dynamic_subgrid" valid_values="" >
+Day of month of the annual CN harvest pulse. The default is 31.
+</entry>
+
+<entry id="cn_harvest_pulse_tod" type="integer" category="physics"
+       group="dynamic_subgrid" valid_values="" >
+Time of day of the annual CN harvest pulse in seconds after midnight. The
+default is 0.
+</entry>
+
 <!-- ========================================================================================  -->
 <!-- Namelist options related to finidat consistency checks                                    -->
 <!-- ========================================================================================  -->

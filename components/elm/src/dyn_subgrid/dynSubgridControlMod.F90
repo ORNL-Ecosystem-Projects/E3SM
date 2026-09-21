@@ -26,6 +26,7 @@ module dynSubgridControlMod
   public :: get_do_transient_crops  ! return the value of the do_transient_crops control flag
   public :: run_has_transient_landcover ! returns true if any aspects of prescribed transient landcover are enabled
   public :: get_do_harvest          ! return the value of the do_harvest control flag
+  public :: get_cn_harvest_pulse_settings ! return CN harvest pulse controls
   public :: get_for_testing_allow_non_annual_changes ! return true if user has requested to allow area changes at times other than the year boundary, for testing purposes
   public :: get_for_testing_zero_dynbal_fluxes ! return true if user has requested to set the dynbal water and energy fluxes to zero, for testing purposes
   !
@@ -40,6 +41,10 @@ module dynSubgridControlMod
      logical :: do_transient_pfts  = .false. ! whether to apply transient natural PFTs from dataset
      logical :: do_transient_crops = .false. ! whether to apply transient crops from dataset
      logical :: do_harvest         = .false. ! whether to apply harvest from dataset
+     logical :: use_cn_harvest_pulse = .false. ! apply each annual CN harvest fraction in one timestep
+     integer :: cn_harvest_pulse_month = 1     ! month of the annual CN harvest pulse
+     integer :: cn_harvest_pulse_day = 31      ! day of month of the annual CN harvest pulse
+     integer :: cn_harvest_pulse_tod = 0       ! time of day of the annual CN harvest pulse (s)
 
      ! The following is only meant for testing: Whether area changes are allowed at times
      ! other than the year boundary. This should only arise in some test configurations
@@ -114,6 +119,10 @@ contains
     logical :: do_transient_pfts
     logical :: do_transient_crops
     logical :: do_harvest
+    logical :: use_cn_harvest_pulse
+    integer :: cn_harvest_pulse_month
+    integer :: cn_harvest_pulse_day
+    integer :: cn_harvest_pulse_tod
     logical :: for_testing_allow_non_annual_changes
     logical :: for_testing_zero_dynbal_fluxes
     ! other local variables:
@@ -128,6 +137,10 @@ contains
          do_transient_pfts, &
          do_transient_crops, &
          do_harvest, &
+         use_cn_harvest_pulse, &
+         cn_harvest_pulse_month, &
+         cn_harvest_pulse_day, &
+         cn_harvest_pulse_tod, &
          for_testing_allow_non_annual_changes, &
          for_testing_zero_dynbal_fluxes
 
@@ -136,6 +149,10 @@ contains
     do_transient_pfts  = .false.
     do_transient_crops = .false.
     do_harvest         = .false.
+    use_cn_harvest_pulse = .false.
+    cn_harvest_pulse_month = 1
+    cn_harvest_pulse_day = 31
+    cn_harvest_pulse_tod = 0
     for_testing_allow_non_annual_changes = .false.
     for_testing_zero_dynbal_fluxes = .false.
 
@@ -172,6 +189,10 @@ contains
     call shr_mpi_bcast (do_transient_pfts, mpicom)
     call shr_mpi_bcast (do_transient_crops, mpicom)
     call shr_mpi_bcast (do_harvest, mpicom)
+    call shr_mpi_bcast (use_cn_harvest_pulse, mpicom)
+    call shr_mpi_bcast (cn_harvest_pulse_month, mpicom)
+    call shr_mpi_bcast (cn_harvest_pulse_day, mpicom)
+    call shr_mpi_bcast (cn_harvest_pulse_tod, mpicom)
     call shr_mpi_bcast (for_testing_allow_non_annual_changes, mpicom)
     call shr_mpi_bcast (for_testing_zero_dynbal_fluxes, mpicom)
 
@@ -180,6 +201,10 @@ contains
          do_transient_pfts = do_transient_pfts, &
          do_transient_crops = do_transient_crops, &
          do_harvest = do_harvest, &
+         use_cn_harvest_pulse = use_cn_harvest_pulse, &
+         cn_harvest_pulse_month = cn_harvest_pulse_month, &
+         cn_harvest_pulse_day = cn_harvest_pulse_day, &
+         cn_harvest_pulse_tod = cn_harvest_pulse_tod, &
          for_testing_allow_non_annual_changes = for_testing_allow_non_annual_changes, &
          for_testing_zero_dynbal_fluxes = for_testing_zero_dynbal_fluxes)
 
@@ -250,6 +275,22 @@ contains
        end if
     end if
 
+    if (dyn_subgrid_control_inst%use_cn_harvest_pulse) then
+       if (.not. use_cn .or. use_fates) then
+          write(iulog,*) 'ERROR: use_cn_harvest_pulse is available only for non-FATES CN harvest'
+          call endrun(msg=errMsg(sourcefile, __LINE__))
+       end if
+       if (dyn_subgrid_control_inst%cn_harvest_pulse_month < 1 .or. &
+           dyn_subgrid_control_inst%cn_harvest_pulse_month > 12 .or. &
+           dyn_subgrid_control_inst%cn_harvest_pulse_day < 1 .or. &
+           dyn_subgrid_control_inst%cn_harvest_pulse_day > 31 .or. &
+           dyn_subgrid_control_inst%cn_harvest_pulse_tod < 0 .or. &
+           dyn_subgrid_control_inst%cn_harvest_pulse_tod >= 86400) then
+          write(iulog,*) 'ERROR: invalid CN harvest pulse date or time of day'
+          call endrun(msg=errMsg(sourcefile, __LINE__))
+       end if
+    end if
+
   end subroutine check_namelist_consistency
 
   !-----------------------------------------------------------------------
@@ -312,6 +353,24 @@ contains
     get_do_harvest = dyn_subgrid_control_inst%do_harvest
 
   end function get_do_harvest
+
+  !-----------------------------------------------------------------------
+  subroutine get_cn_harvest_pulse_settings(use_pulse, month, day, tod)
+    ! !DESCRIPTION:
+    ! Return controls for applying the annual CN harvest fraction as a pulse.
+    logical, intent(out) :: use_pulse
+    integer, intent(out) :: month
+    integer, intent(out) :: day
+    integer, intent(out) :: tod
+
+    SHR_ASSERT(dyn_subgrid_control_inst%initialized, errMsg(sourcefile, __LINE__))
+
+    use_pulse = dyn_subgrid_control_inst%use_cn_harvest_pulse
+    month = dyn_subgrid_control_inst%cn_harvest_pulse_month
+    day = dyn_subgrid_control_inst%cn_harvest_pulse_day
+    tod = dyn_subgrid_control_inst%cn_harvest_pulse_tod
+
+  end subroutine get_cn_harvest_pulse_settings
 
   !-----------------------------------------------------------------------
   logical function get_for_testing_allow_non_annual_changes()

@@ -205,7 +205,8 @@ contains
     use pftvarcon       , only : pprodharv10
     use pftvarcon       , only : woody
     use elm_varcon      , only : secspday
-    use elm_time_manager, only : get_days_per_year
+    use elm_time_manager, only : get_days_per_year, get_curr_date, get_step_size
+    use dynSubgridControlMod, only : get_cn_harvest_pulse_settings
     use GridcellType   , only : grc_pp
     
     ! !ARGUMENTS:
@@ -219,10 +220,19 @@ contains
     integer :: t,ti,topi                 ! topounit indices TKT
     integer :: g                         ! gridcell index
     integer :: fp                        ! patch filter index
+    integer :: yr, mon, day, sec         ! date at the end of the current timestep
+    integer :: prev_yr, prev_mon         ! date at the end of the previous timestep
+    integer :: prev_day, prev_sec
+    integer :: dtime                     ! timestep length (s)
+    integer :: pulse_month               ! configured harvest pulse month
+    integer :: pulse_day                 ! configured harvest pulse day of month
+    integer :: pulse_tod                 ! configured harvest pulse time of day (s)
     real(r8):: am                        ! rate for fractional harvest mortality (1/yr)
     real(r8):: m                         ! rate for fractional harvest mortality (1/s)
     real(r8):: days_per_year             ! days per year
     integer :: varnum                    ! counter for harvest variables
+    logical :: use_harvest_pulse         ! apply annual harvest in one timestep
+    logical :: is_harvest_pulse_step     ! this timestep crosses the configured pulse time
     !-----------------------------------------------------------------------
 
    associate(& 
@@ -366,6 +376,29 @@ contains
 
 
    days_per_year = get_days_per_year()
+   call get_cn_harvest_pulse_settings(use_harvest_pulse, pulse_month, pulse_day, pulse_tod)
+   is_harvest_pulse_step = .false.
+   if (use_harvest_pulse) then
+      dtime = get_step_size()
+      call get_curr_date(yr, mon, day, sec)
+      call get_curr_date(prev_yr, prev_mon, prev_day, prev_sec, offset=-dtime)
+
+      ! The model clock is valid at the end of the current timestep. Trigger
+      ! the pulse on the timestep that crosses the requested date and time,
+      ! including when the event falls between timestep boundaries.
+      if (mon == pulse_month .and. day == pulse_day .and. sec >= pulse_tod) then
+         if (prev_yr /= yr .or. prev_mon /= pulse_month .or. prev_day /= pulse_day .or. &
+             prev_sec < pulse_tod) then
+            is_harvest_pulse_step = .true.
+         end if
+      else if (prev_mon == pulse_month .and. prev_day == pulse_day .and. &
+               (prev_yr /= yr .or. prev_mon /= mon .or. prev_day /= day) .and. &
+               prev_sec < pulse_tod) then
+         ! The event occurred late on the requested day in a timestep whose
+         ! endpoint is on the following day.
+         is_harvest_pulse_step = .true.
+      end if
+   end if
 
    ! patch loop
    do fp = 1,num_soilp
@@ -385,7 +418,19 @@ contains
             do varnum = 1, num_harvest_vars
                am = am + harvest_rates(varnum,g)
             end do
-            m  = am/(days_per_year * secspday)
+            if (use_harvest_pulse) then
+               if (is_harvest_pulse_step) then
+                  if (am < 0._r8 .or. am > 1._r8) then
+                     call endrun(msg='CN harvest pulse fraction must be between zero and one'//&
+                          errMsg(__FILE__, __LINE__))
+                  end if
+                  m = am / real(dtime, r8)
+               else
+                  m = 0._r8
+               end if
+            else
+               m = am/(days_per_year * secspday)
+            end if
          else
             m = 0._r8
          end if   

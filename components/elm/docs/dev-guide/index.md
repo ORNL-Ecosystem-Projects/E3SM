@@ -8,3 +8,4 @@ This guide contains information for developing ELM and MOSART.
 * [Peatland respiration acclimation](peatland-respiration-acclimation.md): PFT-specific maintenance respiration and woody temperature acclimation
 * [Peatland balance diagnostics](peatland-balance-diagnostics.md): Water and ecosystem conservation diagnostics for peatland topounits
 * [Peatland shading options](peatland-shading.md): Optional shrub attenuation of moss PAR and topounit surface-structure shading
+* [CN harvest pulse](cn-harvest-pulse.md): Optional event-style timing for annual non-FATES CN harvest fractions
