@@ -299,6 +299,8 @@ module pftvarcon
   real(r8), allocatable :: br_xr(:)            !Base rate for excess respiration
   real(r8), allocatable :: crit_gdd1(:)        !Critical GDD intercept
   real(r8), allocatable :: crit_gdd2(:)        !Critical GDD slope with MAT
+  real(r8), allocatable :: br_mr_pft(:)        !PFT-specific maintenance respiration base rate
+  real(r8), allocatable :: q10_mr_pft(:)       !PFT-specific maintenance respiration Q10
   real(r8)              :: tc_stress           !Critial temperature for moisture stress
   real(r8), allocatable :: vcmax_np1(:)        !vcmax~np relationship coefficient
   real(r8), allocatable :: vcmax_np2(:)        !vcmax~np relationship coefficient
@@ -657,6 +659,8 @@ contains
     allocate( br_xr              (0:mxpft) )
     allocate( crit_gdd1          (0:mxpft) )
     allocate( crit_gdd2          (0:mxpft) )
+    allocate( br_mr_pft          (0:mxpft) )
+    allocate( q10_mr_pft         (0:mxpft) )
     ! Ground cover for soil erosion
     allocate( gcbc_p             (0:mxpft) )
     allocate( gcbc_q             (0:mxpft) )
@@ -1123,6 +1127,10 @@ contains
     if (.not. readv) crit_gdd1(:) = 4.8_r8
     call ncd_io('crit_gdd2', crit_gdd2, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if (.not. readv) crit_gdd2(:) = 0.13_r8
+    call ncd_io('br_mr_pft', br_mr_pft(0:npft-1), 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) br_mr_pft(:) = 2.525e-6_r8
+    call ncd_io('q10_mr_pft', q10_mr_pft(0:npft-1), 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) q10_mr_pft(:) = 1.5_r8
     call ncd_io('tc_stress', tc_stress, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if ( .not. readv) call endrun(msg='ERROR:  error in reading in pft data'//errMsg(__FILE__,__LINE__))
     call ncd_io('gcbc_p',gcbc_p, 'read', ncid, readvar=readv, posNOTonfile=.true.)

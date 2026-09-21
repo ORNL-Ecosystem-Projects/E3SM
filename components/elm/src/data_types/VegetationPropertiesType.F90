@@ -144,6 +144,8 @@ module VegetationPropertiesType
      real(r8), pointer :: br_xr(:)         => null()   !Base rate for excess respiration
      real(r8), pointer :: crit_gdd1(:) => null()   !Deciduous pheonlogy critical GDD intercept
      real(r8), pointer :: crit_gdd2(:) => null()   !Deciduous pheonlogy critical GDD slope
+     real(r8), pointer :: br_mr_pft(:) => null()   !PFT-specific maintenance respiration base rate
+     real(r8), pointer :: q10_mr_pft(:) => null()  !PFT-specific maintenance respiration Q10
      real(r8), pointer :: tc_stress        => null()   !Critial temperature for moisture stress
      ! new properties for flexible PFT
      real(r8), pointer :: climatezone(:)   => null()   !climate zone adapted
@@ -200,6 +202,7 @@ contains
     ! snow/vegetation interactions (NGEE Arctic IM3)
     use pftvarcon , only : bendresist, stocking, vegshape, taper
     use pftvarcon , only : bbbopt, mbbopt, nstor, br_xr, tc_stress, lmrhd, crit_gdd1, crit_gdd2
+    use pftvarcon , only : br_mr_pft, q10_mr_pft
     !
 
     class (vegetation_properties_type) :: this
@@ -340,6 +343,8 @@ contains
 
     allocate( this%crit_gdd1(0:numpft))                          ; this%crit_gdd1(:)             =spval
     allocate( this%crit_gdd2(0:numpft))                          ; this%crit_gdd2(:)             =spval
+    allocate( this%br_mr_pft(0:numpft))                          ; this%br_mr_pft(:)             =spval
+    allocate( this%q10_mr_pft(0:numpft))                         ; this%q10_mr_pft(:)            =spval
     do m = 0,numpft
 
        ! not needed anymore: woody(m)=1 for tree, 2 for shrub, or 0 for any other
@@ -437,6 +442,8 @@ contains
 
        this%crit_gdd1(m)    = crit_gdd1(m)
        this%crit_gdd2(m)    = crit_gdd2(m)
+       this%br_mr_pft(m)    = br_mr_pft(m)
+       this%q10_mr_pft(m)   = q10_mr_pft(m)
     end do
 
     do m = 0,numpft

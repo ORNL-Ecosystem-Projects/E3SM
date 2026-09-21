@@ -34,6 +34,7 @@ module  PhotosynthesisMod
   use pftvarcon           , only : noveg
   use SharedParamsMod     , only : ParamsShareInst
   use TopounitDataType    , only : top_as
+  use TopounitType        , only : top_pp
   use VegetationDataType  , only : veg_es, veg_ns, veg_ps
   use VegetationDataType  , only : veg_wf, veg_ws
   use ColumnDataType      , only : col_es, col_ws, col_wf
@@ -370,6 +371,8 @@ contains
          flnr          => veg_vp%flnr                          , & ! Input:  [real(r8) (:)   ]  fraction of leaf N in the Rubisco enzyme (gN Rubisco / gN leaf)
          fnitr         => veg_vp%fnitr                         , & ! Input:  [real(r8) (:)   ]  foliage nitrogen limitation factor (-)
          slatop        => veg_vp%slatop                        , & ! Input:  [real(r8) (:)   ]  specific leaf area at top of canopy, projected area basis [m^2/gC]
+         br_mr_pft     => veg_vp%br_mr_pft                     , & ! Input:  [real(r8) (:)   ]  PFT-specific respiration base rate
+         q10_mr_pft    => veg_vp%q10_mr_pft                    , & ! Input:  [real(r8) (:)   ]  PFT-specific respiration Q10
          forc_pbot     => top_as%pbot                              , & ! Input:  [real(r8) (:)   ]  atmospheric pressure (Pa)
 
          t_veg         => veg_es%t_veg             , & ! Input:  [real(r8) (:)   ]  vegetation temperature (Kelvin)
@@ -732,7 +735,12 @@ contains
             !
             ! Then scale this value at the top of the canopy for canopy depth
 
-            lmr25top = 2.525e-6_r8 * (ParamsShareInst%Q10_mr ** ((25._r8 - 20._r8)/10._r8))
+            if (use_humhol .and. top_pp%peat_depth(veg_pp%topounit(p)) > 0._r8) then
+               lmr25top = br_mr_pft(veg_pp%itype(p)) * &
+                    q10_mr_pft(veg_pp%itype(p))**((25._r8 - 20._r8)/10._r8)
+            else
+               lmr25top = 2.525e-6_r8 * (ParamsShareInst%Q10_mr ** ((25._r8 - 20._r8)/10._r8))
+            end if
             lmr25top = lmr25top * lnc(p) / 12.e-06_r8
          else
             ! Leaf maintenance respiration in proportion to vcmax25top
@@ -770,7 +778,12 @@ contains
 
             lmr25 = lmr25top * nscaler
             if (c3flag(p)) then
-               lmr_z(p,iv) = lmr25 * ft(t_veg(p), lmrha) * fth(t_veg(p), lmrhd, lmrse, lmrc)
+               if (use_humhol .and. top_pp%peat_depth(veg_pp%topounit(p)) > 0._r8) then
+                  lmr_z(p,iv) = lmr25 * q10_mr_pft(veg_pp%itype(p))** &
+                       ((t_veg(p)-(tfrz+25._r8))/10._r8)
+               else
+                  lmr_z(p,iv) = lmr25 * ft(t_veg(p), lmrha) * fth(t_veg(p), lmrhd, lmrse, lmrc)
+               end if
             else
                lmr_z(p,iv) = lmr25 * 2._r8**((t_veg(p)-(tfrz+25._r8))/10._r8)
                lmr_z(p,iv) = lmr_z(p,iv) / (1._r8 + exp( 1.3_r8*(t_veg(p)-(tfrz+55._r8)) ))
@@ -1892,6 +1905,8 @@ contains
          stem_leaf     => veg_vp%stem_leaf                         , & ! allocation parameter: new stem c per new leaf C (gC/gC)
          froot_leaf     => veg_vp%froot_leaf                         , & ! allocation parameter: new fine root C per new leaf C (gC/gC)
          croot_stem     => veg_vp%croot_stem                         , & ! allocation parameter: new coarse root C per new stem C (gC/gC)
+         br_mr_pft      => veg_vp%br_mr_pft                          , & ! PFT-specific respiration base rate
+         q10_mr_pft     => veg_vp%q10_mr_pft                         , & ! PFT-specific respiration Q10
          forc_pbot  => top_as%pbot                           , & ! Input:  [real(r8) (:)   ]  atmospheric pressure (Pa)
 
          t_veg         => veg_es%t_veg             , & ! Input:  [real(r8) (:)   ]  vegetation temperature (Kelvin)
@@ -2292,7 +2307,12 @@ contains
             !
             ! Then scale this value at the top of the canopy for canopy depth
 
-            lmr25top = 2.525e-6_r8 * (ParamsShareInst%Q10_mr ** ((25._r8 - 20._r8)/10._r8))
+            if (use_humhol .and. top_pp%peat_depth(veg_pp%topounit(p)) > 0._r8) then
+               lmr25top = br_mr_pft(veg_pp%itype(p)) * &
+                    q10_mr_pft(veg_pp%itype(p))**((25._r8 - 20._r8)/10._r8)
+            else
+               lmr25top = 2.525e-6_r8 * (ParamsShareInst%Q10_mr ** ((25._r8 - 20._r8)/10._r8))
+            end if
             lmr25top = lmr25top * lnc(p) / 12.e-06_r8
 
          else
@@ -2340,8 +2360,15 @@ contains
             lmr25_sha = lmr25top * nscaler_sha
 
             if (c3flag(p)) then
-               lmr_z_sun(p,iv) = lmr25_sun * ft(t_veg(p), lmrha) * fth(t_veg(p), lmrhd, lmrse, lmrc)
-               lmr_z_sha(p,iv) = lmr25_sha * ft(t_veg(p), lmrha) * fth(t_veg(p), lmrhd, lmrse, lmrc)
+               if (use_humhol .and. top_pp%peat_depth(veg_pp%topounit(p)) > 0._r8) then
+                  lmr_z_sun(p,iv) = lmr25_sun * q10_mr_pft(veg_pp%itype(p))** &
+                       ((t_veg(p)-(tfrz+25._r8))/10._r8)
+                  lmr_z_sha(p,iv) = lmr25_sha * q10_mr_pft(veg_pp%itype(p))** &
+                       ((t_veg(p)-(tfrz+25._r8))/10._r8)
+               else
+                  lmr_z_sun(p,iv) = lmr25_sun * ft(t_veg(p), lmrha) * fth(t_veg(p), lmrhd, lmrse, lmrc)
+                  lmr_z_sha(p,iv) = lmr25_sha * ft(t_veg(p), lmrha) * fth(t_veg(p), lmrhd, lmrse, lmrc)
+               end if
             else
                lmr_z_sun(p,iv) = lmr25_sun * 2._r8**((t_veg(p)-(tfrz+25._r8))/10._r8)
                lmr_z_sun(p,iv) = lmr_z_sun(p,iv) / (1._r8 + exp( 1.3_r8*(t_veg(p)-(tfrz+55._r8)) ))
