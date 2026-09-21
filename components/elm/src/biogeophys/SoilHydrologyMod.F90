@@ -1441,7 +1441,7 @@ contains
      ! !USES:
       !$acc routine seq
      use elm_varpar       , only : nlevsoi, nlevgrnd, nlayer, nlayert
-     use elm_varcon       , only : pondmx, tfrz, watmin,rpi, secspday, nlvic
+     use elm_varcon       , only : pondmx, tfrz, watmin,rpi, secspday, nlvic, aquifer_water_baseline
      use column_varcon    , only : icol_roof, icol_road_imperv, icol_road_perv
      use elm_varctl       , only : use_vsfm, use_var_soil_thick, use_firn_percolation_and_compaction
      use SoilWaterMovementMod, only : zengdecker_2009_with_var_soil_thick
@@ -1489,6 +1489,7 @@ contains
      real(r8) :: ka                                      ! hydraulic conductivity of the aquifer (mm/s)
      real(r8) :: dza                                     ! fff*(zwt-z(jwt)) (-)
      real(r8) :: available_h2osoi_liq                    ! available soil liquid water in a layer
+     real(r8) :: peat_aquifer_excess                     ! peat aquifer water returned to surface/runoff (mm)
      real(r8) :: rsub_top_max
      real(r8) :: rsub_top_zwt                            ! water-table depth used for regional drainage (m)
      real(r8) :: rsub_top_ref_elev                       ! drainage reference elevation (m)
@@ -1625,6 +1626,29 @@ contains
              end if
           enddo
        end do
+
+       ! The standard lower-boundary formulation treats aquifer_water_baseline
+       ! as the maximum implicit aquifer store. Peat columns can receive water
+       ! from lateral exchange as well as vertical recharge, so return any
+       ! excess to the explicitly represented surface reservoir. This keeps
+       ! the transfer conservative and leaves non-peat columns unchanged.
+       if (use_humhol) then
+          do fc = 1, num_hydrologyc
+             c = filter_hydrologyc(fc)
+             t = col_pp%topounit(c)
+             if (top_pp%peat_depth(t) <= 0._r8) cycle
+
+             peat_aquifer_excess = max(0._r8, wa(c) - aquifer_water_baseline)
+             if (peat_aquifer_excess > aquifer_water_tol) then
+                wa(c) = wa(c) - peat_aquifer_excess
+                if (h2osfcflag == 1) then
+                   h2osfc(c) = h2osfc(c) + peat_aquifer_excess
+                else
+                   qflx_qrgwl(c) = qflx_qrgwl(c) + peat_aquifer_excess/dtime
+                end if
+             end if
+          end do
+       end if
 
        rous = 0.2_r8
 
@@ -2138,9 +2162,9 @@ contains
 
           qflx_drain(c) = qflx_rsub_sat(c) + rsub_top(c)
 
-          ! Set imbalance for snow capping
-
-          qflx_qrgwl(c) = qflx_snwcp_liq(c)
+          ! Add the snow-capping imbalance without overwriting other qrgwl
+          ! terms such as peat aquifer overflow.
+          qflx_qrgwl(c) = qflx_qrgwl(c) + qflx_snwcp_liq(c)
 
        end do
 
