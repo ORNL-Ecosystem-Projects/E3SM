@@ -122,6 +122,7 @@ attributes from the config_cache.xml file (with keys converted to upper-case).
 <use_fen_bog_drainage>.false.</use_fen_bog_drainage>
 <!-- Use standard roots unless peatland physics is enabled -->
 <use_peatland_roots>.false.</use_peatland_roots>
+<use_peatland_vertical_transport>.false.</use_peatland_vertical_transport>
 
 <!-- ================================================================== -->
 <!-- The default filenames are given relative to the root directory

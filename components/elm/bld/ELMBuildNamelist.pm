@@ -2048,6 +2048,7 @@ sub process_namelist_inline_logic {
   setup_logic_delta_time($opts, $nl_flags, $definition, $defaults, $nl);
   setup_logic_do_budgets($opts, $nl_flags, $definition, $defaults, $nl);
   setup_logic_peatland_roots($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
+  setup_logic_peatland_vertical_transport($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
   setup_logic_decomp_performance($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
   setup_logic_snow($opts, $nl_flags, $definition, $defaults, $nl, $physv);
   setup_logic_glacier($opts, $nl_flags, $definition, $defaults, $nl,  $envxml_ref, $physv);
@@ -2323,6 +2324,21 @@ sub setup_logic_peatland_roots {
     my $value = ($use_humhol =~ /true/i) ? '.true.' : '.false.';
     add_default($test_files, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl,
                 'use_peatland_roots', 'val'=>$value);
+  }
+}
+
+#-------------------------------------------------------------------------------
+
+sub setup_logic_peatland_vertical_transport {
+  my ($test_files, $nl_flags, $definition, $defaults, $nl) = @_;
+
+  # Preserve an explicit user setting. Otherwise, peat vertical transport
+  # follows the master peatland-physics switch.
+  if ( ! defined($nl->get_value('use_peatland_vertical_transport')) ) {
+    my $use_humhol = $nl->get_value('use_humhol') || '.false.';
+    my $value = ($use_humhol =~ /true/i) ? '.true.' : '.false.';
+    add_default($test_files, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl,
+                'use_peatland_vertical_transport', 'val'=>$value);
   }
 }
 

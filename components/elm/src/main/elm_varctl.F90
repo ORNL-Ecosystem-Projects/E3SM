@@ -487,8 +487,10 @@ module elm_varctl
   logical, public            :: use_humhol                   = .false.
   logical, public            :: use_fen_bog_drainage         = .false.
   logical, public            :: use_peatland_roots           = .false.
+  logical, public            :: use_peatland_vertical_transport = .false.
 
   !$acc declare copyin(use_peatland_roots)
+  !$acc declare copyin(use_peatland_vertical_transport)
  
   !-----------------------------------------------------------------------
   ! flux limiter for phenology flux calculation

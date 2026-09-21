@@ -6,6 +6,7 @@ module SoilLittVertTranspMod
   use shr_kind_mod           , only : r8 => shr_kind_r8
   use shr_log_mod            , only : errMsg => shr_log_errMsg
   use elm_varctl             , only : iulog, use_c13, use_c14, spinup_state, use_vertsoilc
+  use elm_varctl             , only : use_peatland_vertical_transport
   use elm_varcon             , only : secspday
   use decompMod              , only : bounds_type
   use abortutils             , only : endrun
@@ -16,6 +17,8 @@ module SoilLittVertTranspMod
   use ColumnDataType         , only : col_cs, c13_col_cs, c14_col_cs
   use ColumnDataType         , only : col_cf, c13_col_cf, c14_col_cf
   use ColumnDataType         , only : col_ns, col_nf, col_ps, col_pf
+  use ColumnType             , only : col_pp
+  use TopounitType           , only : top_pp
   use timeinfoMod
   !
   implicit none
@@ -47,6 +50,12 @@ module SoilLittVertTranspMod
 
   real(r8), public :: som_adv_flux =  0._r8
   !$acc declare create(som_adv_flux)
+  real(r8), public :: peat_som_adv_flux = 0.0004_r8 / (secspday * 365._r8)
+  !$acc declare create(peat_som_adv_flux)
+  real(r8), public :: peat_som_diffus = 0._r8
+  !$acc declare create(peat_som_diffus)
+  real(r8), public :: peat_adv_reference_depth = 3._r8
+  !$acc declare create(peat_adv_reference_depth)
   real(r8), public :: max_depth_cryoturb = 3._r8   ! (m) this is the maximum depth of cryoturbation
   !$acc declare create(max_depth_cryoturb)
   !-----------------------------------------------------------------------
@@ -215,7 +224,7 @@ contains
     real(r8) :: dz_node,dz_nodep1          ! difference between nodes
     real(r8) :: a_p_0
     integer  :: ntype
-    integer  :: i_type,s,fc,c,j,l  ! indices
+    integer  :: i_type,s,fc,c,j,l,t  ! indices
     integer  :: jtop(num_soilc)    ! top level at each column
     real(r8) :: spinup_term                  ! spinup accelerated decomposition factor, used to accelerate transport as well
     real(r8), parameter :: epsilon=1.e-30     ! small number
@@ -229,6 +238,7 @@ contains
     real(r8) :: conc_trcr(num_soilc,0:nlevdecomp+1,ndecomp_pools)                  !
     real(r8) :: bet
     real(r8) :: gam(0:nlevdecomp+1)
+    real(r8) :: peat_depth_factor
     !-----------------------------------------------------------------------
 
 
@@ -268,34 +278,71 @@ contains
       if (use_vertsoilc) then
          !------ first get diffusivity / advection terms -------!
          ! use different mixing rates for bioturbation and cryoturbation, with fixed bioturbation and cryoturbation set to a maximum depth
-         !$acc parallel loop independent gang default(present)
-         do j = 1,nlevdecomp+1
-            !$acc loop vector independent private(c)
-            do fc = 1, num_soilc
-               c = filter_soilc (fc)
-               if  ( ( max(altmax(c), altmax_lastyear(c)) <= max_altdepth_cryoturbation ) .and. &
-                  ( max(altmax(c), altmax_lastyear(c)) > 0._r8) ) then
-                  ! use mixing profile modified slightly from Koven et al. (2009): constant through active layer, linear decrease from base of active layer to zero at a fixed depth
-                  if ( zisoi(j) < max(altmax(c), altmax_lastyear(c)) ) then
-                     som_diffus_coef(c,j) = cryoturb_diffusion_k
-                     som_adv_coef(c,j) = 0._r8
+         if (.not. use_peatland_vertical_transport) then
+            ! Keep the standard path separate and unchanged for off-mode BFB.
+            !$acc parallel loop independent gang default(present)
+            do j = 1,nlevdecomp+1
+               !$acc loop vector independent private(c)
+               do fc = 1, num_soilc
+                  c = filter_soilc (fc)
+                  if  ( ( max(altmax(c), altmax_lastyear(c)) <= max_altdepth_cryoturbation ) .and. &
+                     ( max(altmax(c), altmax_lastyear(c)) > 0._r8) ) then
+                     ! use mixing profile modified slightly from Koven et al. (2009): constant through active layer, linear decrease from base of active layer to zero at a fixed depth
+                     if ( zisoi(j) < max(altmax(c), altmax_lastyear(c)) ) then
+                        som_diffus_coef(c,j) = cryoturb_diffusion_k
+                        som_adv_coef(c,j) = 0._r8
+                     else
+                        som_diffus_coef(c,j) = max(cryoturb_diffusion_k * &
+                             ( 1._r8 - ( zisoi(j) - max(altmax(c), altmax_lastyear(c)) ) / &
+                             ( max_depth_cryoturb - max(altmax(c), altmax_lastyear(c)) ) ), 0._r8)  ! go linearly to zero between ALT and max_depth_cryoturb
+                        som_adv_coef(c,j) = 0._r8
+                     endif
+                  elseif (  max(altmax(c), altmax_lastyear(c)) > 0._r8 ) then
+                     ! constant advection, constant diffusion
+                     som_adv_coef(c,j) = som_adv_flux
+                     som_diffus_coef(c,j) = som_diffus
                   else
-                     som_diffus_coef(c,j) = max(cryoturb_diffusion_k * &
-                          ( 1._r8 - ( zisoi(j) - max(altmax(c), altmax_lastyear(c)) ) / &
-                          ( max_depth_cryoturb - max(altmax(c), altmax_lastyear(c)) ) ), 0._r8)  ! go linearly to zero between ALT and max_depth_cryoturb
+                     ! completely frozen soils--no mixing
                      som_adv_coef(c,j) = 0._r8
+                     som_diffus_coef(c,j) = 0._r8
                   endif
-               elseif (  max(altmax(c), altmax_lastyear(c)) > 0._r8 ) then
-                  ! constant advection, constant diffusion
-                  som_adv_coef(c,j) = som_adv_flux
-                  som_diffus_coef(c,j) = som_diffus
-               else
-                  ! completely frozen soils--no mixing
-                  som_adv_coef(c,j) = 0._r8
-                  som_diffus_coef(c,j) = 0._r8
-               endif
+               end do
             end do
-         end do
+         else
+            !$acc parallel loop independent gang default(present)
+            do j = 1,nlevdecomp+1
+               !$acc loop vector independent private(c,t,peat_depth_factor)
+               do fc = 1, num_soilc
+                  c = filter_soilc (fc)
+                  if  ( ( max(altmax(c), altmax_lastyear(c)) <= max_altdepth_cryoturbation ) .and. &
+                     ( max(altmax(c), altmax_lastyear(c)) > 0._r8) ) then
+                     if ( zisoi(j) < max(altmax(c), altmax_lastyear(c)) ) then
+                        som_diffus_coef(c,j) = cryoturb_diffusion_k
+                        som_adv_coef(c,j) = 0._r8
+                     else
+                        som_diffus_coef(c,j) = max(cryoturb_diffusion_k * &
+                             ( 1._r8 - ( zisoi(j) - max(altmax(c), altmax_lastyear(c)) ) / &
+                             ( max_depth_cryoturb - max(altmax(c), altmax_lastyear(c)) ) ), 0._r8)
+                        som_adv_coef(c,j) = 0._r8
+                     endif
+                  elseif (max(altmax(c), altmax_lastyear(c)) > 0._r8) then
+                     t = col_pp%topounit(c)
+                     peat_depth_factor = max(top_pp%peat_depth(t), 0._r8) / &
+                          peat_adv_reference_depth
+                     if (peat_depth_factor > 0._r8) then
+                        som_adv_coef(c,j) = peat_som_adv_flux * peat_depth_factor
+                        som_diffus_coef(c,j) = peat_som_diffus
+                     else
+                        som_adv_coef(c,j) = som_adv_flux
+                        som_diffus_coef(c,j) = som_diffus
+                     end if
+                  else
+                     som_adv_coef(c,j) = 0._r8
+                     som_diffus_coef(c,j) = 0._r8
+                  endif
+               end do
+            end do
+         end if
       endif
    
       !------ loop over litter/som types

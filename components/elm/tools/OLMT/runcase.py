@@ -1251,9 +1251,9 @@ else:
     sys.exit(1)
 
 #Land CPPDEF modifications
-if (options.humhol):
-    print("Turning on HUM_HOL modification\n")
-    os.system("./xmlchange -id CLM_CONFIG_OPTS --append --val '-cppdefs -DHUM_HOL'")
+# HUMHOL physics is selected at runtime through use_humhol and subordinate
+# namelist options. The humhol OLMT flag is retained for constructing the
+# multi-topounit surface and must not alter the compile-time CPP definition set.
 if (options.harvmod):
     print('Turning on HARVMOD modification\n')
     os.system("./xmlchange -id CLM_CONFIG_OPTS --append --val '-cppdefs -DHARVMOD'")

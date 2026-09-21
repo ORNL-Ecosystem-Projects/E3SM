@@ -29,7 +29,9 @@ module controlMod
   use ColumnDataType          , only: nfix_timeconst
   use NitrifDenitrifMod       , only: no_frozen_nitrif_denitrif
   use C14DecayMod             , only: use_c14_bombspike, atm_c14_filename
-  use SoilLittVertTranspMod   , only: som_adv_flux, max_depth_cryoturb
+  use SoilLittVertTranspMod   , only: som_adv_flux, max_depth_cryoturb, &
+                                      peat_som_adv_flux, peat_som_diffus, &
+                                      peat_adv_reference_depth
   use VerticalProfileMod      , only: exponential_rooting_profile, rootprof_exp
   use VerticalProfileMod      , only: surfprof_exp, pftspecific_rootingprofile
   use SharedParamsMod         , only: anoxia_wtsat
@@ -70,7 +72,8 @@ module controlMod
                         vsfm_lateral_model_type, vsfm_include_seepage_bc, &
                         use_hydrstress, lateral_connectivity, domain_decomp_type, &
                         use_IM2_hillslope_hydrology, use_humhol, use_fen_bog_drainage, &
-                        use_peatland_roots, use_petsc_thermal_model, &
+                        use_peatland_roots, use_peatland_vertical_transport, &
+                        use_petsc_thermal_model, &
                         do_budgets, budget_inst, budget_daily, budget_month, &
                         budget_ann, budget_ltann, budget_ltend, &
                         use_lnd_rof_two_way, use_ocn_lnd_one_way, &
@@ -289,7 +292,8 @@ contains
 
     ! vertical soil mixing variables
     namelist /elm_inparm/  &
-         som_adv_flux, max_depth_cryoturb
+         som_adv_flux, max_depth_cryoturb, peat_som_adv_flux, &
+         peat_som_diffus, peat_adv_reference_depth
 
     ! C and N input vertical profiles
     namelist /elm_inparm/  &
@@ -373,7 +377,8 @@ contains
     namelist /elm_inparm/ &
          use_IM2_hillslope_hydrology
 
-    namelist /elm_inparm/ use_humhol, use_fen_bog_drainage, use_peatland_roots
+    namelist /elm_inparm/ use_humhol, use_fen_bog_drainage, use_peatland_roots, &
+         use_peatland_vertical_transport
 
     namelist /elm_inparm/ &
          use_petsc_thermal_model
@@ -926,6 +931,9 @@ contains
        ! vertical soil mixing variables
        call mpi_bcast (som_adv_flux, 1, MPI_REAL8,  0, mpicom, ier)
        call mpi_bcast (max_depth_cryoturb, 1, MPI_REAL8,  0, mpicom, ier)
+       call mpi_bcast (peat_som_adv_flux, 1, MPI_REAL8, 0, mpicom, ier)
+       call mpi_bcast (peat_som_diffus, 1, MPI_REAL8, 0, mpicom, ier)
+       call mpi_bcast (peat_adv_reference_depth, 1, MPI_REAL8, 0, mpicom, ier)
     end if
     if (use_cn .and. use_vertsoilc) then
        ! C and N input vertical profiles
@@ -1029,6 +1037,12 @@ contains
     call mpi_bcast (use_humhol, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_fen_bog_drainage, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_peatland_roots, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_peatland_vertical_transport, 1, MPI_LOGICAL, 0, mpicom, ier)
+    !$acc update device(use_peatland_vertical_transport)
+
+    if ((use_cn .or. use_fates) .and. use_vertsoilc) then
+       !$acc update device(peat_som_adv_flux, peat_som_diffus, peat_adv_reference_depth)
+    end if
 
     if (use_fen_bog_drainage .and. .not. use_humhol) then
        call endrun(msg=' ERROR: use_fen_bog_drainage=.true. requires '//&
@@ -1038,6 +1052,18 @@ contains
     if (use_peatland_roots .and. .not. use_humhol) then
        call endrun(msg=' ERROR: use_peatland_roots=.true. requires '//&
             'use_humhol=.true.'//errMsg(__FILE__, __LINE__))
+    end if
+
+    if (use_peatland_vertical_transport .and. .not. use_humhol) then
+       call endrun(msg=' ERROR: use_peatland_vertical_transport=.true. requires '//&
+            'use_humhol=.true.'//errMsg(__FILE__, __LINE__))
+    end if
+    if (use_peatland_vertical_transport .and. &
+         (peat_som_adv_flux < 0._r8 .or. peat_som_diffus < 0._r8 .or. &
+          peat_adv_reference_depth <= 0._r8)) then
+       call endrun(msg=' ERROR: peatland vertical-transport coefficients must be '//&
+            'nonnegative and peat_adv_reference_depth must be positive'//&
+            errMsg(__FILE__, __LINE__))
     end if
 
     ! bgc & pflotran interface
@@ -1160,6 +1186,7 @@ contains
     write(iulog,*) '    use_humhol = ', use_humhol
     write(iulog,*) '    use_fen_bog_drainage = ', use_fen_bog_drainage
     write(iulog,*) '    use_peatland_roots = ', use_peatland_roots
+    write(iulog,*) '    use_peatland_vertical_transport = ', use_peatland_vertical_transport
     write(iulog,*) '    use_shrub_moss_shading = ', use_shrub_moss_shading
     write(iulog,*) '    use_surface_structure_shading = ', use_surface_structure_shading
     write(iulog,*) '    use_atm_downscaling_to_topunit = ', use_atm_downscaling_to_topunit
@@ -1238,6 +1265,9 @@ contains
     if (use_cn .and. use_vertsoilc) then
        write(iulog, *) '   som_adv_flux, the advection term in soil mixing (m/s) : ', som_adv_flux
        write(iulog, *) '   max_depth_cryoturb (m)                                : ', max_depth_cryoturb
+       write(iulog, *) '   peat_som_adv_flux at reference depth (m/s)             : ', peat_som_adv_flux
+       write(iulog, *) '   peat_som_diffus (m2/s)                                 : ', peat_som_diffus
+       write(iulog, *) '   peat_adv_reference_depth (m)                           : ', peat_adv_reference_depth
 
        write(iulog, *) '   exponential_rooting_profile                           : ', exponential_rooting_profile
        write(iulog, *) '   rootprof_exp                                          : ', rootprof_exp
