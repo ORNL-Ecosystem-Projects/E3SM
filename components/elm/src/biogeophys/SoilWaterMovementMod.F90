@@ -411,6 +411,7 @@ contains
          qflx_deficit      =>    col_wf%qflx_deficit    , & ! Input:  [real(r8) (:)   ]  water deficit to keep non-negative liquid water content
          qflx_infl         =>    col_wf%qflx_infl       , & ! Input:  [real(r8) (:)   ]  infiltration (mm H2O /s)
          qflx_rootsoi_col  =>    col_wf%qflx_rootsoi    , & ! Input: [real(r8) (:,:) ]  vegetation/soil water exchange (mm H2O/s) (+ = to atm)
+         qflx_adv          =>    col_wf%qflx_adv        , & ! Output: [real(r8) (:,:) ] interface water flux [mm H2O/s] (+ downward)
          t_soisno          =>    col_es%t_soisno        & ! Input:  [real(r8) (:,:) ]  soil temperature (Kelvin)
          )
 
@@ -1173,6 +1174,23 @@ contains
                  //errMsg(__FILE__, __LINE__))
          endif
       enddo
+
+      ! Retain the vertical water fluxes used by this hydrology solve for
+      ! conservative dissolved-tracer transport. Interfaces below bedrock do
+      ! not participate in the solve and must not retain their allocation fill
+      ! value. qin(c,1) is infiltration through the upper soil boundary;
+      ! qout(c,j) is positive downward through the lower face of layer j.
+      do fc = 1, num_hydrologyc
+         c = filter_hydrologyc(fc)
+         nlevbed = nlev2bed(c)
+         qflx_adv(c,0) = qin(c,1)
+         do j = 1, nlevbed
+            qflx_adv(c,j) = qout(c,j)
+         end do
+         do j = nlevbed+1, nlevgrnd
+            qflx_adv(c,j) = 0._r8
+         end do
+      end do
 
     end associate
 

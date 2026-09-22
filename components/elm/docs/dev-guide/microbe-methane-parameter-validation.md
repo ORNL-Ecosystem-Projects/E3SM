@@ -1214,6 +1214,36 @@ reduction script are archived in
 `phase3-artifacts/spruce-20260918/sensitivity_k_20260920` outside this source
 tree.
 
+### Native-ELM aqueous-flux coupling regression
+
+The reconstructed native-ELM adapter initially read `col_wf%qflx_adv` without
+restoring the hydrology code that populates that field. Native ELM allocated
+the array at its `1e36 mm s-1` fill value; only the BeTR path otherwise wrote
+it. The conservative aqueous solver therefore interpreted the fill value as
+an enormous downward water flux, transported DOM through the entire column,
+and accounted for its removal as bottom-boundary export. The transport balance
+check correctly closed that mathematically valid but physically meaningless
+export, so it did not expose the uninitialized input.
+
+Native soil hydrology now saves the infiltration and interlayer `qin`/`qout`
+fluxes in `qflx_adv`, with interfaces below bedrock explicitly zeroed. The
+revised-methane adapter also aborts if an aqueous run receives a non-finite or
+fill-valued interface flux. This is required ELM coupling infrastructure, not
+a scientific departure from the intended CLM-Microbe aqueous transport.
+
+The clean 50-year three-topounit SPRUCE regression
+`20260922SPRMIC50E_..._aqueous_fluxfix` used the reference parameter file
+(`K_acetoclastic=50 mmol C m-3`, not the exploratory value of 10). Over years
+44--50, gridcell-weighted CH4 production was `3.580 g C m-2 yr-1`, oxidation
+was `1.743 g C m-2 yr-1`, net surface flux was `1.838 g C m-2 yr-1`, and DOM
+stock was `65.92 g C m-2`. The largest absolute DOM transport residual was
+`2.20e-13 g C m-2` per timestep. The preceding fill-value run had zero DOM by
+year 11 and only `1.09e-8 g C m-2 yr-1` CH4 production, confirming that its
+collapsed methane cycle was a coupling error rather than a kinetic response.
+The corrected run had a closed lower boundary in the native hydrology solve,
+so diagnosed bottom DOM export was zero; lateral/runoff solute export remains
+a separate future development.
+
 ## Validation experiments and diagnostics
 
 Generate coupled site experiments with `elm_olmt` by default. Avoid using a

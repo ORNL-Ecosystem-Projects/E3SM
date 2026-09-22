@@ -584,7 +584,7 @@ contains
     use shr_log_mod, only : errMsg => shr_log_errMsg
     use elm_varctl, only : iulog
     use elm_varpar, only : nlevdecomp, i_dom
-    use elm_varcon, only : denh2o, denice, tfrz, d_con_w, d_con_g, catomw, rgas
+    use elm_varcon, only : denh2o, denice, tfrz, d_con_w, d_con_g, catomw, rgas, spval
     use elm_varcon, only : c_h_inv, kh_theta, kh_tbase
     use ColumnType, only : col_pp
     use TopounitType, only : top_pp
@@ -808,6 +808,14 @@ contains
        ! matter must not leave with water vapor, so only the downward clean-
        ! water infiltration component is admitted here. A future surface-
        ! water/runoff solute pathway must use an explicit aqueous surface pool.
+       if (use_microbe_aqueous_transport) then
+          if (any(.not. ieee_is_finite(col_wf%qflx_adv(c,0:nlevdecomp))) .or. &
+               any(abs(col_wf%qflx_adv(c,0:nlevdecomp)) >= 0.5_r8 * spval)) then
+             write(message,'(a,i0)') &
+                  ' ERROR: invalid or uninitialized aqueous-transport water flux for column ', c
+             call endrun(msg=trim(message)//errMsg(__FILE__, __LINE__))
+          end if
+       end if
        water_flux = 1.e-3_r8 * col_wf%qflx_adv(c,0:nlevdecomp)
        water_flux(0) = max(0._r8, water_flux(0))
 
