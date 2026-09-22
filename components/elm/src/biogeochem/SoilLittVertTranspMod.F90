@@ -8,6 +8,7 @@ module SoilLittVertTranspMod
   use elm_varctl             , only : iulog, use_c13, use_c14, spinup_state, use_vertsoilc
   use elm_varctl             , only : use_microbe_methane
   use elm_varctl             , only : use_peatland_vertical_transport
+  use elm_varctl             , only : use_microbe_aqueous_transport
   use elm_varcon             , only : secspday
   use decompMod              , only : bounds_type
   use abortutils             , only : endrun
@@ -366,7 +367,8 @@ contains
 
             !$acc parallel loop independent gang default(present)
             do s = 1, ndecomp_pools
-               if ( .not. is_cwd(s) .and. .not. is_microbial(s) ) then
+               if ( .not. is_cwd(s) .and. .not. is_microbial(s) .and. &
+                    .not. (use_microbe_aqueous_transport .and. is_dissolved(s)) ) then
                   !$acc loop independent worker vector private(c)
                   do fc = 1, num_soilc ! dummy terms here
                      c = filter_soilc (fc)
@@ -392,7 +394,8 @@ contains
                do j = 1,nlevdecomp
                   do fc = 1, num_soilc
                      c = filter_soilc (fc)
-                     if(.not. is_cwd(s) .and. .not. is_microbial(s)) then
+                     if(.not. is_cwd(s) .and. .not. is_microbial(s) .and. &
+                          .not. (use_microbe_aqueous_transport .and. is_dissolved(s))) then
 
                         if ( spinup_state .eq. 1 ) then
                            ! increase transport (both advection and diffusion) by the same factor as accelerated decomposition for a given pool
@@ -479,7 +482,8 @@ contains
                do j = 1, nlevdecomp
                   do fc = 1, num_soilc
                      c = filter_soilc (fc)
-                     if(.not. is_cwd(s) .and. .not. is_microbial(s)) then
+                     if(.not. is_cwd(s) .and. .not. is_microbial(s) .and. &
+                          .not. (use_microbe_aqueous_transport .and. is_dissolved(s))) then
                         transport_ptr_list(i_type)%trcr_tend_ptr(c,j,s) = 0._r8 - (conc_trcr(fc,j,s) + transport_ptr_list(i_type)%src_ptr(c,j,s))
                      end if
                   end do
@@ -491,7 +495,8 @@ contains
             !$acc parallel loop independent gang worker vector collapse(2) default(present) private(bet, gam(0:nlevdecomp+1))
             do s = 1, ndecomp_pools
                do fc = 1,num_soilc
-                  if(.not. is_cwd(s) .and. .not. is_microbial(s)) then
+                  if(.not. is_cwd(s) .and. .not. is_microbial(s) .and. &
+                       .not. (use_microbe_aqueous_transport .and. is_dissolved(s))) then
                      bet = b_tri(fc,0,s)
 
                      !$acc loop seq
@@ -517,7 +522,8 @@ contains
             !$acc parallel loop independent gang collapse(2) default(present)
             do s = 1, ndecomp_pools
                do j = 1, nlevdecomp
-                  if(.not. is_cwd(s) .and. .not. is_microbial(s)) then
+                  if(.not. is_cwd(s) .and. .not. is_microbial(s) .and. &
+                       .not. (use_microbe_aqueous_transport .and. is_dissolved(s))) then
                      !$acc loop vector independent private(c)
                      do fc = 1, num_soilc
                         c = filter_soilc (fc)
@@ -528,16 +534,20 @@ contains
                end do
             end do
 
-            ! CWD and living microbial biomass remain in their source layers.
+            ! CWD, living microbial biomass, and physically transported DOM
+            ! remain in their source layers here. The aqueous operator moves
+            ! DOM after its reaction sources have been applied.
             !$acc parallel loop independent gang default(present)
             do s = 1, ndecomp_pools
-               if(is_cwd(s) .or. is_microbial(s)) then
+               if(is_cwd(s) .or. is_microbial(s) .or. &
+                    (use_microbe_aqueous_transport .and. is_dissolved(s))) then
                   !$acc loop worker vector collapse(2) independent private(c)
                   do j = 1,nlevdecomp
                      do fc = 1, num_soilc
                         c = filter_soilc (fc)
                         conc_trcr(fc,j,s) = transport_ptr_list(i_type)%conc_ptr(c,j,s) + transport_ptr_list(i_type)%src_ptr(c,j,s)
-                        if (is_microbial(s)) then
+                        if (is_microbial(s) .or. &
+                             (use_microbe_aqueous_transport .and. is_dissolved(s))) then
                            transport_ptr_list(i_type)%trcr_tend_ptr(c,j,s) = 0._r8
                         end if
                      end do

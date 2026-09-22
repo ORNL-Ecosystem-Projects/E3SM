@@ -2998,8 +2998,55 @@ sub setup_logic_microbe_methane {
   #
   my ($nl) = @_;
 
+  if (value_is_true($nl->get_value('use_elm_microbe_methane_transport')) &&
+      !value_is_true($nl->get_value('use_microbe_methane'))) {
+    fatal_error("use_elm_microbe_methane_transport=.true. requires use_microbe_methane=.true.\n");
+  }
+  if (value_is_true($nl->get_value('use_clm_microbe_humhol_saturation')) &&
+      !value_is_true($nl->get_value('use_microbe_methane'))) {
+    fatal_error("use_clm_microbe_humhol_saturation=.true. requires use_microbe_methane=.true.\n");
+  }
+  if (value_is_true($nl->get_value('use_clm_microbe_dom_relaxation')) &&
+      !value_is_true($nl->get_value('use_microbe_methane'))) {
+    fatal_error("use_clm_microbe_dom_relaxation=.true. requires use_microbe_methane=.true.\n");
+  }
+  if (value_is_true($nl->get_value('use_microbe_aqueous_transport')) &&
+      !value_is_true($nl->get_value('use_microbe_methane'))) {
+    fatal_error("use_microbe_aqueous_transport=.true. requires use_microbe_methane=.true.\n");
+  }
+  if (value_is_true($nl->get_value('use_legacy_ch4_with_microbe')) &&
+      !value_is_true($nl->get_value('use_microbe_methane'))) {
+    fatal_error("use_legacy_ch4_with_microbe=.true. requires use_microbe_methane=.true.\n");
+  }
+
   return unless value_is_true($nl->get_value('use_microbe_methane'));
 
+  if (value_is_true($nl->get_value('use_legacy_ch4_with_microbe')) &&
+      (value_is_true($nl->get_value('use_elm_microbe_methane_transport')) ||
+       value_is_true($nl->get_value('use_clm_microbe_humhol_saturation')) ||
+       value_is_true($nl->get_value('use_clm_microbe_dom_relaxation')) ||
+       value_is_true($nl->get_value('use_microbe_aqueous_transport')))) {
+    fatal_error("use_legacy_ch4_with_microbe=.true. cannot be combined with revised-methane or revised-solute transport options.\n");
+  }
+
+  if (value_is_true($nl->get_value('use_microbe_aqueous_transport')) &&
+      value_is_true($nl->get_value('use_clm_microbe_dom_relaxation'))) {
+    fatal_error("use_microbe_aqueous_transport and use_clm_microbe_dom_relaxation are mutually exclusive.\n");
+  }
+  if (value_is_true($nl->get_value('use_microbe_aqueous_transport')) &&
+      !value_is_true($nl->get_value('use_vertsoilc'))) {
+    fatal_error("use_microbe_aqueous_transport=.true. requires use_vertsoilc=.true.\n");
+  }
+  if (value_is_true($nl->get_value('use_microbe_aqueous_transport')) &&
+      (value_is_true($nl->get_value('use_c13')) ||
+       value_is_true($nl->get_value('use_c14')))) {
+    fatal_error("use_microbe_aqueous_transport does not yet transport DOM carbon isotopes; use_c13 and use_c14 must be false.\n");
+  }
+
+  if (value_is_true($nl->get_value('use_clm_microbe_humhol_saturation')) &&
+      !value_is_true($nl->get_value('use_humhol'))) {
+    fatal_error("use_clm_microbe_humhol_saturation=.true. requires use_humhol=.true.\n");
+  }
   if (!value_is_true($nl->get_value('use_lch4'))) {
     fatal_error("Phase 2 microbial decomposition requires use_lch4=.true. so the established methane oxygen and nitrification/denitrification coupling remains active.\n");
   }

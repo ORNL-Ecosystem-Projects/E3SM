@@ -202,7 +202,8 @@ contains
   !-----------------------------------------------------------------------
   subroutine ColCBalanceCheck(bounds, &
        num_soilc, filter_soilc, &
-       col_cs, col_cf, soilstate_vars, additional_carbon_col, surface_carbon_flux_col)
+       col_cs, col_cf, soilstate_vars, additional_carbon_col, surface_carbon_flux_col, &
+       lateral_carbon_flux_col, aqueous_carbon_export_col)
     !
     ! !DESCRIPTION:
     ! On the radiation time step, perform carbon mass conservation check for column and pft
@@ -216,6 +217,8 @@ contains
     type(soilstate_type)      , intent(in)    :: soilstate_vars
     real(r8), optional        , intent(in)    :: additional_carbon_col(bounds%begc:)
     real(r8), optional        , intent(in)    :: surface_carbon_flux_col(bounds%begc:)
+    real(r8), optional        , intent(in)    :: lateral_carbon_flux_col(bounds%begc:)
+    real(r8), optional        , intent(in)    :: aqueous_carbon_export_col(bounds%begc:)
     !
     ! !LOCAL VARIABLES:
     integer  :: c,err_index,p,j ! indices
@@ -315,6 +318,13 @@ contains
 
          if (present(surface_carbon_flux_col)) then
             col_coutputs(c) = col_coutputs(c) + surface_carbon_flux_col(c)
+         end if
+
+         if (present(lateral_carbon_flux_col)) then
+            col_cinputs(c) = col_cinputs(c) + lateral_carbon_flux_col(c)
+         end if
+         if (present(aqueous_carbon_export_col)) then
+            col_coutputs(c) = col_coutputs(c) + aqueous_carbon_export_col(c)
          end if
 
          ! subtract leaching flux
@@ -433,7 +443,7 @@ contains
   !-----------------------------------------------------------------------
   subroutine ColNBalanceCheck(bounds, &
        num_soilc, filter_soilc, &
-       col_ns, col_nf)
+       col_ns, col_nf, aqueous_nitrogen_export_col)
     !
     ! !DESCRIPTION:
     ! On the radiation time step, perform nitrogen mass conservation check
@@ -446,6 +456,7 @@ contains
     integer                   , intent(in)    :: filter_soilc(:) ! filter for soil columns
     type(column_nitrogen_state) , intent(inout) :: col_ns
     type(column_nitrogen_flux)  , intent(inout) :: col_nf
+    real(r8), optional          , intent(in)    :: aqueous_nitrogen_export_col(bounds%begc:)
     !
     ! !LOCAL VARIABLES:
     integer :: c,err_index,j,p  ! indices
@@ -585,6 +596,9 @@ contains
                col_prod1n_loss(c) + col_prod10n_loss(c) + col_prod100n_loss(c)
 
          col_noutputs(c) = col_noutputs(c) - som_n_leached(c)
+         if (present(aqueous_nitrogen_export_col)) then
+            col_noutputs(c) = col_noutputs(c) + aqueous_nitrogen_export_col(c)
+         end if
 
          if (use_fan) col_noutputs(c) = col_noutputs(c) + fan_totnout(c)
 
@@ -657,7 +671,7 @@ contains
   !-----------------------------------------------------------------------
   subroutine ColPBalanceCheck(bounds, &
        num_soilc, filter_soilc, &
-       col_ps, col_pf)
+       col_ps, col_pf, aqueous_phosphorus_export_col)
     !
     ! !DESCRIPTION:
     ! On the radiation time step, perform phosphorus mass conservation check
@@ -669,6 +683,7 @@ contains
     integer                   , intent(in)    :: filter_soilc(:) ! filter for soil columns
     type(column_phosphorus_state) , intent(inout) :: col_ps
     type(column_phosphorus_flux)  , intent(inout) :: col_pf
+    real(r8), optional            , intent(in)    :: aqueous_phosphorus_export_col(bounds%begc:)
     !
     ! !LOCAL VARIABLES:
     integer :: c,err_index,j,k,p  ! indices
@@ -722,6 +737,7 @@ contains
          leafp_to_litter           => veg_pf%leafp_to_litter         , & ! Input:  [real(r8) (:)]  soil mineral P pool loss to leaching (gP/m2/s)
          frootp_to_litter          => veg_pf%frootp_to_litter        , & ! Input:  [real(r8) (:)]  soil mineral P pool loss to leaching (gP/m2/s)
          sminp_to_plant            => col_pf%sminp_to_plant            , &
+         som_p_leached             => col_pf%som_p_leached             , & ! Input: [real(r8) (:)] total SOM P loss from vertical transport
          cascade_receiver_pool     => decomp_cascade_con%cascade_receiver_pool   &
          )
 
@@ -832,6 +848,11 @@ contains
          if (ero_ccycle) then
             col_poutputs(c) = col_poutputs(c) + som_p_yield(c) + labilep_yield(c) + &
                secondp_yield(c) !+ occlp_yield(c) + primp_yield(c)
+         end if
+
+         col_poutputs(c) = col_poutputs(c) - som_p_leached(c)
+         if (present(aqueous_phosphorus_export_col)) then
+            col_poutputs(c) = col_poutputs(c) + aqueous_phosphorus_export_col(c)
          end if
 
          ! calculate the total column-level phosphorus balance error for this time step
@@ -957,7 +978,8 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine GridCBalanceCheck(bounds, col_cs, col_cf, grc_cs, grc_cf, &
-       additional_carbon_col, surface_carbon_flux_col)
+       additional_carbon_col, surface_carbon_flux_col, lateral_carbon_flux_col, &
+       aqueous_carbon_export_col)
     !
     ! !DESCRIPTION:
     ! Calculate the beginning carbon balance for mass conservation checks
@@ -974,11 +996,15 @@ contains
     type(gridcell_carbon_flux) , intent(inout) :: grc_cf
     real(r8), optional         , intent(in)    :: additional_carbon_col(bounds%begc:)
     real(r8), optional         , intent(in)    :: surface_carbon_flux_col(bounds%begc:)
+    real(r8), optional         , intent(in)    :: lateral_carbon_flux_col(bounds%begc:)
+    real(r8), optional         , intent(in)    :: aqueous_carbon_export_col(bounds%begc:)
     !
     integer             :: g, nstep
     real(r8)            :: dt
     real(r8)            :: total_carbon_col(bounds%begc:bounds%endc)
     real(r8)            :: surface_carbon_flux_grc(bounds%begg:bounds%endg)
+    real(r8)            :: lateral_carbon_flux_grc(bounds%begg:bounds%endg)
+    real(r8)            :: aqueous_carbon_export_grc(bounds%begg:bounds%endg)
     !-----------------------------------------------------------------------
 
     associate(                                                       &
@@ -1050,6 +1076,14 @@ contains
          call c2g(bounds, surface_carbon_flux_col(bounds%begc:bounds%endc), &
               surface_carbon_flux_grc, c2l_scale_type = 'unity', l2g_scale_type = 'unity')
       end if
+      if (present(lateral_carbon_flux_col)) then
+         call c2g(bounds, lateral_carbon_flux_col(bounds%begc:bounds%endc), &
+              lateral_carbon_flux_grc, c2l_scale_type = 'unity', l2g_scale_type = 'unity')
+      end if
+      if (present(aqueous_carbon_export_col)) then
+         call c2g(bounds, aqueous_carbon_export_col(bounds%begc:bounds%endc), &
+              aqueous_carbon_export_grc, c2l_scale_type = 'unity', l2g_scale_type = 'unity')
+      end if
       call c2g(bounds, col_totpftc(bounds%begc:bounds%endc), end_totpftc(bounds%begg:bounds%endg), &
                c2l_scale_type = 'unity', l2g_scale_type = 'unity')
       call c2g(bounds, col_cwdc(bounds%begc:bounds%endc), end_cwdc(bounds%begg:bounds%endg), &
@@ -1113,6 +1147,13 @@ contains
 
          if (present(surface_carbon_flux_col)) then
             grc_coutputs(g) = grc_coutputs(g) + surface_carbon_flux_grc(g)
+         end if
+
+         if (present(lateral_carbon_flux_col)) then
+            grc_cinputs(g) = grc_cinputs(g) + lateral_carbon_flux_grc(g)
+         end if
+         if (present(aqueous_carbon_export_col)) then
+            grc_coutputs(g) = grc_coutputs(g) + aqueous_carbon_export_grc(g)
          end if
 
          if (ero_ccycle) then

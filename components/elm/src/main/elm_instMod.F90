@@ -7,7 +7,7 @@ module elm_instMod
   use abortutils                 , only : endrun
   use decompMod                  , only : bounds_type, get_proc_bounds
   use elm_varctl                 , only : use_cn, use_voc, use_c13, use_c14, use_fates, use_betr
-  use elm_varctl                 , only : use_microbe_methane
+  use elm_varctl                 , only : use_microbe_methane, use_legacy_ch4_with_microbe
   use elm_varctl , only : iulog
   !-----------------------------------------
   ! Definition of component types
@@ -260,7 +260,7 @@ contains
        call alm_fates%init(bounds_proc, flandusepftdat)
     end if
 
-    if (use_microbe_methane) then
+    if (use_microbe_methane .and. .not. use_legacy_ch4_with_microbe) then
        call microbe_methane_vars%Init(bounds_proc)
     end if
 

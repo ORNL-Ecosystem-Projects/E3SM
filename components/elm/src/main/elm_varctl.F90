@@ -382,6 +382,12 @@ module elm_varctl
   logical, public :: use_nofire          = .false.
   logical, public :: use_lch4            = .false.
   logical, public :: use_microbe_methane = .false.
+  logical, public :: use_legacy_ch4_with_microbe = .false.
+  logical, public :: use_elm_microbe_methane_transport = .false.
+  logical, public :: use_microbe_nonbog_lateral_gas_transport = .true.
+  logical, public :: use_clm_microbe_humhol_saturation = .false.
+  logical, public :: use_clm_microbe_dom_relaxation = .false.
+  logical, public :: use_microbe_aqueous_transport = .false.
   logical, public :: use_vertsoilc       = .false.
   logical, public :: use_extralakelayers = .false.
   logical, public :: use_vichydro        = .false.
@@ -547,6 +553,12 @@ module elm_varctl
   !$acc declare copyin(use_nofire         )
   !$acc declare copyin(use_lch4           )
   !$acc declare copyin(use_microbe_methane)
+  !$acc declare copyin(use_legacy_ch4_with_microbe)
+  !$acc declare copyin(use_elm_microbe_methane_transport)
+  !$acc declare copyin(use_microbe_nonbog_lateral_gas_transport)
+  !$acc declare copyin(use_clm_microbe_humhol_saturation)
+  !$acc declare copyin(use_clm_microbe_dom_relaxation)
+  !$acc declare copyin(use_microbe_aqueous_transport)
   !$acc declare copyin(use_nitrif_denitrif)
   !$acc declare copyin(use_vertsoilc      )
   !$acc declare copyin(use_extralakelayers)

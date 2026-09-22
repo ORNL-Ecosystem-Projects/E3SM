@@ -24,6 +24,10 @@ module MicrobeMethaneStateUpdateMod
   save
 
   real(r8), parameter :: state_tolerance = 1.e-12_r8
+  ! The implicit aqueous solve can be mildly ill-conditioned when porewater
+  ! advection and dispersion nearly cancel across very dry interfaces. Keep
+  ! its inventory check distinct from the stricter chemistry/state check.
+  real(r8), parameter :: aqueous_budget_tolerance = 1.e-10_r8
 
   type, public :: microbe_methane_nutrient_tendencies_type
      ! Organic tendencies apply to the authoritative DOM pool. Equal and
@@ -57,6 +61,8 @@ module MicrobeMethaneStateUpdateMod
   public :: advanceMicrobeMethaneReactionLayer
   public :: advanceMicrobeMethaneGasTransport
   public :: advanceMicrobeMethaneAcetateTransport
+  public :: advanceMicrobeMethaneDOMRelaxation
+  public :: advanceMicrobeAqueousTracerTransport
   public :: microbeMethaneAdditionalCarbonDensity
   public :: microbeMethaneColumnAdditionalCarbon
   public :: microbeMethaneSurfaceCarbonFlux
@@ -170,8 +176,10 @@ contains
   end subroutine advanceMicrobeMethaneReactionLayer
 
   pure subroutine advanceMicrobeMethaneGasTransport(state, layer_thickness, &
-       effective_diffusivity, surface_equilibrium_concentration, surface_conductance, &
+       effective_diffusivity, transport_capacity, surface_equilibrium_concentration, &
+       surface_conductance, &
        aerenchyma_equilibrium_concentration, aerenchyma_exchange_rate, &
+       aerenchyma_minimum_emission_concentration, aerenchyma_allows_influx, &
        ch4_ebullition_threshold, ch4_ebullition_activation, dt, updated_state, &
        interface_flux, aerenchyma_flux, ch4_ebullition_loss, surface_diffusive_flux, &
        surface_aerenchyma_flux, surface_ebullition_flux, total_surface_flux, &
@@ -179,10 +187,13 @@ contains
     type(microbe_methane_reaction_state_type), intent(in) :: state(:)
     real(r8), intent(in) :: layer_thickness(size(state))
     real(r8), intent(in) :: effective_diffusivity(size(state),microbe_gas_count)
+    real(r8), intent(in) :: transport_capacity(size(state),microbe_gas_count)
     real(r8), intent(in) :: surface_equilibrium_concentration(microbe_gas_count)
     real(r8), intent(in) :: surface_conductance(microbe_gas_count)
     real(r8), intent(in) :: aerenchyma_equilibrium_concentration(size(state),microbe_gas_count)
     real(r8), intent(in) :: aerenchyma_exchange_rate(size(state),microbe_gas_count)
+    real(r8), intent(in) :: aerenchyma_minimum_emission_concentration(size(state),microbe_gas_count)
+    logical, intent(in) :: aerenchyma_allows_influx(microbe_gas_count)
     real(r8), intent(in) :: ch4_ebullition_threshold(size(state))
     real(r8), intent(in) :: ch4_ebullition_activation(size(state))
     real(r8), intent(in) :: dt
@@ -205,8 +216,9 @@ contains
        call stateToGasVector(state(j), concentration(j,:))
     end do
     call computeMicrobeGasTransport(concentration, layer_thickness, effective_diffusivity, &
-         surface_equilibrium_concentration, surface_conductance, &
+         transport_capacity, surface_equilibrium_concentration, surface_conductance, &
          aerenchyma_equilibrium_concentration, aerenchyma_exchange_rate, &
+         aerenchyma_minimum_emission_concentration, aerenchyma_allows_influx, &
          ch4_ebullition_threshold, ch4_ebullition_activation, dt, interface_flux, &
          aerenchyma_flux, ch4_ebullition_loss, tendency, surface_diffusive_flux, &
          surface_aerenchyma_flux, surface_ebullition_flux, total_surface_flux)
@@ -261,6 +273,249 @@ contains
          residualIsClosed(residual, sum(concentration * layer_thickness), &
          sum((concentration + dt * tendency) * layer_thickness))
   end subroutine advanceMicrobeMethaneAcetateTransport
+
+  pure subroutine advanceMicrobeAqueousTracerTransport(concentration, &
+       layer_thickness, liquid_fraction, diffusion_conductivity, water_flux, &
+       mobile_fraction, minimum_liquid_fraction, dt, updated_concentration, &
+       advective_flux, diffusive_flux, tendency, boundary_export, residual, valid)
+    ! Conservative backward-Euler transport of one bulk-soil solute inventory.
+    ! concentration is mass per bulk-soil volume. Fluxes use the mobile
+    ! porewater concentration mobile_fraction*concentration/liquid_fraction.
+    ! water_flux is positive downward and has units m s-1. The external
+    ! concentration is zero at both boundaries, so infiltration is solute-free
+    ! and outward flow exports the donor-layer concentration.
+    real(r8), intent(in) :: concentration(:)
+    real(r8), intent(in) :: layer_thickness(size(concentration))
+    real(r8), intent(in) :: liquid_fraction(size(concentration))
+    real(r8), intent(in) :: diffusion_conductivity(size(concentration))
+    real(r8), intent(in) :: water_flux(0:size(concentration))
+    real(r8), intent(in) :: mobile_fraction, minimum_liquid_fraction, dt
+    real(r8), intent(out) :: updated_concentration(size(concentration))
+    real(r8), intent(out) :: advective_flux(0:size(concentration))
+    real(r8), intent(out) :: diffusive_flux(0:size(concentration))
+    real(r8), intent(out) :: tendency(size(concentration))
+    real(r8), intent(out) :: boundary_export, residual
+    logical, intent(out) :: valid
+    real(r8) :: porewater_factor(size(concentration))
+    real(r8) :: conductance(0:size(concentration))
+    real(r8) :: lower(size(concentration)), diagonal(size(concentration))
+    real(r8) :: upper(size(concentration)), rhs(size(concentration))
+    real(r8) :: cprime(size(concentration)), dprime(size(concentration))
+    real(r8) :: left_coefficient, right_coefficient, resistance
+    real(r8) :: denominator, initial_inventory, final_inventory
+    integer :: j, number_of_layers
+
+    number_of_layers = size(concentration)
+    updated_concentration = concentration
+    advective_flux = 0._r8
+    diffusive_flux = 0._r8
+    tendency = 0._r8
+    boundary_export = 0._r8
+    residual = 0._r8
+    valid = .false.
+    if (number_of_layers == 0 .or. dt <= 0._r8) return
+    if (any(layer_thickness <= 0._r8) .or. any(liquid_fraction < 0._r8) .or. &
+         any(diffusion_conductivity < 0._r8) .or. any(concentration < -state_tolerance)) return
+    if (mobile_fraction <= 0._r8 .or. mobile_fraction > 1._r8 .or. &
+         minimum_liquid_fraction <= 0._r8) return
+
+    porewater_factor = 0._r8
+    do j = 1, number_of_layers
+       if (liquid_fraction(j) >= minimum_liquid_fraction) then
+          porewater_factor(j) = mobile_fraction / liquid_fraction(j)
+       end if
+    end do
+
+    conductance = 0._r8
+    do j = 1, number_of_layers - 1
+       if (diffusion_conductivity(j) > 0._r8 .and. &
+            diffusion_conductivity(j+1) > 0._r8 .and. &
+            porewater_factor(j) > 0._r8 .and. porewater_factor(j+1) > 0._r8) then
+          resistance = 0.5_r8 * layer_thickness(j) / diffusion_conductivity(j) + &
+               0.5_r8 * layer_thickness(j+1) / diffusion_conductivity(j+1)
+          conductance(j) = 1._r8 / resistance
+       end if
+    end do
+
+    lower = 0._r8
+    diagonal = 1._r8
+    upper = 0._r8
+    rhs = concentration
+
+    ! Internal interfaces. A positive interface flux moves material from j to
+    ! j+1; upwinding and the centered diffusive term form an M-matrix.
+    do j = 1, number_of_layers - 1
+       left_coefficient = (max(water_flux(j), 0._r8) + conductance(j)) * &
+            porewater_factor(j)
+       right_coefficient = (min(water_flux(j), 0._r8) - conductance(j)) * &
+            porewater_factor(j+1)
+       diagonal(j) = diagonal(j) + dt * left_coefficient / layer_thickness(j)
+       upper(j) = upper(j) + dt * right_coefficient / layer_thickness(j)
+       lower(j+1) = lower(j+1) - dt * left_coefficient / layer_thickness(j+1)
+       diagonal(j+1) = diagonal(j+1) - dt * right_coefficient / layer_thickness(j+1)
+    end do
+
+    ! Zero-concentration external water: downward top inflow and upward bottom
+    ! inflow add no solute; upward top flow and downward bottom flow export it.
+    if (water_flux(0) < 0._r8) then
+       diagonal(1) = diagonal(1) - dt * water_flux(0) * &
+            porewater_factor(1) / layer_thickness(1)
+    end if
+    if (water_flux(number_of_layers) > 0._r8) then
+       diagonal(number_of_layers) = diagonal(number_of_layers) + &
+            dt * water_flux(number_of_layers) * porewater_factor(number_of_layers) / &
+            layer_thickness(number_of_layers)
+    end if
+
+    denominator = max(diagonal(1), tiny(1._r8))
+    cprime(1) = upper(1) / denominator
+    dprime(1) = rhs(1) / denominator
+    do j = 2, number_of_layers
+       denominator = max(diagonal(j) - lower(j) * cprime(j-1), tiny(1._r8))
+       cprime(j) = upper(j) / denominator
+       dprime(j) = (rhs(j) - lower(j) * dprime(j-1)) / denominator
+    end do
+    updated_concentration(number_of_layers) = dprime(number_of_layers)
+    do j = number_of_layers - 1, 1, -1
+       updated_concentration(j) = dprime(j) - cprime(j) * updated_concentration(j+1)
+    end do
+
+    if (water_flux(0) < 0._r8) then
+       advective_flux(0) = water_flux(0) * porewater_factor(1) * &
+            updated_concentration(1)
+    end if
+    do j = 1, number_of_layers - 1
+       if (water_flux(j) >= 0._r8) then
+          advective_flux(j) = water_flux(j) * porewater_factor(j) * &
+               updated_concentration(j)
+       else
+          advective_flux(j) = water_flux(j) * porewater_factor(j+1) * &
+               updated_concentration(j+1)
+       end if
+       diffusive_flux(j) = conductance(j) * &
+            (porewater_factor(j) * updated_concentration(j) - &
+             porewater_factor(j+1) * updated_concentration(j+1))
+    end do
+    if (water_flux(number_of_layers) > 0._r8) then
+       advective_flux(number_of_layers) = water_flux(number_of_layers) * &
+            porewater_factor(number_of_layers) * &
+            updated_concentration(number_of_layers)
+    end if
+
+    tendency = (updated_concentration - concentration) / dt
+    boundary_export = advective_flux(number_of_layers) + &
+         diffusive_flux(number_of_layers) - advective_flux(0) - diffusive_flux(0)
+    initial_inventory = sum(concentration * layer_thickness)
+    final_inventory = sum(updated_concentration * layer_thickness)
+    residual = final_inventory - initial_inventory + dt * boundary_export
+    valid = all(updated_concentration >= -state_tolerance) .and. &
+         boundary_export >= -state_tolerance .and. &
+         aqueousResidualIsClosed(residual, initial_inventory, final_inventory)
+  end subroutine advanceMicrobeAqueousTracerTransport
+
+  pure subroutine advanceMicrobeMethaneDOMRelaxation(dom_c, dom_n, dom_p, &
+       layer_thickness, layer_relaxation_rate, dt, updated_dom_c, updated_dom_n, &
+       updated_dom_p, carbon_residual, nitrogen_residual, phosphorus_residual, valid)
+    real(r8), intent(in) :: dom_c(:), dom_n(size(dom_c)), dom_p(size(dom_c))
+    real(r8), intent(in) :: layer_thickness(size(dom_c))
+    real(r8), intent(in) :: layer_relaxation_rate(size(dom_c))
+    real(r8), intent(in) :: dt
+    real(r8), intent(out) :: updated_dom_c(size(dom_c))
+    real(r8), intent(out) :: updated_dom_n(size(dom_c))
+    real(r8), intent(out) :: updated_dom_p(size(dom_c))
+    real(r8), intent(out) :: carbon_residual, nitrogen_residual, phosphorus_residual
+    logical, intent(out) :: valid
+    real(r8) :: initial_carbon, initial_nitrogen, initial_phosphorus
+    real(r8) :: final_carbon, final_nitrogen, final_phosphorus
+
+    updated_dom_c = dom_c
+    updated_dom_n = dom_n
+    updated_dom_p = dom_p
+    carbon_residual = 0._r8
+    nitrogen_residual = 0._r8
+    phosphorus_residual = 0._r8
+    valid = .false.
+    if (size(dom_c) == 0 .or. dt <= 0._r8) return
+    if (any(layer_thickness <= 0._r8) .or. any(layer_relaxation_rate < 0._r8)) return
+    if (any(dom_c < -state_tolerance) .or. any(dom_n < -state_tolerance) .or. &
+         any(dom_p < -state_tolerance)) return
+
+    ! The CLM-Microbe source relaxes each adjacent DOM pair at dom_diffus
+    ! [s-1], even though its input metadata labels that value as m2 s-1. This
+    ! backward-Euler finite-volume form preserves that equal-layer timescale
+    ! while closing the top and bottom boundaries and conserving inventory.
+    ! The identical matrix transports C, N, and P without creating or losing
+    ! any element; it also preserves a spatially uniform DOM C:N:P ratio.
+    call relaxDOMTracer(dom_c, layer_thickness, layer_relaxation_rate, dt, updated_dom_c)
+    call relaxDOMTracer(dom_n, layer_thickness, layer_relaxation_rate, dt, updated_dom_n)
+    call relaxDOMTracer(dom_p, layer_thickness, layer_relaxation_rate, dt, updated_dom_p)
+
+    initial_carbon = sum(dom_c * layer_thickness)
+    initial_nitrogen = sum(dom_n * layer_thickness)
+    initial_phosphorus = sum(dom_p * layer_thickness)
+    final_carbon = sum(updated_dom_c * layer_thickness)
+    final_nitrogen = sum(updated_dom_n * layer_thickness)
+    final_phosphorus = sum(updated_dom_p * layer_thickness)
+    carbon_residual = final_carbon - initial_carbon
+    nitrogen_residual = final_nitrogen - initial_nitrogen
+    phosphorus_residual = final_phosphorus - initial_phosphorus
+    valid = all(updated_dom_c >= -state_tolerance) .and. &
+         all(updated_dom_n >= -state_tolerance) .and. &
+         all(updated_dom_p >= -state_tolerance) .and. &
+         residualIsClosed(carbon_residual, initial_carbon, final_carbon) .and. &
+         residualIsClosed(nitrogen_residual, initial_nitrogen, final_nitrogen) .and. &
+         residualIsClosed(phosphorus_residual, initial_phosphorus, final_phosphorus)
+  end subroutine advanceMicrobeMethaneDOMRelaxation
+
+  pure subroutine relaxDOMTracer(concentration, layer_thickness, &
+       layer_relaxation_rate, dt, updated_concentration)
+    real(r8), intent(in) :: concentration(:)
+    real(r8), intent(in) :: layer_thickness(size(concentration))
+    real(r8), intent(in) :: layer_relaxation_rate(size(concentration))
+    real(r8), intent(in) :: dt
+    real(r8), intent(out) :: updated_concentration(size(concentration))
+    real(r8) :: conductance(0:size(concentration))
+    real(r8) :: lower(size(concentration)), diagonal(size(concentration))
+    real(r8) :: upper(size(concentration)), rhs(size(concentration))
+    real(r8) :: cprime(size(concentration)), dprime(size(concentration))
+    real(r8) :: denominator
+    integer :: j, number_of_layers
+
+    number_of_layers = size(concentration)
+    updated_concentration = concentration
+    if (number_of_layers == 0) return
+
+    conductance = 0._r8
+    do j = 1, number_of_layers - 1
+       ! Using the deeper-layer rate matches the executed CLM loop. The
+       ! harmonic storage depth makes conductance symmetric, hence conservative.
+       conductance(j) = max(0._r8, layer_relaxation_rate(j+1)) * &
+            2._r8 * layer_thickness(j) * layer_thickness(j+1) / &
+            (layer_thickness(j) + layer_thickness(j+1))
+    end do
+
+    rhs = concentration
+    do j = 1, number_of_layers
+       lower(j) = -dt * conductance(j-1) / layer_thickness(j)
+       upper(j) = -dt * conductance(j) / layer_thickness(j)
+       diagonal(j) = 1._r8 - lower(j) - upper(j)
+    end do
+    lower(1) = 0._r8
+    upper(number_of_layers) = 0._r8
+
+    denominator = max(diagonal(1), tiny(1._r8))
+    cprime(1) = upper(1) / denominator
+    dprime(1) = rhs(1) / denominator
+    do j = 2, number_of_layers
+       denominator = max(diagonal(j) - lower(j) * cprime(j-1), tiny(1._r8))
+       cprime(j) = upper(j) / denominator
+       dprime(j) = (rhs(j) - lower(j) * dprime(j-1)) / denominator
+    end do
+    updated_concentration(number_of_layers) = dprime(number_of_layers)
+    do j = number_of_layers - 1, 1, -1
+       updated_concentration(j) = dprime(j) - cprime(j) * updated_concentration(j+1)
+    end do
+  end subroutine relaxDOMTracer
 
   pure real(r8) function microbeMethaneAdditionalCarbonDensity(state) result(carbon)
     type(microbe_methane_reaction_state_type), intent(in) :: state
@@ -402,6 +657,15 @@ contains
     scale = max(1._r8, abs(initial_inventory), abs(final_inventory))
     closed = abs(residual) <= state_tolerance * scale
   end function residualIsClosed
+
+  pure logical function aqueousResidualIsClosed(residual, initial_inventory, &
+       final_inventory) result(closed)
+    real(r8), intent(in) :: residual, initial_inventory, final_inventory
+    real(r8) :: scale
+
+    scale = max(1._r8, abs(initial_inventory), abs(final_inventory))
+    closed = abs(residual) <= aqueous_budget_tolerance * scale
+  end function aqueousResidualIsClosed
 
   pure real(r8) function clampUnitInterval(value) result(clamped)
     real(r8), intent(in) :: value

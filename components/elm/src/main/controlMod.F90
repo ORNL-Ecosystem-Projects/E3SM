@@ -100,6 +100,12 @@ module controlMod
                         fates_radiation_model, fates_electron_transport_model, &
                         fates_history_dimlevel, elm_varctl_set, &
                         use_nofire, use_lch4, use_microbe_methane, &
+                        use_legacy_ch4_with_microbe, &
+                        use_elm_microbe_methane_transport, &
+                        use_microbe_nonbog_lateral_gas_transport, &
+                        use_clm_microbe_humhol_saturation, &
+                        use_clm_microbe_dom_relaxation, &
+                        use_microbe_aqueous_transport, &
                         use_vertsoilc, use_extralakelayers, &
                         use_vichydro, use_century_decomp, use_cn, use_crop, &
                         use_snicar_frc, use_snicar_ad, use_firn_percolation_and_compaction, &
@@ -352,6 +358,12 @@ contains
 
     namelist /elm_inparm/ &
          use_nofire, use_lch4, use_microbe_methane, &
+         use_legacy_ch4_with_microbe, &
+         use_elm_microbe_methane_transport, &
+         use_microbe_nonbog_lateral_gas_transport, &
+         use_clm_microbe_humhol_saturation, &
+         use_clm_microbe_dom_relaxation, &
+         use_microbe_aqueous_transport, &
          use_vertsoilc, use_extralakelayers, &
          use_vichydro, use_century_decomp, use_cn, use_crop, use_snicar_frc, &
          use_snicar_ad, use_firn_percolation_and_compaction, use_extrasnowlayers,&
@@ -783,7 +795,55 @@ contains
     !
     implicit none
 
+    if (use_elm_microbe_methane_transport .and. .not. use_microbe_methane) then
+       call endrun(msg=' ERROR: use_elm_microbe_methane_transport=.true. requires '//&
+            'use_microbe_methane=.true.'//errMsg(__FILE__, __LINE__))
+    end if
+    if (use_clm_microbe_humhol_saturation .and. .not. use_microbe_methane) then
+       call endrun(msg=' ERROR: use_clm_microbe_humhol_saturation=.true. requires '//&
+            'use_microbe_methane=.true.'//errMsg(__FILE__, __LINE__))
+    end if
+    if (use_clm_microbe_dom_relaxation .and. .not. use_microbe_methane) then
+       call endrun(msg=' ERROR: use_clm_microbe_dom_relaxation=.true. requires '//&
+            'use_microbe_methane=.true.'//errMsg(__FILE__, __LINE__))
+    end if
+    if (use_microbe_aqueous_transport .and. .not. use_microbe_methane) then
+       call endrun(msg=' ERROR: use_microbe_aqueous_transport=.true. requires '//&
+            'use_microbe_methane=.true.'//errMsg(__FILE__, __LINE__))
+    end if
+    if (use_legacy_ch4_with_microbe .and. .not. use_microbe_methane) then
+       call endrun(msg=' ERROR: use_legacy_ch4_with_microbe=.true. requires '//&
+            'use_microbe_methane=.true.'//errMsg(__FILE__, __LINE__))
+    end if
+
     if (.not. use_microbe_methane) return
+
+    if (use_legacy_ch4_with_microbe .and. &
+         (use_elm_microbe_methane_transport .or. &
+          use_clm_microbe_humhol_saturation .or. &
+          use_clm_microbe_dom_relaxation .or. use_microbe_aqueous_transport)) then
+       call endrun(msg=' ERROR: use_legacy_ch4_with_microbe=.true. cannot be combined '//&
+            'with revised-methane or revised-solute transport options.'//&
+            errMsg(__FILE__, __LINE__))
+    end if
+    if (use_microbe_aqueous_transport .and. use_clm_microbe_dom_relaxation) then
+       call endrun(msg=' ERROR: use_microbe_aqueous_transport and '//&
+            'use_clm_microbe_dom_relaxation are mutually exclusive.'//&
+            errMsg(__FILE__, __LINE__))
+    end if
+    if (use_microbe_aqueous_transport .and. .not. use_vertsoilc) then
+       call endrun(msg=' ERROR: use_microbe_aqueous_transport=.true. requires '//&
+            'use_vertsoilc=.true.'//errMsg(__FILE__, __LINE__))
+    end if
+    if (use_microbe_aqueous_transport .and. (use_c13 .or. use_c14)) then
+       call endrun(msg=' ERROR: use_microbe_aqueous_transport does not yet transport '//&
+            'DOM carbon isotopes; use_c13 and use_c14 must be false.'//&
+            errMsg(__FILE__, __LINE__))
+    end if
+    if (use_clm_microbe_humhol_saturation .and. .not. use_humhol) then
+       call endrun(msg=' ERROR: use_clm_microbe_humhol_saturation=.true. requires '//&
+            'use_humhol=.true.'//errMsg(__FILE__, __LINE__))
+    end if
 
     if (.not. use_lch4) then
        call endrun(msg=' ERROR: Phase 2 microbial decomposition requires use_lch4=.true. '//&
@@ -862,6 +922,12 @@ contains
     call mpi_bcast (use_nofire, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_lch4, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_microbe_methane, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_legacy_ch4_with_microbe, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_elm_microbe_methane_transport, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_microbe_nonbog_lateral_gas_transport, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_clm_microbe_humhol_saturation, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_clm_microbe_dom_relaxation, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_microbe_aqueous_transport, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_vertsoilc, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_extralakelayers, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_extrasnowlayers, 1, MPI_LOGICAL, 0, mpicom, ier)
@@ -1223,6 +1289,17 @@ contains
     write(iulog,*) '    use_nofire = ', use_nofire
     write(iulog,*) '    use_lch4 = ', use_lch4
     write(iulog,*) '    use_microbe_methane = ', use_microbe_methane
+    write(iulog,*) '    use_legacy_ch4_with_microbe = ', use_legacy_ch4_with_microbe
+    write(iulog,*) '    use_elm_microbe_methane_transport = ', &
+         use_elm_microbe_methane_transport
+    write(iulog,*) '    use_microbe_nonbog_lateral_gas_transport = ', &
+         use_microbe_nonbog_lateral_gas_transport
+    write(iulog,*) '    use_clm_microbe_humhol_saturation = ', &
+         use_clm_microbe_humhol_saturation
+    write(iulog,*) '    use_clm_microbe_dom_relaxation = ', &
+         use_clm_microbe_dom_relaxation
+    write(iulog,*) '    use_microbe_aqueous_transport = ', &
+         use_microbe_aqueous_transport
     write(iulog,*) '    use_vertsoilc = ', use_vertsoilc
     write(iulog,*) '    use_var_soil_thick = ', use_var_soil_thick
     write(iulog,*) '    use_lake_wat_storage = ', use_lake_wat_storage

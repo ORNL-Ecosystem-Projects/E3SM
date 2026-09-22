@@ -571,7 +571,7 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine CNPBudget_Run(bounds, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf, &
-       surface_carbon_flux_col)
+       surface_carbon_flux_col, aqueous_carbon_export_col)
     !
     ! !DESCRIPTION:
     !
@@ -586,10 +586,21 @@ contains
     type(gridcell_carbon_state) , intent(in) :: grc_cs
     type(gridcell_carbon_flux)  , intent(in) :: grc_cf
     real(r8), optional          , intent(in) :: surface_carbon_flux_col(bounds%begc:)
+    real(r8), optional          , intent(in) :: aqueous_carbon_export_col(bounds%begc:)
 
-    if (present(surface_carbon_flux_col)) then
+    if (present(surface_carbon_flux_col) .and. present(aqueous_carbon_export_col)) then
        call CBudget_Run(bounds, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf, &
-            c_budg_fluxL, c_budg_stateL, surface_carbon_flux_col)
+            c_budg_fluxL, c_budg_stateL, &
+            surface_carbon_flux_col=surface_carbon_flux_col, &
+            aqueous_carbon_export_col=aqueous_carbon_export_col)
+    else if (present(surface_carbon_flux_col)) then
+       call CBudget_Run(bounds, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf, &
+            c_budg_fluxL, c_budg_stateL, &
+            surface_carbon_flux_col=surface_carbon_flux_col)
+    else if (present(aqueous_carbon_export_col)) then
+       call CBudget_Run(bounds, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf, &
+            c_budg_fluxL, c_budg_stateL, &
+            aqueous_carbon_export_col=aqueous_carbon_export_col)
     else
        call CBudget_Run(bounds, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf, &
             c_budg_fluxL, c_budg_stateL)
@@ -599,7 +610,7 @@ contains
     
   !-----------------------------------------------------------------------
   subroutine CBudget_Run(bounds, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf, budg_fluxL, &
-       budg_stateL, surface_carbon_flux_col)
+       budg_stateL, surface_carbon_flux_col, aqueous_carbon_export_col)
     !
     ! !DESCRIPTION:
     !
@@ -616,15 +627,21 @@ contains
     type(gridcell_carbon_flux)  , intent(in)    :: grc_cf
     real(r8)                    , intent(inout) :: budg_fluxL(:,:), budg_stateL(:,:)
     real(r8), optional          , intent(in)    :: surface_carbon_flux_col(bounds%begc:)
+    real(r8), optional          , intent(in)    :: aqueous_carbon_export_col(bounds%begc:)
     !
     ! !LOCAL VARIABLES:
     integer  :: g, nf, ns, ip
     real(r8) :: af, one_over_re2
     real(r8) :: surface_carbon_flux_grc(bounds%begg:bounds%endg)
+    real(r8) :: aqueous_carbon_export_grc(bounds%begg:bounds%endg)
 
     if (present(surface_carbon_flux_col)) then
        call c2g(bounds, surface_carbon_flux_col(bounds%begc:bounds%endc), &
             surface_carbon_flux_grc, c2l_scale_type='unity', l2g_scale_type='unity')
+    end if
+    if (present(aqueous_carbon_export_col)) then
+       call c2g(bounds, aqueous_carbon_export_col(bounds%begc:bounds%endc), &
+            aqueous_carbon_export_grc, c2l_scale_type='unity', l2g_scale_type='unity')
     end if
 
     associate(                                                       &
@@ -685,6 +702,13 @@ contains
             ! exchange. Keep it in the respiration category until a dedicated
             ! printed budget category is added.
             nf = f_er ; budg_fluxL(nf,ip) = budg_fluxL(nf,ip) - surface_carbon_flux_grc(g) * af
+         end if
+         if (present(aqueous_carbon_export_col)) then
+            ! The reconstruction does not carry the older branch's separate
+            ! DOC/DIC runoff budget slots. Record physical DOM export in the
+            ! existing vertically transported SOM-C loss category.
+            nf = f_som_c_leached
+            budg_fluxL(nf,ip) = budg_fluxL(nf,ip) - aqueous_carbon_export_grc(g) * af
          end if
 
          ! states

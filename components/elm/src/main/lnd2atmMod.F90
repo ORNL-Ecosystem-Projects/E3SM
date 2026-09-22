@@ -12,7 +12,8 @@ module lnd2atmMod
   use shr_fan_mod          , only : shr_fan_to_atm
   use elm_varpar           , only : numrad, ndst, nlevgrnd, nlevsno, nlevsoi !ndst = number of dust bins.
   use elm_varcon           , only : rair, grav, cpair, hfus, tfrz, spval
-  use elm_varctl           , only : iulog, use_c13, use_cn, use_lch4, use_microbe_methane
+  use elm_varctl           , only : iulog, use_c13, use_cn, use_lch4, use_microbe_methane, &
+       use_legacy_ch4_with_microbe
   use elm_varctl           , only : use_voc, use_fates, use_atm_downscaling_to_topunit, use_fan
   use elm_varctl           , only : use_lnd_rof_two_way, use_finetop_rad
   use tracer_varcon        , only : is_active_betr_bgc
@@ -398,7 +399,7 @@ contains
          eflx_lh_tot_grc(bounds%begg:bounds%endg)      , &
          p2c_scale_type=unity, c2l_scale_type= urbanf, l2g_scale_type=unity)
 
-    if (use_microbe_methane) then
+    if (use_microbe_methane .and. .not. use_legacy_ch4_with_microbe) then
        ! The revised backend diagnoses its carbon-conserving CO2 correction
        ! directly.  Keep ch4offline policy in the existing NEE block below.
        call c2g(bounds, &
@@ -458,7 +459,7 @@ contains
 
     ! ch4 flux
     if (use_lch4 .and. (.not. is_active_betr_bgc)) then
-       if (use_microbe_methane) then
+       if (use_microbe_methane .and. .not. use_legacy_ch4_with_microbe) then
           call c2g(bounds, &
                microbe_methane_vars%surface_ch4_flux_col(bounds%begc:bounds%endc), &
                flux_ch4_grc(bounds%begg:bounds%endg), &

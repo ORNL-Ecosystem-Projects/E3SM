@@ -32,6 +32,7 @@ class Environment:
     soil_ph: float = 7.0
     dom_fermentation_scalar: float = 0.0
     aerobic_acetate_oxidation_scalar: float = 0.0
+    elm_aerobic_o2_demand: float = 0.0
 
 
 @dataclass
@@ -42,11 +43,14 @@ class Rates:
     hydrogenotrophic_methanogenesis_c: float = 0.0
     aerobic_acetate_oxidation_c: float = 0.0
     aerobic_methane_oxidation_c: float = 0.0
+    aerobic_methane_oxidation_pre_o2_c: float = 0.0
     anaerobic_methane_oxidation_c: float = 0.0
     acetate_methanogen_mortality_c: float = 0.0
     h2_methanogen_mortality_c: float = 0.0
     aerobic_methanotroph_mortality_c: float = 0.0
     anaerobic_methanotroph_mortality_c: float = 0.0
+    elm_aerobic_o2_consumption: float = 0.0
+    oxygen_stress: float = 1.0
     effective_soil_ph: float = 0.0
     ph_response: float = 0.0
 
@@ -235,7 +239,13 @@ def potential_rates(
     return rates
 
 
-def limit_rates(state: State, parameters: Mapping[str, float], dt: float, rates: Rates) -> Rates:
+def limit_rates(
+    state: State,
+    environment: Environment,
+    parameters: Mapping[str, float],
+    dt: float,
+    rates: Rates,
+) -> Rates:
     if dt <= 0.0:
         return Rates()
     rates.dom_to_acetate_c = min(
@@ -276,14 +286,20 @@ def limit_rates(state: State, parameters: Mapping[str, float], dt: float, rates:
     )
     rates.aerobic_methane_oxidation_c *= scale
     rates.anaerobic_methane_oxidation_c *= scale
+    rates.aerobic_methane_oxidation_pre_o2_c = rates.aerobic_methane_oxidation_c
 
     available_o2 = max(0.0, state.conc_o2) / dt
     o2_demand = (
-        _p(parameters, "aerobic_decomp_o2_c_ratio") * rates.aerobic_acetate_oxidation_c
+        max(0.0, environment.elm_aerobic_o2_demand)
+        + _p(parameters, "aerobic_decomp_o2_c_ratio") * rates.aerobic_acetate_oxidation_c
         + _p(parameters, "aerobic_oxidation_o2_ch4_ratio")
         * rates.aerobic_methane_oxidation_c
     )
     scale = _supply_scale(available_o2, o2_demand)
+    rates.oxygen_stress = scale
+    rates.elm_aerobic_o2_consumption = (
+        max(0.0, environment.elm_aerobic_o2_demand) * scale
+    )
     rates.aerobic_acetate_oxidation_c *= scale
     rates.aerobic_methane_oxidation_c *= scale
 
@@ -351,7 +367,8 @@ def assemble(parameters: Mapping[str, float], rates: Rates) -> Tendencies:
         conc_o2=-_p(parameters, "aerobic_decomp_o2_c_ratio")
         * rates.aerobic_acetate_oxidation_c
         - _p(parameters, "aerobic_oxidation_o2_ch4_ratio")
-        * rates.aerobic_methane_oxidation_c,
+        * rates.aerobic_methane_oxidation_c
+        - rates.elm_aerobic_o2_consumption,
         conc_co2=0.5 * rates.dom_to_acetate_c
         - rates.acetogenesis_c
         - (1.0 + y_h2) * rates.hydrogenotrophic_methanogenesis_c
@@ -368,7 +385,9 @@ def assemble(parameters: Mapping[str, float], rates: Rates) -> Tendencies:
 def compute(
     state: State, environment: Environment, parameters: Mapping[str, float], dt: float
 ) -> tuple[Rates, Tendencies]:
-    rates = limit_rates(state, parameters, dt, potential_rates(state, environment, parameters))
+    rates = limit_rates(
+        state, environment, parameters, dt, potential_rates(state, environment, parameters)
+    )
     return rates, assemble(parameters, rates)
 
 

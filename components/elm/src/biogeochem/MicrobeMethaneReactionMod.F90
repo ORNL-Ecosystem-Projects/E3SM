@@ -36,6 +36,10 @@ module MicrobeMethaneReactionMod
      ! partition/repartition logic. They keep that policy outside chemistry.
      real(r8) :: dom_fermentation_scalar = 0._r8
      real(r8) :: aerobic_acetate_oxidation_scalar = 0._r8
+     ! Potential ELM decomposition, root-respiration, and nitrification O2
+     ! demand. The reaction limiter competes this demand with its microbial
+     ! aerobic reactions, following the shared-stress structure in CH4Mod.
+     real(r8) :: elm_aerobic_o2_demand = 0._r8
   end type microbe_methane_reaction_environment_type
 
   type, public :: microbe_methane_reaction_rates_type
@@ -46,11 +50,17 @@ module MicrobeMethaneReactionMod
      real(r8) :: hydrogenotrophic_methanogenesis_c = 0._r8
      real(r8) :: aerobic_acetate_oxidation_c = 0._r8
      real(r8) :: aerobic_methane_oxidation_c = 0._r8
+     ! Diagnostic copy after CH4 competition and before shared-O2 scaling.
+     real(r8) :: aerobic_methane_oxidation_pre_o2_c = 0._r8
      real(r8) :: anaerobic_methane_oxidation_c = 0._r8
      real(r8) :: acetate_methanogen_mortality_c = 0._r8
      real(r8) :: h2_methanogen_mortality_c = 0._r8
      real(r8) :: aerobic_methanotroph_mortality_c = 0._r8
      real(r8) :: anaerobic_methanotroph_mortality_c = 0._r8
+     ! Non-microbial O2 consumption accepted by the shared limiter
+     ! [mol O2 m-3 s-1] and the dimensionless common O2 stress.
+     real(r8) :: elm_aerobic_o2_consumption = 0._r8
+     real(r8) :: oxygen_stress = 1._r8
      real(r8) :: effective_soil_ph = 0._r8
      real(r8) :: ph_response = 0._r8
   end type microbe_methane_reaction_rates_type
@@ -87,7 +97,7 @@ contains
     type(microbe_methane_reaction_tendencies_type), intent(out) :: tendencies
 
     call computeMicrobeMethanePotentialRates(state, environment, parameters, rates)
-    call limitMicrobeMethaneReactionRates(state, parameters, dt, rates)
+    call limitMicrobeMethaneReactionRates(state, environment, parameters, dt, rates)
     call assembleMicrobeMethaneReactionTendencies(parameters, rates, tendencies)
   end subroutine computeMicrobeMethaneReactionTendencies
 
@@ -184,8 +194,9 @@ contains
          anaerobic_methanotroph_mol_c * rates%ph_response
   end subroutine computeMicrobeMethanePotentialRates
 
-  pure subroutine limitMicrobeMethaneReactionRates(state, parameters, dt, rates)
+  pure subroutine limitMicrobeMethaneReactionRates(state, environment, parameters, dt, rates)
     type(microbe_methane_reaction_state_type), intent(in) :: state
+    type(microbe_methane_reaction_environment_type), intent(in) :: environment
     type(MicrobeMethaneParamsType), intent(in) :: parameters
     real(r8), intent(in) :: dt
     type(microbe_methane_reaction_rates_type), intent(inout) :: rates
@@ -235,12 +246,20 @@ contains
     scale = supplyScale(available_ch4_rate, ch4_demand)
     rates%aerobic_methane_oxidation_c = rates%aerobic_methane_oxidation_c * scale
     rates%anaerobic_methane_oxidation_c = rates%anaerobic_methane_oxidation_c * scale
+    rates%aerobic_methane_oxidation_pre_o2_c = rates%aerobic_methane_oxidation_c
 
-    ! Stage 5: aerobic acetate and methane oxidation compete for O2.
+    ! Stage 5: ELM decomposition, root respiration, nitrification, aerobic
+    ! acetate oxidation, and aerobic methane oxidation compete for O2. ELM's
+    ! carbon and nitrogen fluxes were resolved earlier using the preceding
+    ! timestep's shared stress, as in the legacy CH4Mod coupling.
     available_o2_rate = max(0._r8, state%conc_o2) / dt
-    o2_demand = parameters%aerobic_decomp_o2_c_ratio * rates%aerobic_acetate_oxidation_c + &
+    o2_demand = max(0._r8, environment%elm_aerobic_o2_demand) + &
+         parameters%aerobic_decomp_o2_c_ratio * rates%aerobic_acetate_oxidation_c + &
          parameters%aerobic_oxidation_o2_ch4_ratio * rates%aerobic_methane_oxidation_c
     scale = supplyScale(available_o2_rate, o2_demand)
+    rates%oxygen_stress = scale
+    rates%elm_aerobic_o2_consumption = &
+         max(0._r8, environment%elm_aerobic_o2_demand) * scale
     rates%aerobic_acetate_oxidation_c = rates%aerobic_acetate_oxidation_c * scale
     rates%aerobic_methane_oxidation_c = rates%aerobic_methane_oxidation_c * scale
 
@@ -302,7 +321,8 @@ contains
 
     tendencies%conc_ch4 = acetate_ch4 + rates%hydrogenotrophic_methanogenesis_c - &
          rates%aerobic_methane_oxidation_c - rates%anaerobic_methane_oxidation_c
-    tendencies%conc_o2 = -parameters%aerobic_decomp_o2_c_ratio * &
+    tendencies%conc_o2 = -rates%elm_aerobic_o2_consumption - &
+         parameters%aerobic_decomp_o2_c_ratio * &
          rates%aerobic_acetate_oxidation_c - parameters%aerobic_oxidation_o2_ch4_ratio * &
          rates%aerobic_methane_oxidation_c
     tendencies%conc_co2 = 0.5_r8 * rates%dom_to_acetate_c - rates%acetogenesis_c - &

@@ -13,7 +13,8 @@ module elm_driver
   use shr_log_mod            , only : errMsg => shr_log_errMsg
   use elm_varpar             , only : nlevtrc_soil, nlevsoi
   use elm_varctl             , only : wrtdia, iulog, create_glacier_mec_landunit, use_fates, use_betr, use_firn_percolation_and_compaction
-  use elm_varctl             , only : use_cn, use_lch4, use_microbe_methane, use_voc, use_noio, use_c13, use_c14
+  use elm_varctl             , only : use_cn, use_lch4, use_microbe_methane, use_legacy_ch4_with_microbe, &
+       use_voc, use_noio, use_c13, use_c14
   use elm_varctl             , only : use_erosion, use_fates_sp, use_fan
   use elm_varctl             , only : iac_present
   use elm_varctl             , only : mpi_sync_nstep_freq
@@ -444,7 +445,7 @@ contains
           call col_ps%Summary(bounds_clump, &
                filter(nc)%num_soilc, filter(nc)%soilc)
 
-          if (use_microbe_methane) then
+          if (use_microbe_methane .and. .not. use_legacy_ch4_with_microbe) then
              call BeginGridCBalance(bounds_clump, col_cs, grc_cs, &
                   additional_carbon_col=microbe_methane_vars%additional_carbon_col)
           else
@@ -521,7 +522,7 @@ contains
              call col_ps%Summary(bounds_clump, &
                   filter(nc)%num_soilc, filter(nc)%soilc)
 
-             if (use_microbe_methane) then
+             if (use_microbe_methane .and. .not. use_legacy_ch4_with_microbe) then
                 call EndGridCBalanceAfterDynSubgridDriver(bounds_clump, &
                      filter(nc)%num_soilc, filter(nc)%soilc, &
                      col_cs, grc_cs, grc_cf, &
@@ -607,7 +608,7 @@ contains
                filter(nc)%num_soilc, filter(nc)%soilc)
           call col_ps%Summary(bounds_clump, &
                filter(nc)%num_soilc, filter(nc)%soilc)
-          if (use_microbe_methane) then
+          if (use_microbe_methane .and. .not. use_legacy_ch4_with_microbe) then
              call BeginColCBalance(bounds_clump, &
                   filter(nc)%num_soilc, filter(nc)%soilc, col_cs, &
                   additional_carbon_col=microbe_methane_vars%additional_carbon_col)
@@ -1222,14 +1223,16 @@ contains
           call ep_betr%StepWithoutDrainage(bounds_clump, col_pp, veg_pp)
        endif  !end use_betr
 
-       if (use_lch4 .and. .not. is_active_betr_bgc .and. use_microbe_methane) then
+       if (use_lch4 .and. .not. is_active_betr_bgc .and. use_microbe_methane .and. &
+            .not. use_legacy_ch4_with_microbe) then
           ! Do not call either methane backend before AnnualUpdate.
           call t_startf('microbe_methane')
           call microbe_methane_vars%Advance(bounds_clump, &
-               filter(nc)%num_soilc, filter(nc)%soilc, dtime_mod, &
-               atm2lnd_vars, col_es, col_ws, chemstate_vars, soilstate_vars, &
+               filter(nc)%num_soilc, filter(nc)%soilc, &
+               filter(nc)%num_soilp, filter(nc)%soilp, dtime_mod, &
+               atm2lnd_vars, col_es, col_ws, col_wf, chemstate_vars, soilstate_vars, &
                soilhydrology_vars, ch4_vars%grnd_ch4_cond_patch, &
-               ch4_vars, col_cs, col_cf, col_ns, col_nf, col_ps)
+               ch4_vars, col_cs, col_cf, veg_cf, col_ns, col_nf, col_ps)
           call t_stopf('microbe_methane')
        else if (use_lch4 .and. .not. is_active_betr_bgc) then
           ! Warning: do not call CH4 before AnnualUpdate, which will fail the legacy model.
@@ -1381,30 +1384,42 @@ contains
 
           call t_startf('cnbalchk')
 
-          if (use_microbe_methane) then
+          if (use_microbe_methane .and. .not. use_legacy_ch4_with_microbe) then
              call ColCBalanceCheck(bounds_clump, &
                   filter(nc)%num_soilc, filter(nc)%soilc, &
                   col_cs, col_cf, soilstate_vars, &
                   additional_carbon_col=microbe_methane_vars%additional_carbon_col, &
-                  surface_carbon_flux_col=microbe_methane_vars%surface_carbon_flux_col)
+                  surface_carbon_flux_col=microbe_methane_vars%surface_carbon_flux_col, &
+                  lateral_carbon_flux_col=microbe_methane_vars%lateral_carbon_flux_col, &
+                  aqueous_carbon_export_col=microbe_methane_vars%aqueous_carbon_export_col)
           else
              call ColCBalanceCheck(bounds_clump, &
                   filter(nc)%num_soilc, filter(nc)%soilc, &
                   col_cs, col_cf, soilstate_vars)
           end if
 
-          call ColNBalanceCheck(bounds_clump, &
-               filter(nc)%num_soilc, filter(nc)%soilc, &
-               col_ns, col_nf)
+          if (use_microbe_methane .and. .not. use_legacy_ch4_with_microbe) then
+             call ColNBalanceCheck(bounds_clump, &
+                  filter(nc)%num_soilc, filter(nc)%soilc, col_ns, col_nf, &
+                  aqueous_nitrogen_export_col=&
+                  microbe_methane_vars%aqueous_nitrogen_export_col)
+             call ColPBalanceCheck(bounds_clump, &
+                  filter(nc)%num_soilc, filter(nc)%soilc, col_ps, col_pf, &
+                  aqueous_phosphorus_export_col=&
+                  microbe_methane_vars%aqueous_phosphorus_export_col)
+          else
+             call ColNBalanceCheck(bounds_clump, &
+                  filter(nc)%num_soilc, filter(nc)%soilc, col_ns, col_nf)
+             call ColPBalanceCheck(bounds_clump, &
+                  filter(nc)%num_soilc, filter(nc)%soilc, col_ps, col_pf)
+          end if
 
-          call ColPBalanceCheck(bounds_clump, &
-               filter(nc)%num_soilc, filter(nc)%soilc, &
-               col_ps, col_pf)
-
-          if (use_microbe_methane) then
+          if (use_microbe_methane .and. .not. use_legacy_ch4_with_microbe) then
              call GridCBalanceCheck(bounds_clump, col_cs, col_cf, grc_cs, grc_cf, &
                   additional_carbon_col=microbe_methane_vars%additional_carbon_col, &
-                  surface_carbon_flux_col=microbe_methane_vars%surface_carbon_flux_col)
+                  surface_carbon_flux_col=microbe_methane_vars%surface_carbon_flux_col, &
+                  lateral_carbon_flux_col=microbe_methane_vars%lateral_carbon_flux_col, &
+                  aqueous_carbon_export_col=microbe_methane_vars%aqueous_carbon_export_col)
           else
              call GridCBalanceCheck(bounds_clump, col_cs, col_cf, grc_cs, grc_cf)
           end if
@@ -1580,9 +1595,10 @@ contains
             budget_ann,  budget_ltann,  budget_ltend)
 
        if (use_cn .and. do_budgets) then
-          if (use_microbe_methane) then
+          if (use_microbe_methane .and. .not. use_legacy_ch4_with_microbe) then
              call CNPBudget_Run(bounds_proc, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf, &
-                  surface_carbon_flux_col=microbe_methane_vars%surface_carbon_flux_col)
+                  surface_carbon_flux_col=microbe_methane_vars%surface_carbon_flux_col, &
+                  aqueous_carbon_export_col=microbe_methane_vars%aqueous_carbon_export_col)
           else
              call CNPBudget_Run(bounds_proc, atm2lnd_vars, lnd2atm_vars, grc_cs, grc_cf)
           end if

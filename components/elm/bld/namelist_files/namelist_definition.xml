@@ -801,6 +801,67 @@ methane backend so its oxygen and nitrification/denitrification coupling remain
 active. Phase 3 replaces that bridge with revised methane.
 </entry>
 
+<entry id="use_legacy_ch4_with_microbe" type="logical" category="bgc"
+       group="elm_inparm" valid_values="" value=".false.">
+Select the Phase 2 compatibility bridge when use_microbe_methane is enabled.
+TRUE retains the DOM-bacteria-fungi decomposition cascade but executes legacy
+CH4Mod instead of revised microbial methane. FALSE (default) executes revised
+microbial methane. The compatibility bridge requires use_lch4=.true. and is
+incompatible with revised-methane transport, CLM saturation/DOM-relaxation
+parity switches, and physical microbial aqueous transport.
+</entry>
+
+<entry id="use_elm_microbe_methane_transport" type="logical" category="bgc"
+       group="elm_inparm" valid_values="" value=".false.">
+Select the ELM multiphase gas-transport mapping within the revised microbial
+methane backend. FALSE (default) uses the CLM-Microbe aqueous Fickian mapping
+for both saturated and unsaturated partitions. TRUE uses gas diffusion through
+air-filled pore space in unsaturated soil, aqueous diffusion in saturated soil,
+Henry-law transport capacity, and ELM surface resistances. This option requires
+use_microbe_methane=.true.
+</entry>
+
+<entry id="use_microbe_nonbog_lateral_gas_transport" type="logical" category="bgc"
+       group="elm_inparm" valid_values="" value=".true.">
+Control revised-methane lateral gas exchange on graph edges involving a
+non-bog topounit. TRUE (default) retains the generalized CLM-Microbe-compatible
+behavior and exchanges CH4, O2, CO2, and H2 across every configured topounit
+edge. FALSE skips only edges for which either endpoint is non-bog, retaining
+gas exchange among connected bog topounits. This diagnostic does not change
+lateral hydrology or vertical gas and solute transport.
+</entry>
+
+<entry id="use_clm_microbe_humhol_saturation" type="logical" category="bgc"
+       group="elm_inparm" valid_values="" value=".false.">
+Parity-only switch for the CLM-SPRUCE HUM_HOL methane-area treatment. TRUE
+forces the revised methane saturated fraction to 0.99, matching the source
+CLM-Microbe HUM_HOL override. FALSE (default) retains native ELM hydrology via
+max(FSAT, frac_h2osfc). This option requires use_microbe_methane=.true. and
+use_humhol=.true.; it is intended for source-parity diagnosis, not calibrated
+production use.
+</entry>
+
+<entry id="use_clm_microbe_dom_relaxation" type="logical" category="bgc"
+       group="elm_inparm" valid_values="" value=".false.">
+Parity-test switch for the executed CLM-Microbe vertical DOM mixing behavior.
+TRUE applies a conservative adjacent-layer relaxation operator to DOM C, N,
+and P after microbial reactions. The rate comes from the standard ELM
+parameter file. FALSE (default) leaves DOM transport on the normal ELM
+decomposition-cascade path. This option requires use_microbe_methane=.true.;
+it is intended for source-parity diagnosis, not calibrated production use.
+</entry>
+
+<entry id="use_microbe_aqueous_transport" type="logical" category="bgc"
+       group="elm_inparm" valid_values="" value=".false.">
+Enable conservative physical transport of microbial-model DOM C, N, and P and
+acetate. The operator uses porewater concentration, ELM interlayer water flux,
+molecular diffusion, and hydrodynamic dispersion. It bypasses the generic SOM
+transport operator for DOM, does not move bacteria or fungi, and is mutually
+exclusive with use_clm_microbe_dom_relaxation. This option requires
+use_microbe_methane=.true. and use_vertsoilc=.true. Carbon-isotope DOM
+transport is not yet implemented, so use_c13 and use_c14 must be FALSE.
+</entry>
+
 <entry id="use_cn" type="logical" category="bgc"
        group="elm_inparm" valid_values="" value=".false.">
 ELM Biogeochemistry mode : Carbon Nitrogen model (CN)

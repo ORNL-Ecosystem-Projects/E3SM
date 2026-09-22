@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,8 @@ def inject_parameters(input_path: Path, output_path: Path, manifest_path: Path) 
 
         dataset.microbe_methane_schema = document["schema"]
         dataset.microbe_methane_warning = document["warning"]
+        dataset.microbe_methane_source_revision = document["source_revision"]
+        dataset.microbe_methane_source_parameter_file = document["source_parameter_file"]
 
 
 def validate_parameter_file(path: Path, manifest_path: Path) -> None:
@@ -75,6 +78,40 @@ def validate_parameter_file(path: Path, manifest_path: Path) -> None:
             raise SystemExit("missing revised methane parameters: " + ", ".join(missing))
         if getattr(dataset, "microbe_methane_schema", "") != document["schema"]:
             raise SystemExit("revised methane schema attribute is missing or incompatible")
+        expected_globals = {
+            "microbe_methane_source_revision": document["source_revision"],
+            "microbe_methane_source_parameter_file": document["source_parameter_file"],
+            "microbe_methane_warning": document["warning"],
+        }
+        for attribute, expected_attribute in expected_globals.items():
+            actual_attribute = getattr(dataset, attribute, None)
+            if actual_attribute != expected_attribute:
+                raise SystemExit(
+                    f"global attribute {attribute} is {actual_attribute!r}, "
+                    f"expected {expected_attribute!r}"
+                )
+        for name, source_id, expected, units, provenance in document["parameters"]:
+            variable = dataset.variables[name]
+            values = variable[...]
+            if values.size != 1:
+                raise SystemExit(f"{name} must contain exactly one scalar value")
+            actual = float(values.flat[0])
+            if not math.isclose(actual, float(expected), rel_tol=1.0e-13, abs_tol=0.0):
+                raise SystemExit(f"{name} is {actual!r}, expected {expected!r}")
+            expected_attributes = {
+                "units": units,
+                "legacy_name": source_id,
+                "source_revision": document["source_revision"],
+                "source_provenance": provenance,
+                "science_status": "phase3_reference_test_only",
+            }
+            for attribute, expected_attribute in expected_attributes.items():
+                actual_attribute = getattr(variable, attribute, None)
+                if actual_attribute != expected_attribute:
+                    raise SystemExit(
+                        f"{name} attribute {attribute} is {actual_attribute!r}, "
+                        f"expected {expected_attribute!r}"
+                    )
 
 
 def main() -> None:
