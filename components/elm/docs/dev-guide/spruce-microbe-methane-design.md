@@ -3,7 +3,9 @@
 Status: Phase 0 harness and Phases 1-2 implementation complete; Phase 3 Steps
 1-5 are implemented on their feature branch. Step 5 makes the executing
 methane backends mutually exclusive and connects revised storage and surface
-fluxes to ELM balances, budgets, and atmosphere exchange. The archived
+fluxes to ELM balances, budgets, and atmosphere exchange. A default-off
+compatibility option retains the Phase 2 microbial-cascade plus legacy-CH4Mod
+mode for controlled attribution. The archived
 CLM-SPRUCE scientific reference, exact-restart comparison, and SPRUCE science
 validation remain pending. Docker/CIME build, five-day enabled/disabled smoke
 tests, and a paired 50-year US-MOz run pass numerically with carbon balance at
@@ -22,13 +24,20 @@ decomposition, topounit hydrology, and atmosphere coupling. Replacing those
 facilities with the older CLM-SPRUCE implementation would regress current ELM
 capabilities.
 
-The proposed design adds one opt-in science switch:
+The proposed design adds one opt-in science switch and independently selectable
+transport suboptions:
 
 ```fortran
 use_microbe_methane = .false.
+use_legacy_ch4_with_microbe = .false.
+use_elm_microbe_methane_transport = .false.
+use_microbe_nonbog_lateral_gas_transport = .true.
 ```
 
-`use_lch4` remains the existing umbrella switch for methane. When
+`use_lch4` remains the existing umbrella switch for methane. The default-off
+`use_legacy_ch4_with_microbe` compatibility option retains the microbial
+decomposition cascade while selecting legacy `CH4Mod`; it permits controlled
+separation of decomposition and revised-methane effects. When
 `use_microbe_methane` is omitted or false, ELM follows its present call graph,
 pool topology, parameter reads, restart schema, history registration, and
 floating-point operations. When both switches are true, the new switch selects:
@@ -36,7 +45,12 @@ floating-point operations. When both switches are true, the new switch selects:
 1. the CLM-SPRUCE-style microbial CTC cascade, adding DOM, bacteria, and fungi
    to the standard decomposition pools; and
 2. a revised methane backend with acetate, explicit methanogenic and
-   methanotrophic guilds, dissolved CH4/O2/CO2/H2, and gas transport.
+   methanotrophic guilds, CH4/O2/CO2/H2 inventories, and gas transport.
+
+Within revised methane, the default false transport suboption uses the
+CLM-Microbe aqueous Fickian mapping. Setting it true selects the alternative ELM
+multiphase mapping; it has no valid standalone meaning when revised methane is
+disabled.
 
 The existing `CH4Mod` remains intact and remains the default methane backend.
 The two methane backends must never run on the same soil column and timestep.
@@ -111,24 +125,26 @@ handled by the C-N-P transaction.
 Hydrology and oxygen determine which methane pathways can operate and whether
 their products reach the atmosphere. Each layer contains saturated and
 unsaturated subarea state. Changes in inundated fraction conservatively move
-existing acetate, gases, and guild biomass between those partitions. Dissolved
-CH4, O2, CO2, and H2 diffuse vertically; gases can also exchange through roots
-and aerenchyma, and methane above its solubility threshold can escape by
-ebullition. Snow, ponded water, the top soil layer, and the atmospheric
-boundary contribute resistances to surface exchange. Thus net CH4 emission is
-not equated with production: it is the remainder after oxidation, temporary
-dissolved storage, downward or upward redistribution, and the three transport
-pathways.
+existing acetate, gases, and guild biomass between those partitions. CH4, O2,
+CO2, and H2 state is stored as bulk-soil inventory density. Gas-phase diffusion
+operates in air-filled pores above the water table, while Henry-law-equilibrated
+aqueous diffusion operates in saturated layers. Gases can also exchange through
+roots and aerenchyma, and methane above its solubility threshold can escape by
+ebullition. Snow, ponded water, the top soil layer, and the atmospheric boundary
+contribute resistances to surface exchange. Thus net CH4 emission is not equated
+with production: it is the remainder after oxidation, temporary gas storage,
+downward or upward redistribution, and the three transport pathways.
 
 Oxygen is shared with the rest of ELM rather than treated as an isolated
-methane control. Standard heterotrophic respiration, root respiration, and
-nitrification consume the revised dissolved-O2 inventory before methane
-reactions are evaluated. Nitrification is capped by available oxygen using two
-moles of O2 per mole of N nitrified. The remaining O2 constrains aerobic CH4
-oxidation, while low O2 favors anaerobic processes. The revised concentrations
-and oxygen stress are then published through the established ELM anoxia
-interface for the next decomposition and nitrification/denitrification step.
-This creates the intended feedback: wetness restricts atmospheric O2 supply,
+methane control. In each saturated and unsaturated layer partition, potential
+heterotrophic respiration, root respiration, nitrification, aerobic acetate
+oxidation, and aerobic CH4 oxidation form one demand. A common stress scales
+the demand when it exceeds the finite dissolved-O2 inventory. Nitrification
+enters at two moles of O2 per mole of N. Following legacy `CH4Mod`, ELM carbon
+and nitrogen fluxes have already used the preceding timestep's stress, while
+the current stress scales microbial aerobic reactions and is published through
+the established ELM anoxia interface for the next decomposition step. This
+creates the intended lagged feedback: wetness restricts atmospheric O2 supply,
 redox limitation alters decomposition and nitrogen transformations, DOM and
 fermentation products accumulate, methane production increases, and oxidation
 and transport determine the emitted fraction.
@@ -137,14 +153,26 @@ Carbon accounting differs deliberately from the legacy `CH4Mod` diagnostic
 formulation. In the revised model, methanogenesis and methane oxidation are
 internal conversions among represented carbon pools; neither is itself an
 external source or sink. The carbon budget includes DOM through the standard
-decomposition pools and adds acetate, guild biomass, dissolved CH4-C, and
-dissolved CO2-C as revised-backend storage. Only net CH4-C and CO2-C crossing
+decomposition pools and adds acetate, guild biomass, bulk-soil CH4-C, and
+bulk-soil CO2-C inventories as revised-backend storage. Only net CH4-C and CO2-C crossing
 the land-atmosphere boundary are external fluxes. Gross diagnostics retain the
 science needed to interpret that net exchange: `MM_CH4_PROD` integrates
 acetoclastic plus hydrogenotrophic methanogenesis, while `MM_CH4_OXID`
 integrates aerobic plus anaerobic methane consumption. They correspond in
 purpose, though not in detailed formulation, to legacy `CH4PROD` and
-`FCH4TOCO2`.
+`FCH4TOCO2`. The acetoclastic contribution to `MM_CH4_PROD` is the reaction
+extent multiplied by the non-biomass fraction and the CH4 yield; counting the
+whole process extent would incorrectly include biomass and CO2 carbon as CH4.
+`MM_CH4_PROD_UNSAT`, `MM_CH4_PROD_SAT`, `MM_CH4_OXID_UNSAT`, and
+`MM_CH4_OXID_SAT` are area-weighted contributions that sum to the bulk
+diagnostics. `MM_CH4_OXID_AER` and `MM_CH4_OXID_AOM` separate aerobic
+methanotrophy from anaerobic methane oxidation; their `_UNSAT` and `_SAT`
+fields expose both area-weighted subarea contributions. The aerobic and AOM
+bulk fields sum exactly to `MM_CH4_OXID`, and `MM_SAT_FRACTION` records the
+area weighting used. `MM_CH4_SURF_DIFF`, `MM_CH4_SURF_AERE`, and
+`MM_CH4_SURF_EBUL` expose the three surface pathways. Each has `_UNSAT` and
+`_SAT` area-weighted contributions that sum to its bulk field; all use
+`g C m-2 s-1` and are positive toward the atmosphere.
 
 The expected land-carbon response is therefore not a uniform increase or
 decrease in SOM. Carbon is diverted into rapidly cycling DOM and living
@@ -167,8 +195,9 @@ emissions scientifically.
 | --- | --- | --- |
 | E3SM-Peatlands | branch `simplify/bog-zwt-no-perched`, commit `7b0703e07c7c933d53814f0c31856d3aed480d7b` | `components/elm` |
 | CLM-SPRUCE | branch `master`, commit `a85800bad2c2a57abff77af36ccec319b202166a` | `models/lnd/clm/src/clm4_5` |
+| CLM-Microbe | branch `master`, commit `9c2e0a048bb3799669d32b91e6cc76efb36d4b75` | `models/lnd/clm/src/clm4_5` and `inputdata/lnd/clm2/paramdata/microbepar_in` |
 
-The important CLM-SPRUCE source files are `microbeMod.F90`,
+The important CLM-SPRUCE/CLM-Microbe source files are `microbeMod.F90`,
 `initmicrobeMod.F90`, `microbeRestMod.F90`, `microbevarcon.F90`, and the
 microbial changes in `CNDecompCascadeMod_BGC.F90`, `clm_varpar.F90`,
 `pftvarcon.F90`, `CNEcosystemDynMod.F90`, and `clm_driver.F90`.
@@ -191,6 +220,8 @@ and `lnd2atmType.F90` / `lnd2atmMod.F90`.
   state.
 - Connect the revised methane backend to current ELM hydrology, vegetation,
   history, restart, mass-balance, and land-atmosphere exchange interfaces.
+- Generalize the source's two-column lateral gas diffusion to ELM's arbitrary
+  multi-topounit connection graph without hard-coded hummock/hollow indices.
 - Preserve exact current behavior when the new option is disabled.
 - Make all scientific parameters named, unit-documented, validated NetCDF
   inputs.
@@ -202,8 +233,9 @@ and `lnd2atmType.F90` / `lnd2atmMod.F90`.
 - Replaying or merging the old CLM-SPRUCE commit history.
 - Replacing or cleaning up the current legacy `CH4Mod` path.
 - Porting the empty `microbeCN` or `microben2o` stubs.
-- Porting `HUM_HOL` hydrology or its ad hoc lateral BGC code. The new backend
-  consumes current ELM/topounit hydrologic state.
+- Porting `HUM_HOL` hydrology or directly copying its ad hoc lateral BGC code.
+  The new backend uses current ELM topounit topology for Fickian gas exchange;
+  water-flux-driven DOM, nutrient, and acetate advection remains deferred.
 - Supporting FATES, BeTR/sBeTR, PFLOTRAN, Alquimia, or EMI BGC in the first
   release.
 - Enabling lake methane production in the revised backend initially.
@@ -237,21 +269,36 @@ acetoclastic methanogens, hydrogenotrophic methanogens, aerobic methanotrophs,
 or anaerobic methanotrophs. These are separate prognostic states and must remain
 separate in the port.
 
-### 4.3 The old parameter input is not safe to reproduce
+### 4.3 Positional parameter input requires an explicit baseline
 
 `microbevarcon.F90` declares `nummicrobepar = 88`, reads exactly 88 values from
-`./microbepar_in`, ignores the names, and assigns by position. The inspected
-`microbepar_in` contains 111 records. Its records 84-86 are `k_dom`,
-`k_bacteria`, and `k_fungi`, while the reader assigns those positions to
-`dom_diffus`, `m_Fick_ad`, and `m_dPlantTrans`. Later records are never read by
-that routine. Many PFT-level cascade parameters are separately declared in
-`pftvarcon.F90`; most were not present by name in the inspected SPRUCE physiology
-NetCDF file.
+`./microbepar_in`, ignores the names, and assigns by position. The original
+CLM-SPRUCE snapshot inspected for the port has a 111-record file whose records
+84-86 are `k_dom`, `k_bacteria`, and `k_fungi`; the reader instead assigns
+those positions to `dom_diffus`, `m_Fick_ad`, and `m_dPlantTrans`. It therefore
+cannot define the revised-methane runtime values safely. The local CLM-SPRUCE
+test branch repairs the parameter file by moving `dom_diffus`, `m_Fick_ad`, and
+`m_dPlantTrans` to records 84-86. The decomposition records remain later in the
+file for provenance; their active values are read from the PFT parameter
+NetCDF, not assigned by this methane reader.
 
-Consequently, the checked-in text file, declared defaults, PFT reader, and the
-values actually used by historical runs must be audited against archived run
-directories before declaring a canonical parameter set. The port must not
-encode the positional behavior accidentally.
+The later CLM-Microbe snapshot has an 89-record file whose first 86 positions
+align with the reader through `m_dPlantTrans`. Records 87 (`AOM`) and 88
+(`H2maxCH4`) are read into the temporary array but never assigned, and record
+89 (`AcemaxCH4`) is not read. For this integration, that file at commit
+`9c2e0a048bb3799669d32b91e6cc76efb36d4b75` is the default upstream baseline
+for the 38 active Phase 3 parameters it actually supplies. Phase 3 maps those
+values by legacy identifier into named standard-ELM variables; it does not
+reproduce positional reads at runtime. Before writing the ELM parameter file,
+the converter translates the raw numbers from the units used by the active
+legacy equations into ELM's declared units. Parameters absent from the file use
+an audited declaration or active source literal with distinct provenance.
+
+This resolves which checked-in values the integration tests use, but it does
+not make them a production calibration. Archived-run provenance and site
+suitability remain scientific-validation tasks. Many
+PFT-level microbial-cascade parameters are separately declared in
+`pftvarcon.F90` and are not supplied by this text file.
 
 ### 4.4 The old module directly mutates and duplicates state
 
@@ -271,6 +318,65 @@ CLM-SPRUCE contains `microbech4` calls in both `CNEcosystemDynMod.F90` and
 C14 in one path. The port will have one timestep entry point and one bulk
 reaction calculation. Isotope transfers will derive from that calculation.
 
+### 4.6 CLM-Microbe structural delta audit
+
+The later CLM-Microbe tree is an incremental evolution of the same model, not
+a replacement formulation. Its core `microbeMod.F90` reaction equations,
+`microbevarcon.F90` declarations, ecosystem driver, and Century cascade remain
+substantially the same as CLM-SPRUCE. The following deltas affect the porting
+decision:
+
+- The seven litter/SOM-to-DOM transition respiration fractions changed from
+  one to zero. This confirms that they are intended as conservative DOM
+  transfers and matches the Phase 2 implementation.
+- Dominant-PFT selection now explicitly handles bare-ground or nearly
+  unvegetated columns. The ELM adapter independently implements the same safety
+  requirement using current patch weights and PFT indices.
+- The new fungi-allocation expressions add `(1 / 30)**0.6`. Because `1 / 30`
+  is integer division in the source, the term evaluates to zero and does not
+  change the old allocation. The port retains the effective equation; any
+  intended nonzero fungi preference is a future science change.
+- Inundation changed from a layer/water-head split toward an empirical
+  `max(0.001, 1 - 0.04*zwt**2)` column fraction. Unsaturated surface exchange
+  was also extended to every layer with a `1/j**2` weighting, frozen exchange
+  was attenuated to one percent rather than disabled, and a top-five-layer
+  atmospheric-CH4 oxidation diagnostic was subtracted from net CH4 flux. These
+  are not copied literally: the port uses current ELM water state, conservative
+  saturated/unsaturated repartition, and finite-volume transport. The added
+  atmospheric-oxidation behavior remains a validation comparison target.
+- Both inspected CLM-Microbe snapshots contain explicit vertical Fickian
+  pathways: DOC and acetate use `dom_diffus`, while CH4/O2/CO2/H2 use the water
+  diffusion coefficient (`Fick_D_w*m_Fick_ad`) throughout the soil profile,
+  including unsaturated layers. `HUM_HOL` adds lateral concentration-gradient
+  exchange. The later source partly masks weak atmospheric gas coupling by
+  resetting a near-surface layer to atmospheric Henry equilibrium each
+  timestep. The ELM port keeps DOM C/N/P on the standard SOM transport operator
+  and gives acetate its own conservative `dom_diffus` solve. Revised gas
+  transport now defaults to the source aqueous Fickian coefficients; the
+  air-filled-pore/aqueous mapping and finite snow/pond/topsoil/boundary
+  resistance remain available through a namelist option. Section 9.3.2 records
+  both mappings and the diagnostics required to validate them.
+- The source's lateral gas diffusion assumes columns 1 and 2, fixed 0.75/0.25
+  areas, matching layer numbers, and a one-meter exchange distance. The port
+  instead reads `regional_target_ti`, `lateral_dist`, topounit weights, and
+  elevations from ELM. It exchanges all overlapping absolute-elevation layer
+  segments simultaneously, applies one donor limiter across every outgoing
+  edge, and conserves gridcell-area inventory. This supports the current
+  three-topounit SPRUCE surface without a new neighbor data model.
+- The later tree still owns state through global `clmtype` arrays and mutates
+  duplicated saturated/unsaturated state in place. Its active calls remain in
+  `CNEcosystemDynMod.F90` for bulk C, C13, and C14, while the driver call is
+  commented. The ELM port therefore retains its single bulk call, typed state,
+  transaction boundary, and derived future isotope transfers.
+- The tree includes experiment-specific changes outside the microbial model,
+  including fivefold N deposition, forced constant N fixation, and altered
+  respiration summaries. Those changes are not module dependencies and are
+  deliberately excluded.
+
+No CLM-Microbe source examined here adds C:P parameters for DOM, bacteria, or
+fungi, nor does its text file supply the Phase 2 microbial turnover and routing
+inventory. Those ELM-CNP inputs remain explicit new or unresolved parameters.
+
 ## 5. Configuration contract
 
 ### 5.1 Namelist variables
@@ -279,7 +385,31 @@ Add to `elm_inparm`:
 
 ```fortran
 logical :: use_microbe_methane = .false.
+logical :: use_legacy_ch4_with_microbe = .false.
+logical :: use_elm_microbe_methane_transport = .false.
+logical :: use_microbe_nonbog_lateral_gas_transport = .true.
 ```
+
+`use_legacy_ch4_with_microbe=.true.` selects the retained Phase 2 bridge:
+DOM, bacteria, and fungi remain active in the decomposition cascade, while
+legacy `CH4Mod` supplies methane, oxygen/anoxia, atmospheric exchange, restart,
+and history behavior. Revised methane state and parameters are not allocated or
+read in this mode. The option is intended for scientific attribution and
+backward-compatible experiments; it defaults false, so the main enabled
+configuration continues to use revised methane.
+
+When revised methane is enabled, the transport option defaults false and uses
+the CLM-Microbe aqueous Fickian mapping. Setting it true selects the ELM
+multiphase air-filled-pore/aqueous mapping. It is invalid to enable the transport
+option while `use_microbe_methane` is false.
+
+The default-on `use_microbe_nonbog_lateral_gas_transport` switch preserves the
+ported CLM-Microbe behavior on ELM's generalized topounit graph. Setting it
+false excludes an edge when either endpoint is a non-bog topounit, while
+retaining bog-to-bog gas exchange. The switch affects CH4, O2, CO2, and H2 gas
+exchange only; it does not change lateral hydrology, vertical gas transport, or
+aqueous DOM C/N/P and acetate transport. The default therefore preserves the
+existing enabled-path result.
 
 The module's scientific parameters will be variables in ELM's standard
 parameter NetCDF selected by the existing `paramfile` machinery. There is no
@@ -297,12 +427,14 @@ namelist.
 
 ### 5.2 Selection truth table
 
-| `use_lch4` | `use_microbe_methane` | Result |
-| --- | --- | --- |
-| false | false | Current no-methane behavior, unchanged |
-| true | false | Current `CH4Mod` behavior, unchanged |
-| false | true | Configuration error; Phase 2 requires established methane oxygen/anoxia coupling |
-| true | true | Phase 2: microbial decomposition plus established methane bridge; Phase 3 target: revised methane backend |
+| `use_lch4` | `use_microbe_methane` | `use_legacy_ch4_with_microbe` | Result |
+| --- | --- | --- | --- |
+| false | false | false | Current no-methane behavior, unchanged |
+| true | false | false | Standard decomposition plus current `CH4Mod`, unchanged |
+| false | true | either | Configuration error; the microbial cascade requires methane oxygen/anoxia coupling |
+| either | false | true | Configuration error; the compatibility option requires the microbial cascade |
+| true | true | false | Microbial decomposition plus revised methane backend |
+| true | true | true | Microbial decomposition plus retained legacy `CH4Mod` (Phase 2 compatibility bridge) |
 
 A string-valued `methane_model='legacy|microbial'` was considered but rejected
 for this port. Adding a default-false boolean makes the backward-compatibility
@@ -315,6 +447,12 @@ The build-namelist layer and runtime initialization must both validate:
 - `use_cn=.true.`;
 - `use_vertsoilc=.true.`;
 - `use_century_decomp=.false.` (the CTC cascade);
+- `use_elm_microbe_methane_transport=.true.` only when
+  `use_microbe_methane=.true.`;
+- `use_legacy_ch4_with_microbe=.true.` only when both `use_lch4` and
+  `use_microbe_methane` are true;
+- the compatibility bridge cannot be combined with revised-methane saturation,
+  gas-transport, DOM-relaxation, or physical aqueous-solute options;
 - ELM-native BGC is active;
 - `use_fates=.false.` and BeTR/sBeTR, PFLOTRAN, Alquimia, and EMI BGC are
   inactive;
@@ -500,13 +638,15 @@ the equations, not merely forced to sum to one. The old cascade uses both path
 fractions and pathway respiration/CUE, so a naive sum check can double-count the
 respired part. Unit tests will encode the actual donor mass equation.
 
-CLM-SPRUCE assigns a respiration fraction of one to the seven litter/SOM-to-DOM
-solubilization paths. Under current ELM cascade semantics that would respire all
-of their carbon and deliver none to DOM, contradicting the named receivers and
-the documented solubilization fractions. Phase 2 therefore treats these as
-conservative transfers (`rf=0`). This intentional semantic repair must remain
-flagged in golden-vector comparisons rather than being mistaken for exact
-source parity.
+The original CLM-SPRUCE snapshot assigns a respiration fraction of one to the
+seven litter/SOM-to-DOM solubilization paths. Under current ELM cascade
+semantics that would respire all of their carbon and deliver none to DOM,
+contradicting the named receivers and documented solubilization fractions.
+Phase 2 therefore treats these as conservative transfers (`rf=0`). The later
+CLM-Microbe snapshot independently changes all seven fractions to zero, so the
+implemented behavior now agrees with the linked upstream tree as well as the
+intended receiver semantics. It remains an expected difference from golden
+vectors made with the older CLM-SPRUCE snapshot.
 
 ### 8.3 C-N-P behavior
 
@@ -555,7 +695,7 @@ For each active soil column and decomposition layer:
 - hydrogenotrophic methanogen biomass C;
 - aerobic methanotroph biomass C;
 - anaerobic methanotroph biomass C; and
-- dissolved CH4, O2, CO2, and H2.
+- bulk-soil CH4, O2, CO2, and H2 inventory densities.
 
 State that genuinely differs between saturated and unsaturated subareas is
 stored per partition. Bulk diagnostic fields are derived views, not additional
@@ -582,8 +722,8 @@ nonnegative without post-hoc clipping that loses mass.
 #### 9.2.1 Step 2 reaction-kernel contract
 
 The Step 2 kernel is a pure, scalar, one-layer calculation. Inputs are immutable
-and use `g C m-3 soil` for DOM, acetate, and functional guilds; dissolved gases
-use `mol gas m-3`. Outputs are named per-second tendencies in the corresponding
+and use `g C m-3 soil` for DOM, acetate, and functional guilds; gas inventory
+densities use `mol gas m-3 bulk soil`. Outputs are named per-second tendencies in the corresponding
 units plus carbon-basis process rates in `mol C m-3 s-1`. Hydrology supplies
 bounded DOM-fermentation and aerobic-acetate-oxidation scalars; defining those
 scalars and applying the kernel across saturated/unsaturated state belongs to
@@ -672,16 +812,29 @@ partition when saturated area decreases. This exactly preserves
 DOM remains the single authoritative bulk decomposition pool, so it needs no
 partition remap; its Phase 2 vertical transport remains authoritative.
 
-Vertical transport uses a finite-volume interface-flux calculation that is
-generic over concentration units, and can therefore transport acetate as well
-as all four dissolved gases. ELM supplies layer thickness, effective
-diffusivity, an atmosphere-equivalent upper concentration, and a total surface
-conductance. The upper conductance will include the current ELM-selected
-top-half-layer, snow, ponded-water, and boundary-layer resistances; the lower
-boundary is closed. Internal fluxes are equal-and-opposite interface fluxes.
-For an explicit timestep, every layer's simultaneous outward fluxes are scaled
-by one donor factor if necessary, preventing negative concentration without
-breaking internal conservation.
+Vertical transport uses finite-volume, equal-and-opposite interface fluxes.
+Acetate retains the explicit, closed-boundary kernel. Gas transport uses a
+backward-Euler tridiagonal solve because gas-phase diffusion is too fast for an
+ELM-length explicit timestep. For each layer the adapter supplies a transport
+capacity `epsilon` and a diffusivity on a common gas-equivalent mobile-
+concentration basis:
+
+```text
+C_bulk = epsilon * C_mobile
+d(C_bulk)/dt = divergence(D_mobile * gradient(C_mobile))
+```
+
+In air-filled soil, `epsilon` includes gas-filled porosity plus Henry-weighted
+liquid porosity and `D_mobile` is the effective gas diffusivity. In saturated
+soil, `epsilon` is Henry-weighted liquid porosity and `D_mobile` is the aqueous
+diffusivity multiplied by the same dimensionless Henry solubility. This change
+of basis makes gas/aqueous interfaces continuous at phase equilibrium without
+changing the authoritative state unit, which remains mol gas per m3 bulk soil.
+The upper conductance includes the top half-layer, snow, ponded-water, and
+boundary-layer resistances; the lower boundary is closed. The implicit solve is
+nonnegative and exactly conservative to roundoff. A joint donor limiter then
+bounds the explicit aerenchyma and ebullition losses against the post-diffusion
+inventory.
 
 Aerenchyma is represented as signed, first-order layer-to-atmosphere exchange.
 This permits CH4, CO2, and H2 emission and O2 uptake through the same interface,
@@ -691,22 +844,148 @@ combines inundation, thaw state, and depth attenuation. Both kernels report a
 positive-upward surface flux, and the layer-integrated tendency plus that flux
 closes exactly.
 
-The Step 4 ELM adapter will construct effective diffusivities, atmosphere-
-equivalent dissolved concentrations, aerenchyma exchange rates, and ebullition
-activation from current ELM hydrology, temperature, atmospheric forcing, root
-state, and the named parameter-file inputs. Keeping those model-state choices
-outside the pure transport kernel avoids old global pointers and `HUM_HOL`
-branches. It also keeps the dimensional interpretation of `m_dPlantTrans`
-inside the explicit adapter boundary: the source equation requires `m s-1`,
-which becomes a first-order `s-1` exchange after division by layer depth.
+The Step 4 ELM adapter constructs effective diffusivities, atmospheric boundary
+concentrations, aerenchyma exchange rates, and ebullition activation from
+temperature, atmospheric forcing, root state, and the named parameter-file
+inputs. With `use_elm_microbe_methane_transport=.true.`, it additionally maps
+current ELM hydrology into Henry capacities and phase-dependent diffusivities.
+Keeping those model-state choices outside the pure transport kernel avoids old
+global pointers and `HUM_HOL` branches. It also keeps the dimensional
+interpretation of `m_dPlantTrans` inside the explicit adapter boundary: the
+source equation requires `m s-1`, which becomes a first-order `s-1` exchange
+after division by layer depth.
 
 Two CLM-SPRUCE behaviors are intentionally not copied. Its inundation update
 moves a fraction of each concentration without enforcing the area-weighted
 inventory, and its vertical diffusion mutates adjacent layers sequentially
 while mixing `1e-3` and `1e-4` metric factors. Step 3 instead uses the
 conservative area-transfer equations and one simultaneous finite-volume flux
-divergence. Golden-vector comparisons must classify these as accounting and
+divergence. Generalized lateral exchange also multiplies the interface-area
+flux by the smaller participating horizontal area fraction. The source's
+hard-coded two-column equation has no corresponding geometry factor, but
+omitting it in a weighted multi-topounit graph drives concentrations toward
+infinity as a receiving saturated or unsaturated partition approaches zero
+area. Golden-vector comparisons must classify these as accounting and
 numerical repairs rather than port regressions.
+
+An explicit parity test is available behind
+`use_clm_microbe_dom_relaxation=.true.`. The executed source treats
+`dom_diffus=1.8e-7` as an adjacent-layer relaxation rate in s-1, despite its
+diffusivity metadata. The port applies that rate after reactions using a
+closed-boundary backward-Euler finite-volume solve. The same transport matrix
+is applied independently to DOM C, N, and P, so their column inventories are
+conserved and a uniform C:N:P ratio remains uniform. This switch is off by
+default and does not replace ELM's standard decomposition-pool transport. It
+is a diagnostic for the large CLM-versus-ELM deep-DOM difference, particularly
+because the ELM peat accumulation branch sets its base SOM diffusion to zero
+and the normal 10x DOM multiplier therefore provides no diffusive mixing there.
+
+For the scientific transport path, enable
+`use_microbe_aqueous_transport=.true.`. This option is mutually exclusive with
+the CLM relaxation diagnostic and is initially default-off while its transport
+parameters and site behavior are validated. It replaces generic decomposition-
+pool transport for dissolved pools only. DOM C, N, and organic P and the
+adapter-owned acetate pool are transported; bacteria, fungi, litter, and SOM
+remain attached to the soil matrix and continue to use their established ELM
+behavior.
+
+The aqueous operator is a conservative, backward-Euler finite-volume solve on
+the actual ELM layer grid. It applies upwind advection using ELM's liquid-water
+interface flux and centered diffusion/dispersion using porewater concentration:
+
+```text
+C_water = f_mobile C_bulk / theta_liq
+J = q C_water - theta_liq D_eff d(C_water)/dz
+D_eff = D_molecular S_liq^tortuosity f_temperature f_thaw
+        + dispersivity |q| / theta_liq
+```
+
+Equivalently, the code combines `theta_liq*D_molecular` and
+`dispersivity*|q|` into the conductivity multiplying the porewater gradient.
+The same matrix is applied independently to DOM C, N, and P, preserving a
+spatially uniform stoichiometric ratio while allowing an existing nonuniform
+ratio to advect and diffuse conservatively. Clean infiltration carries zero
+solute. Negative top soil-water flux associated with ground evaporation is
+clipped to zero for solutes, because DOM and acetate cannot leave with water
+vapor. The bottom interface is an open advective export when ELM diagnoses
+downward water flow. Explicit coupling to later drainage and runoff terms is a
+remaining hydrologic-integration task; neither is approximated as evaporation
+or as an arbitrary relaxation sink. Carbon-isotope DOM transport is also not
+yet implemented, so the namelist rejects this pathway with `use_c13` or
+`use_c14` rather than allowing isotopic state to diverge silently.
+
+The physical pathway deliberately differs from executed CLM-Microbe in four
+ways: it uses metric grid spacing rather than equal-layer neighbor relaxation,
+uses current liquid water and hydrologic flow, distinguishes molecular
+diffusion from mechanical dispersion, and permits boundary leaching with
+explicit C/N/P accounting. It publishes downward advective and diffusive DOM-C
+interface fluxes, total aqueous C/N/P export, bottom DOM C/N/P export, and
+per-timestep elemental residuals. Aqueous exports are included in column and
+grid carbon balance, column N/P balance, and the monthly carbon budget.
+
+The existing reconstructed `use_peatland_roots=.true.` control addresses a
+separate coupling exposed by aqueous DOM-N transport. In peatland RD cases,
+the standard uptake profile is the prescribed fine-root profile and does not
+respond when transported DOM-N is mineralized below the surface root maximum.
+The optional profile retains root presence as a hard constraint but weights
+rooted, unsaturated layers by their current NH4 plus NO3 concentration:
+
+```text
+w_j = root_profile_j max(NH4_j + NO3_j, 0),  if theta_liq,j < porosity_j
+w_j = 0,                                     otherwise
+uptake_profile_j = w_j / sum_k(w_k dz_k)
+```
+
+The adaptive weighting is evaluated only on columns whose topounit has
+positive peat depth and only for vascular PFTs. Uplands retain the ordinary
+ELM uptake profile, while moss and other nonvascular PFTs retain their
+prescribed shallow profiles. If no eligible mineral N exists on a peatland
+column, the ordinary root profile is used. The
+normalized profile only redistributes the existing column plant-N demand; the
+standard RD competition code remains the sole plant-uptake flux and therefore
+retains its N conservation and NH4/NO3 competition. This is intentionally a
+general rooted-layer treatment rather than a hard-coded layer-6/7 rule. It is
+part of the general peatland-root capability, defaults on with HUMHOL, and is
+not owned by the methane module. It does not alter P uptake. A binary
+below-porosity gate is used for the first experiment;
+its sensitivity near saturation and the strong response to large deep-N
+gradients require explicit validation before this becomes a recommended
+configuration.
+
+#### 9.3.2 Default Fickian and optional ELM gas-transport mappings
+
+The revised backend defaults to a CLM-Microbe Fickian mapping and retains the
+previous ELM multiphase mapping behind
+`use_elm_microbe_methane_transport=.true.`. The following distinctions must be
+retained in reviews and comparisons:
+
+| Concern | Original CLM-Microbe | Default port | Optional ELM mapping |
+| --- | --- | --- | --- |
+| Prognostic gas state | Concentration semantics depend on the active equation and phase | Direct molar concentration-gradient basis with conservative area bookkeeping | Bulk-soil inventory mapped to one gas-equivalent mobile basis |
+| Unsaturated diffusion | Aqueous `Fick_D_w*m_Fick_ad` in active layers | Same active coefficient and `T/298` response in both area partitions | ELM `CH4Mod` gas diffusivity scaled by air-filled porosity and soil structure |
+| Saturated diffusion | Aqueous `Fick_D_w*m_Fick_ad` | Same active coefficient and temperature response | Aqueous diffusivity and Henry capacity on the common mobile basis |
+| Atmosphere boundary | Timestep reset toward atmospheric Henry equilibrium | Finite top-half-layer Fickian conductance to Henry equilibrium | Boundary-layer, snow, pond-water, and top-half-soil resistance |
+| Numerics | Sequential explicit layer updates with mixed metric factors | Conservative backward-Euler tridiagonal solve retaining the executed `1e-3` vertical coefficient | Same conservative backward-Euler solver |
+| Lateral gas exchange with `use_humhol` | Hard-coded columns 1/2, 0.75/0.25 areas, matching layer indices, and `1e-4` coefficient | Arbitrary ELM `regional_target_ti` graph, actual weights/distances, shared horizontal-footprint scaling, absolute-elevation overlap, simultaneous donor limiting, and the source's factor-of-ten smaller lateral coefficient | Not applied; retains the earlier ELM-mapping behavior pending a separately validated multiphase lateral formulation |
+| Reactions | Source microbial equations | Same ported equations | Same ported equations |
+
+The default Fickian path also provides
+`use_microbe_nonbog_lateral_gas_transport`. Its default value, true, uses every
+configured edge and preserves the original generalized implementation. False
+restricts exchange to edges for which both endpoint topounits are classified as
+bog. This diagnostic control is useful for surfaces such as the three-topounit
+SPRUCE configuration, where a bare non-bog fen/boardwalk column can otherwise
+receive methane carbon from a productive hollow even though lateral dissolved
+substrate transport has not yet been implemented.
+
+The optional mapping is an intentional reuse of current ELM methane physics,
+not a literal copy of all `CH4Mod` state or solver code. Above/below-water-table
+phase selection and its existing standard-parameter controls are applied inside
+the revised backend only when the option is true. Legacy `CH4Mod` remains
+independently selectable and is not
+modified by this path. Consequently, coupled results made with the earlier
+aqueous-only Phase 3 adapter are useful reaction baselines but are not
+scientifically comparable surface-transport baselines.
 
 ### 9.4 Units and conservation
 
@@ -715,7 +994,8 @@ Define units at module boundaries and convert only there:
 - ELM decomp pools: `g C|N|P m-3 soil`;
 - functional biomass and acetate: one documented carbon unit, preferably
   `g C m-3 soil`;
-- dissolved gases: `mol gas m-3` of the explicitly documented phase;
+- gas state: `mol gas m-3 bulk soil` (inventory density); phase-equilibrated
+  mobile concentration is an internal transport-solver quantity;
 - internal reaction rates: matching state units per second;
 - column surface CH4: `kg C m-2 s-1`, positive to atmosphere, for
   `flux_ch4_grc`; and
@@ -729,14 +1009,17 @@ included in those budgets.
 
 ### 9.5 Time integration
 
-The first port should reproduce the CLM-SPRUCE explicit ordering but make the
-ordering visible as staged tendencies. If a reaction can consume more substrate
-than available over an ELM timestep, scale all competing consumers
-proportionally. Do not add an implicit solver or subcycling until parity vectors
-exist; either change would combine a numerical-method change with the port.
+Reactions reproduce the CLM-Microbe explicit ordering through visible staged
+tendencies. If a reaction can consume more substrate than available over an ELM
+timestep, all competing consumers are scaled proportionally. The reaction
+kernel remains explicit so one-layer reaction parity is directly testable.
 
-After parity, timestep-convergence tests may justify bounded subcycling as a
-separate change.
+Gas diffusion is the documented exception: the multiphase correction uses a
+backward-Euler tridiagonal solve because gas-phase diffusivity makes an explicit
+ELM timestep unstable. Aerenchyma and ebullition remain explicit and bounded.
+Timestep-convergence tests must distinguish reaction sensitivity from the
+unconditionally stable diffusion update; bounded reaction subcycling remains a
+possible later change.
 
 ### 9.6 Step 4 transaction and ELM accounting contract
 
@@ -766,8 +1049,8 @@ the four gases and must not transport DOM a second time.
 Carbon accounting uses one explicit ledger. DOM is excluded from the revised
 methane storage addition because it is already included in ELM's standard
 decomposition pools. The additional column storage is the area-weighted,
-layer-integrated sum of acetate, the four functional-guild biomasses,
-dissolved CH4-C, and dissolved CO2-C. The matching external loss is the sum of
+layer-integrated sum of acetate, the four functional-guild biomasses, bulk-soil
+CH4-C, and bulk-soil CO2-C inventories. The matching external loss is the sum of
 the net positive-upward CH4-C and CO2-C surface fluxes. Internal reaction,
 partition exchange, and vertical transport do not enter the external budget.
 The column, gridcell, and monthly C-budget interfaces will receive these
@@ -790,9 +1073,11 @@ porosity, suction, water potential, and root fraction from `soilstate_vars`,
 and atmospheric partial pressures from `atm2lnd_vars`. Native ELM currently
 allocates `chemstate_vars%soil_pH` without populating it, while the external
 chemistry modes that do populate it are unsupported by this option. The
-adapter therefore uses the named `ph_opt` value as an explicit temporary base
-pH; acetate feedback can still modify effective pH inside the reaction
-kernel. Phase 4 must add a spatially resolved native-ELM soil-pH input before
+adapter therefore uses a separate named soil-pH fallback as an explicit
+temporary base pH; acetate feedback can still modify effective pH inside the
+reaction kernel. The reference fallback is 7 and the initial SPRUCE test uses
+4.5 without changing the response optimum (`ph_opt = 7`). Phase 4 must add a
+spatially resolved native-ELM soil-pH input before
 pH-response calibration. The named atmospheric mixing ratios are used only as
 missing-forcing fallbacks. The source water-potential response is evaluated in
 ELM's MPa units and combined with liquid saturation for the unsaturated
@@ -801,14 +1086,28 @@ reaction scalar.
 Because the legacy solver normally constructs `rootfr_col` internally, the
 revised adapter instead aggregates the authoritative patch root profile to
 columns before computing plant transport. Missing roots on unvegetated
-columns become zero transport. The aerenchyma kernel also bounds signed
-exchange by the amount needed to reach atmospheric equilibrium over one
-timestep, preventing an explicit 30-minute update from crossing that
-equilibrium while retaining exact surface-flux closure.
+columns become zero transport. In the default mapping, signed surface diffusion
+relaxes the stored concentration toward atmospheric Henry equilibrium through
+a top-half-layer Fickian conductance. In the optional ELM mapping, it relaxes
+toward atmospheric concentration on the common gas-equivalent basis and Henry
+capacity establishes the corresponding aqueous inventory. Plant exchange
+for O2 and CO2 is also signed and bounded by the amount needed to reach its
+temperature-dependent Henry equilibrium over one timestep. CH4 and H2
+aerenchyma transport is a one-way emission path:
+it is zero below the larger of atmospheric equilibrium and its named emission
+threshold and cannot import atmospheric gas. CH4 ebullition retains the same
+CH4 threshold. Keeping the emission threshold separate from the atmospheric
+boundary prevents a cold-start soil from receiving an artificial CH4 source
+while retaining exact surface-flux closure.
 
-Gas surface conductance combines the patch-to-column boundary conductance with
-top-half-layer, snow, and ponded-water resistances. The first three gases reuse
-ELM's `d_con_w`, `d_con_g`, `c_h_inv`, `kh_theta`, and `kh_tbase` constants.
+In the optional ELM mapping, gas surface conductance combines the patch-to-
+column boundary conductance with top-half-layer, snow, and ponded-water
+resistances. The first three gases reuse ELM's `d_con_w`, `d_con_g`, `c_h_inv`,
+`kh_theta`, and `kh_tbase` constants. Gas-filled soil uses the same
+organic/mineral Millington-Quirk/Moldrup blend as ELM `CH4Mod`; saturated soil
+retains the CLM-Microbe `m_Fick_ad` multiplier and temperature exponent.
+Aqueous diffusivity and capacity are both transformed by dimensionless Henry
+solubility so the transport solve has one mobile basis.
 Because those shared tables stop at CO2, H2 uses the corresponding non-tunable
 CLM-SPRUCE physical constants (`4.5e-9 m2 s-1` in water, `6.11e-5 m2 s-1` in
 air near 298 K, `1282.1 L atm mol-1`, and a `500 K` Henry temperature
@@ -816,6 +1115,14 @@ coefficient). These are physical conversion constants, not additional
 calibration parameters. Dimensional analysis of the source plant-flux equation
 resolves `m_dPlantTrans` as `m s-1`; division by finite layer depth produces
 the `s-1` exchange rate expected by the transport kernel.
+
+The adapter publishes pathway-resolved CH4 surface exchange as
+`MM_CH4_SURF_DIFF`, `MM_CH4_SURF_AERE`, and `MM_CH4_SURF_EBUL`, plus `_UNSAT`
+and `_SAT` area-weighted contributions for each. The paired contributions must
+sum to the bulk pathway field, and all three bulk pathways must sum to the net
+CH4 surface exchange after unit conversion. These fields are required for the
+upland atmospheric-uptake audit; net `FCH4` alone cannot distinguish a diffusion
+defect from local production, oxidation, plant transport, or ebullition.
 
 The adapter writes NH4 as the mineral-N counterpool and immediately refreshes
 total mineral N as `NH4 + NO3`; solution P is the mineral-P counterpool. It
@@ -834,19 +1141,30 @@ it, but may not make it more negative. DOM-P remains subject to the strict
 nonnegative-state check.
 
 Nitrification participates in the revised oxygen budget. Before allocation,
-its potential flux is capped by the area-weighted saturated/unsaturated O2
-inventory available over the timestep, using 2 mol O2 per mol N nitrified.
-After ELM resolves decomposition and NH4 competition, the adapter removes the
-actual aerobic demand from standard heterotrophic respiration, root
-respiration, and `f_nit_vr` (the latter at 2 mol O2 per mol N) before revised
-methane reactions compete for the remaining gas state. The removal is
-proportional to each partition's O2 inventory, so neither partition becomes
-negative. This preserves the external-demand ordering in CLM-SPRUCE while
-adding nitrification to the same prognostic ledger. The adapter then publishes
-revised O2 concentration, oxygen stress, aerobic demand, and saturated fraction
-through the existing `ch4_vars` oxygen/anoxia interface for the next standard
-decomposition and nitrification/denitrification calculation. In revised mode
-that object is a compatibility carrier; the legacy CH4 solver is not called.
+its potential flux is calculated by the standard ELM nitrogen code; revised
+methane no longer gives nitrification an independent cap against the complete
+O2 inventory. After ELM resolves decomposition and NH4 competition, the
+adapter reconstructs the CH4Mod-style potential demand from heterotrophic
+respiration, root respiration, and `pot_f_nit_vr` (the latter at 2 mol O2 per
+mol N). The reaction kernel adds aerobic acetate and methane oxidation and
+applies one common stress when the total exceeds available O2. The accepted
+non-microbial and microbial demands are removed together, so no process has
+first access to the finite inventory and neither partition becomes negative.
+The adapter then publishes revised O2 concentration, the common stress,
+aerobic demand, and saturated fraction through the existing `ch4_vars`
+oxygen/anoxia interface for the next standard decomposition and
+nitrification/denitrification calculation. In revised mode that object is a
+compatibility carrier; the legacy CH4 solver is not called. As in legacy
+`CH4Mod`, nitrification's N flux is lag-coupled by ELM's existing call order;
+it is not retroactively changed after nutrient allocation.
+
+The root-respiration term must not be read from `col_cf%rr_vr` in revised
+mode. That array is a legacy CH4Mod work product and remains at its fill value
+when the legacy solver is bypassed. The implemented adapter instead aggregates
+`veg_cf%rr * rootfr_patch * veg_pp%wtcol` over the soil-patch filter, matching
+the legacy profile construction without dispatching legacy methane. This
+prevents a fictitious near-infinite O2 demand and preserves the mutually
+exclusive backend design.
 
 ## 10. Parameters and input data
 
@@ -857,14 +1175,34 @@ read machinery will be used. The new variables are conditionally required and
 read only when `use_microbe_methane=.true.`, preserving compatibility with
 existing parameter files and disabled-mode B4B behavior.
 
-The tables below are the source-level inventory. They use the CLM-SPRUCE
-identifiers so that every equation can be traced during the port. An
+The tables below are the source-level inventory. They use the shared
+CLM-SPRUCE/CLM-Microbe identifiers so that every equation can be traced during
+the port. An
 implementation may adopt clearer ELM-style NetCDF names, but each renamed
 variable must carry a `legacy_name` attribute. Each new variable also needs
 `units`, `long_name`, valid-range, source-revision, and provenance metadata.
-The authoritative values and units remain subject to the audit in section 10.6;
-source declaration defaults and values in the checked-in positional text file
-must not be treated as interchangeable.
+The Phase 3 integration default uses the CLM-Microbe runtime file at commit
+`9c2e0a048bb3799669d32b91e6cc76efb36d4b75` wherever it supplies an active
+parameter. Runtime-file values and declaration defaults are not treated as
+interchangeable. The runtime numbers are not copied blindly: inspection of the
+active source shows that stored carbon is divided by 12 into mol C m-3 and that
+reaction tendencies are multiplied by a timestep in seconds. The Phase 3
+schema therefore applies these executable-equivalent conversions:
+
+| Legacy quantity used by active code | ELM parameter units | Conversion |
+| --- | --- | ---: |
+| Concentration or half-saturation, mol m-3 | mmol m-3 | multiply by 1000 |
+| Volumetric rate, mol m-3 s-1 | mmol m-3 d-1 | multiply by 86,400,000 |
+| Specific growth, mortality, or oxidation rate, s-1 | d-1 | multiply by 86,400 |
+| Functional biomass floor, mol C m-3 | g C m-3 | multiply by `catomw = 12.011` |
+
+The acetate acidification coefficient is divided by 1000 because the ELM
+equation supplies acetate in mmol C m-3 rather than mol C m-3. The same
+concentration and rate conversions are applied to active source literals such
+as the acetate feedback scale, gas-inhibition scales, H2 transport threshold,
+and aerobic acetate oxidation coefficient. Each converted value carries a
+provenance suffix in the standard parameter NetCDF. Production suitability
+remains subject to the audit in section 10.6.
 
 ### 10.1 Microbial decomposition parameters
 
@@ -969,6 +1307,27 @@ C13 implementation gate in section 12 is enabled.
 | `Henry_C_w(1:4)`, `Henry_kHpc_w(1:4)`, `kh_tbase` | Shared Henry-law coefficients and reference temperature; reuse current ELM equivalents |
 | `rgasLatm` | Gas constant; use the current ELM physical constant, not a parameter-file duplicate |
 
+The multiphase ELM adapter intentionally reuses the following parameters that
+are already present in the standard ELM parameter file. They are scientific
+dependencies of revised methane transport and must be included in parameter
+audits, but must not be duplicated under `microbe_methane_*` names.
+
+| Existing ELM parameter | Current test value | Revised-backend use |
+| --- | ---: | --- |
+| `f_sat` | 0.95 | Water-filled-porosity threshold selecting aqueous transport in an unsaturated-area layer |
+| `satpow` | 2 | Porosity exponent for saturated aqueous diffusivity |
+| `scale_factor_gasdiff` | 1 | Multiplier on effective air-phase gas diffusivity |
+| `scale_factor_liqdiff` | 1 | Multiplier on effective aqueous diffusivity |
+| `organic_max` | 130 kg m-3 | Organic-matter scale blending peat and mineral gas-diffusion structure |
+
+The standard soil hydraulic exponent `bsw`, layer porosity, soil organic matter,
+water/ice content, and layer geometry are spatial state/parameter inputs to the
+same calculation. Molecular diffusion tables, Henry coefficients, the gas
+constant, water/ice densities, and atomic weights are shared physical constants,
+not tunable module parameters. All CLM-Microbe-specific scientific controls in
+this section are migrated into the standard ELM parameter file; the table above
+documents the additional standard-ELM parameters now consumed by the adapter.
+
 The inspected equations also contain the following active science coefficients
 as literals. They will either be promoted to clearly named variables in the
 standard parameter file or, where indicated, replaced by a current ELM state or
@@ -998,7 +1357,7 @@ not by leaving unexplained literals in the port.
 | `aqueous_diffusion_t_ref` | 298 K | Reuse shared diffusion reference temperature if available; otherwise parameterize |
 | `aqueous_diffusion_t_exponent` | 1.87 | Parameterize temperature exponent |
 
-Cold-start acetate and all four dissolved-gas concentrations are zero in the
+Cold-start acetate and all four bulk-soil gas inventory densities are zero in the
 source. Each functional guild starts at `MFGbiomin`. These are documented
 initialization rules rather than additional independent parameters; if science
 owners require nonzero configurable initial concentrations, the corresponding
@@ -1015,8 +1374,12 @@ fallbacks as science parameters.
 Reaction stoichiometry such as 2 O2 per CH4, the four-H2 hydrogenotrophic
 reaction, atomic-weight conversions, seconds-per-day, and exact metric unit
 factors are documented constants, not calibration parameters. Site-specific
-`HUM_HOL` layer geometry, lateral-exchange literals, and hard-coded SPRUCE grid
-indices are deliberately excluded because that hydrology is not being ported.
+`HUM_HOL` layer geometry, fixed area fractions, and hard-coded SPRUCE grid
+indices are deliberately excluded. The generalized gas operator uses the
+standard ELM topounit graph, weights, elevations, and lateral distances. The
+source's executed factor-of-ten distinction between vertical (`1e-3`) and
+lateral (`1e-4`) gas coefficients is retained for parity and must be
+scientifically validated.
 
 #### 10.3.1 Phase 3 Step 1 standard parameter-file names
 
@@ -1078,6 +1441,14 @@ exact inventory is:
   `microbe_methane_reaction_t_ref`, `microbe_methane_aom_t_ref`;
 - diffusion, plant transport, and ebullition:
   `microbe_methane_dom_diffusivity`,
+  `microbe_methane_dom_relaxation_rate`,
+  `microbe_methane_aqueous_dom_molecular_diffusivity`,
+  `microbe_methane_aqueous_acetate_molecular_diffusivity`,
+  `microbe_methane_aqueous_dom_mobile_fraction`,
+  `microbe_methane_aqueous_acetate_mobile_fraction`,
+  `microbe_methane_aqueous_solute_dispersivity`,
+  `microbe_methane_aqueous_solute_tortuosity_exponent`,
+  `microbe_methane_aqueous_solute_min_liquid_fraction`,
   `microbe_methane_aqueous_gas_diffusion_multiplier`,
   `microbe_methane_plant_transport_coefficient`,
   `microbe_methane_h2_plant_transport_threshold`,
@@ -1098,8 +1469,30 @@ exact inventory is:
 
 The versioned reference manifest records the legacy identifier, value, units,
 and provenance of every name. It is an injection and integration-test fixture,
-not a production calibration. In particular, legacy kinetic units still need
-the archived-run audit. Step 1 resolves two unambiguous source defects:
+not a production calibration. Manifest schema
+`elm_microbe_methane_phase3_aqueous_transport_v1` contains 73 parameters. It
+uses 38 values copied from the linked CLM-Microbe runtime file; 28 more are
+declarations, promoted active literals, or the two explicit unit corrections
+in the same inspected source tree. The seven aqueous-solute parameters are
+new scientific hypotheses and numerical controls with explicit validation
+provenance, not values inferred from CLM-Microbe's relaxation equation. The
+runtime baseline differs materially from the original Step 1
+declaration-based fixture: for example, AOM net unlimited growth decreases from
+`0.022 d-1` to `0.002 d-1`, the aerobic decomposition O2:C coefficient changes
+from 2 to 0.002, and `dom_diffus` changes to `1.8e-7`. These are intentional
+baseline changes, not new calibrations, and require sensitivity testing.
+
+The active concentration half-saturation use sites have now been audited: the
+legacy arithmetic uses mol m-3 (numerically mmol L-1), so the ELM mmol m-3
+values require the documented factor of 1,000. This establishes execution
+parity, including `m_dKAce=16` mapping to 16,000 mmol C m-3, but it does not
+establish that the source comments or values are scientifically appropriate.
+Kinetic rate intent and transport units still need the archived-run audit. In
+particular, the linked DOM diffusion equation is not dimensionally equivalent
+to the port's finite-volume operator, and `m_drAer=0.002` is scientifically
+suspicious for a quantity represented in the port as mol O2 per mol C. The
+runtime value is retained for reproducibility and flagged for validation rather
+than silently replaced. Step 1 also resolves two unambiguous source defects:
 `aom_t_ref=286.65 K` replaces a 13.5-Celsius literal used against Kelvin state,
 and `transport_thaw_threshold=273.05 K` replaces a -0.1-Celsius literal used
 against Kelvin state. C13 fractionation inputs remain deferred to Phase 5.
@@ -1113,8 +1506,9 @@ geometry. Those remain owned by their current ELM structures and standard
 parameter variables. They must be recorded as interface dependencies in the
 implementation, but must not be copied into a second microbial namespace.
 
-Similarly, `ch4offline`, `allowlakeprod`, history controls, and
-`use_microbe_methane` are runtime controls, not scientific parameter-file
+Similarly, `ch4offline`, `allowlakeprod`, history controls,
+`use_microbe_methane`, `use_elm_microbe_methane_transport`, and
+`use_peatland_roots` are runtime controls, not scientific parameter-file
 variables.
 
 The inspected CLM-SPRUCE branch also hard-codes a 1.35 above-freezing base Q10,
@@ -1127,11 +1521,12 @@ bacteria, and fungi. The SOM2-SOM4 and DOM Q10 literals that occur inside the
 
 ### 10.5 Declared or supplied legacy values not active in the inspected path
 
-For completeness, the following names occur in `microbevarcon.F90` or the
-111-record `microbepar_in`, but are not referenced by active calculations in
-the inspected revised-methane/microbial-cascade path. They will be reported by
-the conversion audit and will not be added to the standard ELM parameter file
-unless an archived reference executable demonstrates an active use:
+For completeness, the following names occur in `microbevarcon.F90` or one of
+the inspected 111-record CLM-SPRUCE and 89-record CLM-Microbe parameter files,
+but are not referenced by active calculations in the inspected
+revised-methane/microbial-cascade path. They will be reported by the conversion
+audit and will not be added to the standard ELM parameter file unless an
+archived reference executable demonstrates an active use:
 
 - older methane formulation: `q10ch4base`, `q10ch4`, `vmax_ch4_oxid`, `k_m`,
   `q10_ch4oxid`, `smp_crit`, `aereoxid`, `mino2lim`, `rootlitfrac`,
@@ -1150,8 +1545,8 @@ unless an archived reference executable demonstrates an active use:
   `m_dAceProdQ10`, `m_dACProdQ10`, `m_dAceH2min`, `m_dCH4H2min`,
   `m_dKCH4ProdO2`, `m_dKAerO2`, `m_dAerDecomQ10`, `m_dKe`, `m_dAirCH4`,
   `m_dAirH2`, `m_dAirO2`, `m_dAirCO2`, and `frac_doc`; and
-- orphan text-file records not declared as active parameters: `AOM`,
-  `H2maxCH4`, and `AcemaxCH4`.
+- orphan CLM-Microbe text-file records: `AOM` and `H2maxCH4` are read but never
+  assigned, and `AcemaxCH4` lies beyond the 88-record read boundary.
 
 The existing `ch4offline` control is active at the coupling level and remains a
 namelist/runtime control as described in section 12.2; its presence in the old
@@ -1176,14 +1571,16 @@ new versioned ELM parameter file with global attributes recording the source
 ELM parameter-file checksum, CLM-SPRUCE revision, conversion-tool revision, and
 microbe/methane schema version.
 
-Because the inspected reader consumes names only as comments, declares 88
-records, and is paired with a 111-record file, it cannot define the canonical
-mapping. In particular, file records 84-86 are named `k_dom`, `k_bacteria`, and
-`k_fungi`, but the reader assigns those positions to `dom_diffus`, `m_Fick_ad`,
-and `m_dPlantTrans`; records after the fixed read boundary cannot supply the PFT
-cascade values. The conversion utility must flag this mismatch rather than
-reproduce it. An archived successful SPRUCE run directory or an
-investigator-approved table is required before freezing production values.
+The original CLM-SPRUCE reader/file pair cannot define a canonical mapping:
+file records 84-86 are named `k_dom`, `k_bacteria`, and `k_fungi`, but the
+reader assigns those positions to `dom_diffus`, `m_Fick_ad`, and
+`m_dPlantTrans`; records after the fixed read boundary cannot supply the PFT
+cascade values. The linked CLM-Microbe 89-record file corrects those first 86
+positions and is therefore the Phase 3 default baseline. The conversion utility
+must still report its three trailing orphan records and must never use it as a
+source for absent Phase 2 or new C:P parameters. An archived successful run
+directory or an investigator-approved table remains required before freezing
+production values.
 
 Initialization validates finite values, units/schema version, PFT coverage,
 positive half-saturation and rate constants, yields and path fractions, pH
@@ -1345,10 +1742,9 @@ Gate: all disabled-mode comparisons are exact and invalid combinations fail.
 - Route C, N, and P and audit fire, transport, erosion, subgrid, spinup, and
   restart assumptions.
 - Preserve CLM-SPRUCE's 10x DOM diffusivity in the ordinary SOM vertical
-  transport solver as a named parameter. Defer saturated/unsaturated
-  water-phase DOM partitioning and the separate `dom_diffus` coefficient to
-  Phase 3, where they can share one hydrologically consistent transport path
-  with acetate and dissolved gases.
+  transport solver as a named parameter. DOM remains on this shared C/N/P path
+  in Phase 3; acetate and gas use the selectable revised-methane transport
+  mapping without duplicating movement of the authoritative DOM pool.
 - Validate the cascade independently of revised methane reactions.
 
 Gate: closed decomp tests conserve C/N/P, all pools stay nonnegative, and the
@@ -1372,7 +1768,7 @@ Implement Phase 3 as separately reviewable steps:
 
 1. Parameter and state foundation: conditionally read the 64 named variables
    from the standard ELM parameter file; allocate saturated/unsaturated acetate,
-   four functional-guild, and four dissolved-gas states; add cold-start,
+   four functional-guild, and four bulk-soil gas-inventory states; add cold-start,
    inactive-by-default history fields, and complete restart I/O. Keep legacy
    `CH4Mod` dispatch unchanged. **Implemented on the Phase 3 Step 1 branch.**
 2. Standalone reaction kernel: compute named tendencies without mutating state,
@@ -1428,6 +1824,7 @@ baseline. No new input file is required and no new restart/history field appears
 - configuration truth table and incompatible-mode errors;
 - 11-pool index/name/role initialization and 47-transition mapping;
 - donor mass equations and CUE/path-fraction bounds;
+- one-layer legacy-to-ELM potential-rate parity after explicit unit conversion;
 - one-layer closed-box reaction atom balance;
 - DOM C/N/P consumption and mineralization balance;
 - nonnegative limiting with two or more competing consumers;
@@ -1438,7 +1835,24 @@ baseline. No new input file is required and no new restart/history field appears
 - cold initialization and missing/invalid parameter errors; and
 - isotope/bulk consistency once C13 is implemented.
 
+The Phase 3 focused suite now includes the one-layer equation-level parity
+vector. Ten directly comparable rates agree at floating-point tolerance. It
+classifies the legacy AOM Celsius/Kelvin error as an intentional divergence and
+checks its exact Q10 ratio. This does not replace the Phase 0 requirement for a
+vector emitted by an archived CLM-SPRUCE executable.
+
 ### 15.3 Integration tests
+
+Use `elm_olmt` to create fresh site cases by default, including one-day and
+one-year smoke tests. Do not use `create_clone` as the routine site workflow:
+OLMT setup generates case-specific domain, surface, and parameter inputs in the
+run directory, and a clone can omit those files while retaining absolute paths
+to its parent. A clone that reuses an executable is permitted only for a
+deliberately limited smoke check after every generated input and absolute path
+has been audited. Fresh OLMT cases may explicitly share a compatible executable.
+The configured prefix/date and full case name identify the run directory;
+generated inputs are written there directly. A shared `elm-olmt/temp` staging
+file is prohibited because concurrent setup can corrupt the NetCDF output.
 
 - exact restart (`ERS`) with revised mode;
 - multi-instance/processor-layout reproducibility appropriate to ELM's current
@@ -1474,7 +1888,7 @@ E3SM revision.
 
 | Risk | Mitigation |
 | --- | --- |
-| Uncertain parameter values caused by the 88/111-record mismatch | Require archived-run provenance and generate an audit report before freezing inputs |
+| Uncertain parameter values and units despite an aligned CLM-Microbe test baseline | Preserve per-value provenance, require archived-run evidence, and generate an audit report before freezing production inputs |
 | Hidden C/N/P imbalance from direct DOM mutation | One authoritative DOM state, explicit tendencies, single commit, and residual history fields |
 | New pool count changes unrelated modes | Conditional counts and allocations, false-path B4B tests before science work |
 | Old C-only science does not define microbial phosphorus | Parameterize DOM/bacteria/fungi C:P, close P budgets, and require science signoff; keep methane guilds explicitly carbon-only |
@@ -1490,8 +1904,9 @@ E3SM revision.
 These decisions do not block the structural implementation, but they must be
 closed before a production parameter set or full validation claim:
 
-1. Canonical parameter values and units, given the mismatch among the old text
-   file, reader, source defaults, PFT reader, and archived runs.
+1. Production parameter values and effective units beyond the reproducible
+   CLM-Microbe test baseline, including conflicts with declarations, the old
+   CLM-SPRUCE file, PFT inputs, and archived runs.
 2. C:P ratios and fixed-versus-floating stoichiometry for DOM, bacteria, and
    fungi in the target CNP model.
 3. Whether methane functional guilds should remain carbon-only after parity or
@@ -1499,8 +1914,11 @@ closed before a production parameter set or full validation claim:
 4. Required C13 and C14 scope for the first production release.
 5. Whether online atmosphere coupling is a release requirement or a later
    qualification target.
-6. Desired lateral transport of DOM and dissolved gases in topounit/hillslope
-   cases; the old `HUM_HOL` implementation is not suitable for direct porting.
+6. Desired water-flux-driven lateral transport of DOM C/N/P and acetate, and
+   whether the optional ELM multiphase gas mapping should also receive a
+   lateral operator. Default Fickian gas inventories now use a generalized,
+   conservative multi-topounit graph operator; the old advection/remapping code
+   is still not suitable for direct porting.
 7. The archived US-SPR case, forcing, initial/restart data, and diagnostic list
    that define the CLM-SPRUCE reference.
 
@@ -1514,6 +1932,8 @@ The integration is complete only when:
   fail before allocation or stepping;
 - DOM, bacteria, and fungi are standard, conservative C/N/P decomp pools;
 - the revised backend runs exactly once per land timestep;
+- default Fickian gas exchange conserves area-weighted inventory for two- and
+  multi-topounit graphs with unequal weights and vertically offset soil grids;
 - bulk revised methane closes all required budgets and restarts exactly;
 - parameter provenance is resolved and the complete active inventory is stored
   as named, versioned variables in the standard ELM parameter NetCDF;
@@ -1528,23 +1948,28 @@ model. The current Phase 2 and Phase 3 parameter files are integration-test
 fixtures: they make every required input explicit and allow conservation,
 restart, and long-run tests, but they do not establish that all values are the
 ones used by a successful CLM-SPRUCE experiment or that they are appropriate
-for ELM's current C-N-P formulation. The remaining work must distinguish three
-classes of information: recoverable legacy values, unit or equation choices
-that require interpretation, and genuinely new parameters introduced by the
-ELM integration.
+for ELM's current C-N-P formulation. Phase 3 schema v3 now makes the linked
+CLM-Microbe runtime file the reproducible default for every active value it
+contains and records executable-equivalent unit conversions; this removes
+ambiguity in the integration-test fixture, not the need for scientific
+validation. The remaining work must distinguish three classes of information:
+recoverable legacy values, equation choices that require interpretation, and
+genuinely new parameters introduced by the ELM integration.
 
 ### 19.1 Recover the historical scientific reference
 
 The first priority is to locate an archived CLM-SPRUCE build and run directory
 with its exact `microbepar_in`, physiology parameter file, initial conditions,
 compiler flags, CPP options, and output. The 88-value positional reader paired
-with a 111-record input file is not sufficient evidence of the values actually
-used. For each active parameter, the audit must record the runtime value,
-effective units after all source conversions, its equation and call site, and
-whether it came from a text record, PFT parameter, source default, or literal.
-The audit must also establish whether both historical `microbech4` call sites
-executed. Until that evidence exists, agreement with the checked-in source
-file alone is not a scientific parity result.
+with the original 111-record input file is not sufficient evidence of the
+values actually used. The aligned 89-record CLM-Microbe file is now the test
+baseline, but an archived run is still needed to establish whether that file
+was staged unchanged and which source revision produced accepted results. For
+each active parameter, the audit must record the runtime value, effective units
+after all source conversions, its equation and call site, and whether it came
+from a text record, PFT parameter, source default, or literal. The audit must
+also establish which historical `microbech4` call sites executed. Agreement
+with a checked-in source file alone is not a scientific parity result.
 
 The archived executable should be used to produce one-layer and one-timestep
 vectors for DOM consumption, acetate and H2/CO2 production, both
@@ -1627,12 +2052,13 @@ oxidation. Gross `MM_CH4_PROD` and `MM_CH4_OXID` should be evaluated separately;
 matching net FCH4 can otherwise hide compensating errors in production and
 oxidation.
 
-Native ELM also needs a spatial soil-pH data path. The current adapter uses
-`ph_opt` as a documented temporary fallback because native
+Native ELM also needs a spatial soil-pH data path. The current adapter uses a
+separate `microbe_methane_soil_ph_fallback` parameter because native
 `chemstate_vars%soil_pH` is not populated. Phase 4 should identify an
 appropriate soil-profile or surface-data product, define interpolation and
 depth behavior, and test whether pH is prescribed or evolves. Methane kinetic
-calibration must not use `ph_opt` to absorb a missing site-pH constraint.
+calibration must not use either the response optimum or the temporary fallback
+to absorb a missing site-pH constraint.
 
 Anaerobic methane oxidation remains scientifically incomplete because the old
 model does not identify or budget its electron acceptor. The initial port can
@@ -1641,39 +2067,122 @@ must explicitly state this limitation. Adding sulfate, nitrate, ferric iron,
 or another acceptor would require new state, stoichiometry, parameterization,
 and site data; it must not be inferred from the existing O2-inhibition scalar.
 
-The first 50-year US-MOz AD-spinup integration test demonstrates that this is
+The first 50-year US-MOz AD-spinup integration test demonstrates that this was
 an active calibration blocker rather than only a conceptual caveat. With the
-uncalibrated CLM-SPRUCE reference values, additional methane-system C rose from
+former declaration-default fixture, additional methane-system C rose from
 `0.38 gC m-2` after model year 25 to `316.51 gC m-2` after year 50, dominated
 by anaerobic-methanotroph biomass. At year 50, gross CH4 oxidation was
 `1.31e-6 gC m-2 s-1`, versus gross production of only
 `4.13e-10 gC m-2 s-1`, and the atmospheric boundary supplied a net CH4 influx.
 The run remained numerically stable and carbon-conservative, so this result
-specifically flags the unconstrained AOM science and reference parameters.
-Before scientific use, evaluate an explicit electron-acceptor limitation or a
+specifically flags the unconstrained AOM science and former parameters. The
+linked-file baseline lowers AOM growth from 0.024 to 0.004 d-1 and yield from
+0.40 to 0.15 while retaining 0.002 d-1 mortality; its unlimited net growth is
+therefore 0.002 rather than 0.022 d-1. The corrected follow-up (`P3S`) gives
+year-50 gross production of 21.842, oxidation of 1.270, and net emission of
+20.557 g C m-2 yr-1, with 10.588 g C m-2 in additional methane-system state.
+An earlier reported production value of 51.82 was a history-diagnostic error:
+it counted the complete acetoclastic extent instead of its CH4-C yield. Before
+scientific use, evaluate an explicit electron-acceptor limitation or a
 documented AOM-off configuration and constrain AOM growth, death, yield, and
 CH4 half-saturation against observations. Do not tune transport merely to hide
-this biomass growth.
+biomass growth.
 
 The shared oxygen budget needs evaluation using observed or credible modeled
 soil O2/redox profiles, nitrification and denitrification rates, and wetting or
-water-table transitions. The current sequential coupling gives standard
-respiration, roots, and nitrification first access to O2 and passes revised O2
-stress to the next ELM timestep. Timestep-sensitivity experiments must show
-that this lag does not control annual CH4 or N cycling. If it does, a more
-tightly coupled O2 solve or bounded subcycling will be needed.
+water-table transitions. The former sequential coupling gave standard
+respiration, roots, and nitrification first access to O2. A 50-year 2-by-2
+sensitivity using
+`K_CH4={1000,1}` and `K_O2={4000,4}` mmol m-3 produced identical output in all
+four cases. A runtime probe confirmed that the low values were read, but the
+standard-demand bridge had reduced pre-reaction top-layer O2 to exactly zero;
+gas transport restored O2 only after the reaction call. The first common-
+stress implementation then exposed a second coupling defect: it read the
+legacy-only `col_cf%rr_vr` profile while that field still held its fill value,
+creating a fictitious root O2 demand and stresses near `1e-40`. The corrected
+adapter reconstructs the profile from patch respiration, root fraction, and
+patch weight. All potential aerobic demands now share one O2 stress, microbial
+aerobic rates use it immediately, and ELM decomposition uses it on the next
+timestep.
+
+A clean paired 50-year retest confirms that the Monod constants are active.
+With `K_CH4/K_O2=1000/4000 mmol m-3`, aerobic biomass remained at its
+functional floor and year-50 aerobic oxidation was `2.83e-11 g C m-2 yr-1`.
+With `1/4 mmol m-3`, maximum saturated aerobic biomass reached
+`0.01168 g C m-3`, aerobic oxidation reached `5.679 g C m-2 yr-1`, and net
+`FCH4` fell from `5.453` to `0.014 g C m-2 yr-1`. Hydrology and maximum O2 were
+effectively identical. Compare this lagged shared-stress treatment with bounded
+subcycling if rapid water-table changes produce timestep sensitivity. Annual
+post-transport O2 history alone remains insufficient to validate the reaction
+environment.
+
+There is also a factor-of-1,000 contradiction between the legacy documentation
+and executable. Its parameter declaration labels the raw `1.0` and `4.0`
+constants as mmol m-3, while its active arithmetic compares them directly with
+concentrations that are numerically mol m-3 (or mmol L-1). Consequently,
+1,000/4,000 mmol m-3 in ELM unambiguously reproduces the legacy executable,
+whereas 1/4 mmol m-3 follows the stated parameter units. Retain the former as
+an execution-parity baseline and the latter as a candidate science setting,
+but treat the large paired response as an identifiability constraint rather
+than evidence that either is calibrated.
 
 ### 19.5 Calibrate transport and hydrologic controls
 
 DOM/acetate diffusivity, the aqueous-gas diffusion multiplier, plant transport
 coefficient, CH4 and H2 thresholds, root e-folding depths, ebullition depth
 scale, saturation threshold, thaw threshold, and plant O2/CO2 factors need to
-be checked against their legacy units and current ELM hydrology. Surface CH4
-must be decomposed into diffusion, ebullition, and aerenchyma components during
-calibration. Water-table position, inundated fraction, ice state, snow and
-surface-water resistance, rooting depth, and plant functional type should be
-validated before modifying reaction kinetics to fix a flux timing error that
-is actually hydrologic or transport-driven.
+be checked against their legacy units and current ELM hydrology. The reused ELM
+`f_sat`, `satpow`, `scale_factor_gasdiff`, `scale_factor_liqdiff`, and
+`organic_max` controls also require sensitivity tests in the revised backend;
+their legacy-CH4 defaults are not automatically calibrated for the microbial
+reaction model. Surface CH4 must be decomposed into diffusion, ebullition, and
+aerenchyma components, with saturated and unsaturated contributions reported
+separately. Water-table position, inundated fraction, air-filled porosity, ice
+state, snow and surface-water resistance, rooting depth, and plant functional
+type should be validated before modifying reaction kinetics to fix a flux
+timing error that is actually hydrologic or transport-driven.
+
+The new solute-transport parameters require independent research and
+calibration: molecular diffusivities for DOM and acetate, their mobile
+fractions, longitudinal dispersivity, the saturation/tortuosity exponent, and
+the minimum liquid fraction used as a numerical mobility threshold. None of
+these seven values exists as a validated parameter in CLM-Microbe. Use soil-
+solution profiles, lysimeter or porewater data, tracer experiments, and runoff
+or drainage DOC/DON/DOP fluxes to constrain them. Evaluate whether DOM mobility
+should vary with substrate class, mineral versus peat soil, pH, ionic strength,
+and adsorption; a single equilibrium mobile fraction is only the first
+hypothesis. The existing new microbial P controls and DOM C:P assumptions must
+be calibrated jointly with organic-P transport and solution-P competition,
+because plausible carbon profiles alone do not validate the phosphorus budget.
+
+Hydrologic coupling still needs explicit tests for bottom drainage, saturation-
+excess exfiltration, ponded surface water, and runoff routing. Ground
+evaporation must retain solute, as implemented, but true liquid exfiltration
+should transfer mass to a surface aqueous pool rather than delete it. Likewise,
+subsurface drainage that is diagnosed after the current reaction call must be
+connected at the correct operator-split point before interpreting leaching
+fluxes. Compare diffusion-only, advection-only, and combined cases under dry,
+steady saturated, pulsed infiltration, and fluctuating-water-table conditions;
+require grid and timestep convergence and exact C/N/P closure in each case.
+
+The CLM-Microbe Fickian and optional ELM multiphase mappings must be compared as
+separate transport hypotheses. Existing coupled runs remain useful for reaction
+and O2-competition comparisons only when their selected mapping is recorded;
+their net or pathway surface fluxes must not be mixed across modes. Repeat the
+execution-parity 50-year US-MOz and SPRUCE cases in both modes with the
+`MM_CH4_SURF_*` fields. A reaction-off column
+test should first recover atmospheric equilibrium across a gas/aqueous
+interface, conserve inventory under a moving water table, and converge across
+timestep. Then require a plausible unsaturated diffusion sink in an upland
+case without introducing a separate high-affinity oxidation formulation.
+
+The linked CLM-Microbe tree provides an additional structural sensitivity
+target: compare its continuous empirical inundated fraction, all-layer
+unsaturated gas exchange, one-percent frozen exchange, and atmospheric-CH4
+oxidation diagnostic against the ELM adapter's hydrology and conservative
+top-boundary transport. These behaviors should be tested separately; they
+should not be bundled into a kinetic calibration or copied without closing the
+gas and carbon inventories.
 
 US-SPR remains the key scientific comparison because it motivated the source
 model, but US-MOz is the simpler integration and parameter-sensitivity site.
@@ -1695,8 +2204,9 @@ and nutrients can adjust on compatible clocks.
 
 Scientific evaluation should report at least DOM, bacteria, fungi, litter C,
 SOM1-4, mineral N and solution P, GPP, NPP, HR, NEE, gross CH4 production,
-gross CH4 oxidation, dissolved CH4 and O2 profiles, and net CH4 exchange. For
-the revised backend, production must be split into acetoclastic and
+gross CH4 oxidation, bulk-soil CH4 and O2 inventory profiles, phase-equivalent
+mobile concentrations where needed for interpretation, and net CH4 exchange.
+For the revised backend, production must be split into acetoclastic and
 hydrogenotrophic components and oxidation into aerobic and anaerobic
 components in detailed diagnostic runs, even if routine history stores only
 the gross totals. Seasonal cycles and responses to water-table and temperature
@@ -1712,3 +2222,42 @@ soil-C, NEE, and CH4 predictions. The production parameter file must record the
 calibration data, objective functions, priors, posterior or selected values,
 software revision, and validation results. Until these tasks are complete, the
 reference parameter file remains explicitly labeled for testing only.
+
+### 19.7 CLM-SPRUCE SOM initialization sensitivity
+
+The source CLM-Microbe reaction loop raises saturated acetoclastic methanogen
+biomass to `1.e-5 mol C m-3` before every reaction call when it falls below
+that value. This is distinct from its cold initializer, which assigns every
+guild `1.e-15 mol C m-3`, and it introduces carbon without a donor pool. A
+100-year ELM sensitivity found only a 4.17% year-50 production increase from
+the repeated reset, so that experimental capability was removed.
+
+No high-biomass initializer or floor is retained. All methane guilds use the
+CLM cold-start value `MFGbiomin` and subsequently evolve prognostically.
+
+The relevant initialization sensitivity is instead the independently spun-up,
+unaccelerated SOM state in CLM-SPRUCE's
+`SPRUCE-finalspinup-peatland-carbon-initial.nc`. For a controlled comparison,
+CLM hollow SOM1--SOM4 C and N map to the ELM boardwalk/fen and hollow
+topounits, while CLM hummock maps to ELM hummock. ELM P is rescaled at fixed
+C:P because the source CLM case does not prognose P. All non-SOM pools and
+physical state remain copied from one common normal-mode ELM restart. This
+isolates the effect of substrate initialization on CH4 production, oxidation,
+and surface flux without confounding it with methane-guild seeding or AD
+exit-spinup scaling.
+
+The completed 100-year sensitivity rules out SOM initialization as the main
+CLM/ELM production discrepancy. Copying CLM SOM increased grid-mean production
+because it filled ELM's nearly empty boardwalk/fen topounit, but year-50
+production in the shared hollow changed from 0.9917 to 0.8875 and the shared
+hummock from 0.4454 to 0.4456 g C m-2 yr-1. The matched-SOM ELM values remain
+far below the CLM-SPRUCE reference values of 14.18 and 13.18 g C m-2 yr-1.
+
+The next parity target is saturated-area semantics. CLM-SPRUCE's `HUM_HOL`
+path hard-codes `finundated` and `micfinundated` to 0.99, making both reference
+columns approximately 99% saturated for methane state and rate aggregation.
+ELM uses native `max(FSAT, frac_h2osfc)`; the matched-SOM year-50 values are
+0.313 in the hollow and 0.0526 in the hummock. This is an intentional ELM
+science change, but it must be isolated with a parity-only namelist option and
+a one-layer reaction comparison before the remaining production difference
+can be assigned to the reaction kernel, substrate coupling, or units.
