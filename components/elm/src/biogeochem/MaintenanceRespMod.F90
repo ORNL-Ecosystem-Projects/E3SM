@@ -47,9 +47,15 @@ module MaintenanceRespMod
   real(r8), public :: br_mr_Inst
   real(r8), public :: mr_acclim_warming_frac_Inst
   integer, public :: mr_acclim_spinup_years_Inst
+  real(r8), public :: cpool_target_wood_frac_Inst
+  real(r8), public :: cpool_target_leafroot_frac_Inst
+  real(r8), public :: cpool_xr_scale_max_Inst
   !$acc declare create(br_mr_Inst)
   !$acc declare create(mr_acclim_warming_frac_Inst)
   !$acc declare create(mr_acclim_spinup_years_Inst)
+  !$acc declare create(cpool_target_wood_frac_Inst)
+  !$acc declare create(cpool_target_leafroot_frac_Inst)
+  !$acc declare create(cpool_xr_scale_max_Inst)
   !-----------------------------------------------------------------------
 
 contains
@@ -96,6 +102,39 @@ contains
         mr_acclim_spinup_years_Inst = nint(tempr)
      end if
 
+     tString='cpool_target_wood_frac'
+     call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+     if (.not. readv) then
+        cpool_target_wood_frac_Inst = 0.03_r8
+     else
+        cpool_target_wood_frac_Inst = tempr
+     end if
+     if (cpool_target_wood_frac_Inst < 0._r8) then
+        call endrun(msg='ERROR: cpool_target_wood_frac must be nonnegative'//errMsg(__FILE__, __LINE__))
+     end if
+
+     tString='cpool_target_leafroot_frac'
+     call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+     if (.not. readv) then
+        cpool_target_leafroot_frac_Inst = 0.10_r8
+     else
+        cpool_target_leafroot_frac_Inst = tempr
+     end if
+     if (cpool_target_leafroot_frac_Inst < 0._r8) then
+        call endrun(msg='ERROR: cpool_target_leafroot_frac must be nonnegative'//errMsg(__FILE__, __LINE__))
+     end if
+
+     tString='cpool_xr_scale_max'
+     call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+     if (.not. readv) then
+        cpool_xr_scale_max_Inst = 10._r8
+     else
+        cpool_xr_scale_max_Inst = tempr
+     end if
+     if (cpool_xr_scale_max_Inst <= 0._r8) then
+        call endrun(msg='ERROR: cpool_xr_scale_max must be positive'//errMsg(__FILE__, __LINE__))
+     end if
+
    end subroutine readMaintenanceRespParams
 
   !-----------------------------------------------------------------------
@@ -131,6 +170,8 @@ contains
     real(r8):: q10   ! temperature dependence
     real(r8):: tc    ! temperature correction, 2m air temp (unitless)
     real(r8):: tc_root ! PFT-specific root temperature correction (unitless)
+    real(r8):: cpool_target ! target nonstructural C pool (gC m-2)
+    real(r8):: cpool_relative ! actual cpool relative to its target (unitless)
     real(r8):: tcsoi(bounds%begc:bounds%endc,nlevgrnd) ! temperature correction by soil layer (unitless)
     !-----------------------------------------------------------------------
 
@@ -156,6 +197,12 @@ contains
          lmrsha         =>    photosyns_vars%lmrsha_patch           , & ! Input:  [real(r8) (:)   ]  shaded leaf maintenance respiration rate (umol CO2/m**2/s)
 
          cpool          =>    veg_cs%cpool          , & ! Input: [real(r8) (:)   ]   plant carbon pool (gC m-2)
+         leafc          =>    veg_cs%leafc          , & ! Input: [real(r8) (:)   ]   leaf carbon (gC m-2)
+         frootc         =>    veg_cs%frootc         , & ! Input: [real(r8) (:)   ]   fine-root carbon (gC m-2)
+         livestemc     =>    veg_cs%livestemc      , & ! Input: [real(r8) (:)   ]   live stem carbon (gC m-2)
+         deadstemc     =>    veg_cs%deadstemc      , & ! Input: [real(r8) (:)   ]   structural stem carbon (gC m-2)
+         livecrootc    =>    veg_cs%livecrootc     , & ! Input: [real(r8) (:)   ]   live coarse-root carbon (gC m-2)
+         deadcrootc    =>    veg_cs%deadcrootc     , & ! Input: [real(r8) (:)   ]   structural coarse-root carbon (gC m-2)
 
          leaf_mr        =>    veg_cf%leaf_mr         , & ! Output: [real(r8) (:)   ]
          froot_mr       =>    veg_cf%froot_mr        , & ! Output: [real(r8) (:)   ]
@@ -236,7 +283,36 @@ contains
             grain_mr(p) = grainn(p)*br_mr*tc
          end if
          if (br_xr(ivt(p)) .gt. 1e-9_r8) then
-            xr(p) = cpool(p) * br_xr(ivt(p)) * tc
+            if (top_pp%peat_depth(veg_pp%topounit(p)) > 0._r8) then
+               ! Treat cpool as a biomass-scaled nonstructural-C reserve on
+               ! peatland topounits. The effective whole-organ wood fraction
+               ! includes both live and structural wood because br_xr acts on
+               ! one accessible patch-level reserve rather than organ pools.
+               cpool_target = cpool_target_wood_frac_Inst * &
+                    (max(livestemc(p), 0._r8) + max(deadstemc(p), 0._r8) + &
+                     max(livecrootc(p), 0._r8) + max(deadcrootc(p), 0._r8)) + &
+                    cpool_target_leafroot_frac_Inst * &
+                    (max(leafc(p), 0._r8) + max(frootc(p), 0._r8))
+
+               ! br_xr remains a fractional turnover rate (s-1). At the
+               ! target, the existing XR equation is recovered. The turnover
+               ! coefficient scales linearly with cpool/target, so at twice
+               ! the target the coefficient is 2*br_xr and total XR is four
+               ! times its value at the target. Before structural biomass is
+               ! established but cpool remains after senescence, use the same
+               ! bounded maximum rather than divide by a vanishing target.
+               if (cpool_target > tiny(1._r8)) then
+                  cpool_relative = min(cpool_xr_scale_max_Inst, &
+                       max(cpool(p), 0._r8) / cpool_target)
+               else if (cpool(p) > 0._r8) then
+                  cpool_relative = cpool_xr_scale_max_Inst
+               else
+                  cpool_relative = 1._r8
+               end if
+               xr(p) = cpool(p) * br_xr(ivt(p)) * cpool_relative * tc
+            else
+               xr(p) = cpool(p) * br_xr(ivt(p)) * tc
+            end if
             !xr_above(p) = xr(p) * (leafn(p) + livestemn(p)) / &
             !          (leafn(p) + livestemn(p) + frootn(p))
             !xr_below(p) = xr(p) - xr_above(p)
