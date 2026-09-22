@@ -54,6 +54,18 @@ cd /path/to/case
 ./xmlquery RUNDIR
 ```
 
+For Docker cases created through `elm-olmt`, always run CIME setup with
+`./case.setup --disable-git`. The case-local Git repository is unnecessary for
+bind-mounted development cases and can fail when host and container ownership
+differ. OLMT's Docker machine path should add this flag automatically.
+
+For matched independent OLMT sensitivity cases, build once and share the
+completed, immutable `EXEROOT`, but give every case its own case and run
+directories. Run the cases concurrently in separate Docker containers when
+host capacity permits. If the containers contend for one processor, assign
+them distinct Docker CPU sets; do not run concurrent builds against the same
+`EXEROOT` or use a shared temporary input-staging directory.
+
 ### Rebuild a case
 ```bash
 #Do not clean just build again
@@ -272,4 +284,3 @@ Build types tested: sp (single precision), dbg (debug), fpe (floating point exce
  text with no markdown or other formatting. Add a line.  The second part should be the full
 description with markdown formatting.
 2. PR description should use imperative tense and start with a verb like 'Fix' or 'Add'
-
