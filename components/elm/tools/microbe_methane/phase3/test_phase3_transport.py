@@ -17,10 +17,14 @@ from transport_oracle import (
     implicit_vertical_diffusion,
     legacy_fickian_gas_diffusivity,
     methane_ebullition,
+    nh4_dissolved_fraction,
+    observed_dom_profile_restoration,
     repartition,
+    saturated_dom_macrodispersion_conductivity,
     topounit_lateral_diffusion,
     transport_residual,
     vertical_diffusion,
+    zwt_saturated_layer_fraction,
 )
 
 
@@ -141,9 +145,43 @@ class Phase3TransportTest(unittest.TestCase):
             'id="use_clm_microbe_dom_relaxation"', 1
         )[1].split("</entry>", 1)[0])
         self.assertIn("advanceMicrobeMethaneDOMRelaxation", self.state_update_source)
+        self.assertIn("advanceMicrobeMethaneTracerRelaxation", self.state_update_source)
         self.assertIn("if (use_clm_microbe_dom_relaxation) then", self.state_source)
+        self.assertIn(
+            "call advanceMicrobeMethaneTracerRelaxation(acetate_concentration",
+            self.state_source,
+        )
+        self.assertGreaterEqual(
+            self.state_source.count("advanceMicrobeMethaneTracerRelaxation"), 3
+        )
         self.assertIn("use_clm_microbe_dom_relaxation=.true. requires", self.control_source)
         self.assertIn("use_clm_microbe_dom_relaxation=.true. requires", self.build_namelist)
+
+    def test_observed_dom_restoration_is_default_off_and_stoichiometric(self) -> None:
+        entry = self.namelist_definition.split(
+            'id="use_microbe_observed_dom_calibration"', 1
+        )[1].split("</entry>", 1)[0]
+        self.assertIn('value=".false."', entry)
+        updated_c, updated_n, updated_p, source = observed_dom_profile_restoration(
+            [10.0, 30.0], [1.0, 3.0], [0.1, 0.3], [30.0, 10.0],
+            10.0, 100.0, 14.0, 86400.0,
+        )
+        self.assertGreater(updated_c[0], 10.0)
+        self.assertLess(updated_c[1], 30.0)
+        self.assertGreater(source[0], 0.0)
+        self.assertLess(source[1], 0.0)
+        self.assertAlmostEqual(updated_n[0], updated_c[0] / 10.0)
+        self.assertAlmostEqual(updated_p[0], updated_c[0] / 100.0)
+        self.assertIn("advanceMicrobeMethaneDOMProfileRestoration", self.state_update_source)
+        self.assertIn("MM_DOM_PROFILE_RESTORE", self.state_source)
+        self.assertIn(
+            "use_microbe_observed_dom_calibration=.true. requires",
+            self.control_source,
+        )
+        self.assertIn(
+            "use_microbe_observed_dom_calibration=.true. requires",
+            self.build_namelist,
+        )
 
     def test_aqueous_diffusion_is_grid_aware_and_conservative(self) -> None:
         updated, advective, diffusive, _tendency, export, residual = (
@@ -198,6 +236,61 @@ class Phase3TransportTest(unittest.TestCase):
         self.assertEqual(export, 0.0)
         self.assertEqual(residual, 0.0)
 
+    def test_saturation_dependent_dom_mobility_is_conservative(self) -> None:
+        constant = aqueous_tracer_transport(
+            [10.0, 0.0], [0.1, 0.1], [0.1, 0.5], [1.0e-10, 1.0e-10],
+            [0.0, 0.0, 0.0], 1.0, 1.0e-4, 86400.0
+        )
+        saturation_dependent = aqueous_tracer_transport(
+            [10.0, 0.0], [0.1, 0.1], [0.1, 0.5], [1.0e-10, 1.0e-10],
+            [0.0, 0.0, 0.0], [0.2, 1.0], 1.0e-4, 86400.0
+        )
+        self.assertLess(saturation_dependent[2][1], constant[2][1])
+        self.assertAlmostEqual(saturation_dependent[-1], 0.0, places=14)
+        self.assertIn("aqueous_dom_mobile_saturation_exponent", self.state_source)
+        self.assertIn("dom_mobile_fraction", self.state_source)
+
+    def test_saturated_dom_macrodispersion_is_gated_conservative_and_default_zero(self) -> None:
+        parameter = "microbe_methane_aqueous_dom_saturated_macrodispersion"
+        self.assertEqual(self.parameters[parameter], 0.0)
+        self.assertEqual(
+            saturated_dom_macrodispersion_conductivity(0.8, 0.98, 1.0, 1.0e-8, 0.99),
+            0.0,
+        )
+        self.assertAlmostEqual(
+            saturated_dom_macrodispersion_conductivity(0.8, 0.995, 0.5, 1.0e-8, 0.99),
+            2.0e-9,
+        )
+        self.assertAlmostEqual(
+            saturated_dom_macrodispersion_conductivity(0.8, 1.0, 1.0, 1.0e-8, 0.99),
+            8.0e-9,
+        )
+        base = aqueous_tracer_transport(
+            [10.0, 0.0], [0.1, 0.1], [0.8, 0.8], [8.0e-11, 8.0e-11],
+            [0.0, 0.0, 0.0], 1.0, 1.0e-4, 86400.0
+        )
+        enhanced = aqueous_tracer_transport(
+            [10.0, 0.0], [0.1, 0.1], [0.8, 0.8], [8.08e-9, 8.08e-9],
+            [0.0, 0.0, 0.0], 1.0, 1.0e-4, 86400.0
+        )
+        self.assertGreater(enhanced[2][1], base[2][1])
+        self.assertAlmostEqual(enhanced[-1], 0.0, places=14)
+        self.assertIn("aqueous_dom_saturated_macrodispersion", self.state_source)
+        self.assertIn("saturated_macrodispersion_scalar", self.state_source)
+        self.assertIn(
+            "aqueous_dom_saturated_macrodispersion > 0._r8", self.state_source
+        )
+
+    def test_zwt_macrodispersion_maps_vertical_saturated_overlap(self) -> None:
+        self.assertEqual(zwt_saturated_layer_fraction(0.1, 0.2, 0.25), 0.0)
+        self.assertAlmostEqual(zwt_saturated_layer_fraction(0.1, 0.2, 0.15), 0.5)
+        self.assertEqual(zwt_saturated_layer_fraction(0.1, 0.2, 0.05), 1.0)
+        self.assertEqual(zwt_saturated_layer_fraction(0.0, 0.1, -0.02), 1.0)
+        self.assertIn("use_microbe_zwt_macrodispersion", self.state_source)
+        self.assertIn("layerSaturatedThicknessFraction", self.state_source)
+        self.assertIn("MM_DOM_MACRODISP_SCALAR", self.state_source)
+        self.assertIn("MM_DOM_DIFF_CONDUCTIVITY", self.state_source)
+
     def test_aqueous_budget_check_has_transport_specific_roundoff_tolerance(self) -> None:
         self.assertIn("state_tolerance = 1.e-12_r8", self.state_update_source)
         self.assertIn("aqueous_budget_tolerance = 1.e-10_r8", self.state_update_source)
@@ -217,17 +310,57 @@ class Phase3TransportTest(unittest.TestCase):
         self.assertIn("DOM carbon isotopes", self.control_source)
         self.assertIn("DOM carbon isotopes", self.build_namelist)
 
-    def test_peatland_root_access_is_pft_gated_and_normalized(self) -> None:
+    def test_peatland_vascular_uptake_uses_root_profile_without_n_hotspot_weighting(self) -> None:
         self.assertNotIn("use_microbe_unsaturated_root_n_access", self.varctl_source)
         self.assertIn("use_peatland_roots", self.allocation_source)
         self.assertIn("veg_vp%nonvascular(ivt(p)) < 0.5_r8", self.allocation_source)
         self.assertIn("h2osoi_vol(c,j) < watsat(c,j)", self.allocation_source)
-        self.assertIn("adaptive_profile_sum", self.allocation_source)
+        self.assertIn("peatland_profile_sum", self.allocation_source)
+        self.assertIn("peatland_weight = max(froot_prof(p,j), 0._r8)", self.allocation_source)
+        vascular_block = self.allocation_source.split("if (use_vascular_root_profile) then", 1)[1]
+        vascular_block = vascular_block.split("else if (use_moss_capillary_profile)", 1)[0]
+        self.assertNotIn("smin_no3_vr", vascular_block)
+        self.assertNotIn("smin_nh4_vr", vascular_block)
         self.assertIn("use TopounitType        , only : top_pp", self.allocation_source)
         self.assertIn(
             "top_pp%peat_depth(col_pp%topounit(c)) > 0._r8",
             self.allocation_source,
         )
+
+    def test_moss_capillary_connectivity_is_retained(self) -> None:
+        self.assertIn("use_moss_capillary_nutrients", self.allocation_source)
+        self.assertIn("use_moss_capillary_profile", self.allocation_source)
+        self.assertIn("moss_capillary_max_demand_fraction", self.allocation_source)
+        self.assertIn("water_table_connectivity", self.allocation_source)
+
+    def test_nh4_equilibrium_partitioning_retards_only_the_dissolved_fraction(self) -> None:
+        coefficient = self.parameters[
+            "microbe_methane_aqueous_nh4_partition_coefficient"
+        ]
+        mobile = nh4_dissolved_fraction(0.5, 100.0, coefficient)
+        self.assertAlmostEqual(mobile, 0.5)
+        self.assertEqual(nh4_dissolved_fraction(0.0, 100.0, coefficient), 0.0)
+        self.assertEqual(nh4_dissolved_fraction(0.5, 100.0, 0.0), 1.0)
+        unretarded = aqueous_tracer_transport(
+            [10.0, 0.0], [0.1, 0.1], [0.5, 0.5], [0.0, 0.0],
+            [0.0, 1.0e-7, 0.0], 1.0, 1.0e-4, 86400.0,
+        )
+        retarded = aqueous_tracer_transport(
+            [10.0, 0.0], [0.1, 0.1], [0.5, 0.5], [0.0, 0.0],
+            [0.0, 1.0e-7, 0.0], [mobile, mobile], 1.0e-4, 86400.0,
+        )
+        self.assertLess(retarded[1][1], unretarded[1][1])
+        self.assertAlmostEqual(retarded[-1], 0.0, places=14)
+        for parameter in (
+            "microbe_methane_aqueous_nh4_molecular_diffusivity",
+            "microbe_methane_aqueous_no3_molecular_diffusivity",
+            "microbe_methane_aqueous_nh4_partition_coefficient",
+        ):
+            self.assertIn(parameter, self.parameters)
+        self.assertIn("MM_NH4_MOBILE_FRAC", self.state_source)
+        self.assertIn("MM_NH4_BOTTOM_EXPORT", self.state_source)
+        self.assertIn("MM_NO3_BOTTOM_EXPORT", self.state_source)
+        self.assertIn("mineral_nh4_export + mineral_no3_export", self.state_source)
 
     def test_diffusion_surface_budget_and_donor_limiting(self) -> None:
         dt = 86400.0

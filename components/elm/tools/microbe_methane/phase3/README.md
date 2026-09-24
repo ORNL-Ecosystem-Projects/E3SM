@@ -38,7 +38,23 @@ run path already includes the configured prefix/date and full case name. Do
 not use a shared `elm-olmt/temp` file for these inputs: concurrent case setup
 can otherwise collide in the NetCDF/HDF5 writer.
 
-The 73 scalar values in `phase3_reference_parameters.json` are traceable test
+When running independent one-rank OLMT cases concurrently in Docker, do not
+assume that `taskset` on `case.submit` pins the actual model rank. OpenMPI may
+discard the wrapper's intended placement and bind every spawned `e3sm.exe` to
+core 0. Disable OpenMPI rebinding while retaining the wrapper affinity, for
+example:
+
+```console
+OMPI_MCA_hwloc_base_binding_policy=none taskset -c 3 ./case.submit --no-batch
+```
+
+After launch, verify the affinity of each live `e3sm.exe`, not merely the
+`case.submit`, shell, or `mpiexec` processes (`taskset -pc PID` on Linux). If
+the ranks are already running on the same core, they can be moved safely with
+`taskset -pc CORE PID`. Record the case-to-PID mapping from `/proc/PID/cwd`
+before changing affinity.
+
+The 85 scalar values in `phase3_reference_parameters.json` are traceable test
 inputs, not a production calibration. The default reaction/transport baseline
 is CLM-Microbe commit `9c2e0a048bb3799669d32b91e6cc76efb36d4b75`:
 38 raw numbers come from its runtime `microbepar_in`, while values absent from
@@ -146,9 +162,21 @@ Gas-transport selection is independent of DOM transport. By default DOM C/N/P
 remains on the Phase 2 standard ELM transport operator; the gas switch changes
 acetate and gas transport only.
 
+When `use_microbe_aqueous_transport=.true.`, the same conservative
+backward-Euler water-flux operator now transports standard mineral NH4 and NO3
+after the reaction update. NO3 is fully mobile. NH4 uses equilibrium linear
+sorption: only `theta/(theta + rho_b Kd)` of the authoritative total NH4 pool
+is represented in porewater and transported. The sorbed remainder stays in
+the same layer; no duplicate dissolved-N state is created. Bottom NH4 and NO3
+exports are added to `MM_AQUEOUS_N_EXPORT` so the existing column N balance
+accounts for them. Molecular diffusivities and `Kd` are named standard ELM
+parameter-file inputs in the Phase 3 manifest and are explicitly uncalibrated
+science hypotheses.
+
 For the CLM-source diagnostic, set
 `use_clm_microbe_dom_relaxation=.true.`. This separate, default-off switch
-applies the source's executed adjacent-layer relaxation timescale after the
+applies the source's executed adjacent-layer relaxation timescale to DOM C/N/P
+and the saturated and unsaturated acetate stores after the
 reaction update to the shared DOM C, N, and P profiles. The port uses one
 backward-Euler finite-volume matrix for all three elements, closed vertical
 boundaries, and element-specific inventory checks. Thus it preserves the

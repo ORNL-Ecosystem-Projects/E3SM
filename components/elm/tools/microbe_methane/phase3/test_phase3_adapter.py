@@ -61,12 +61,14 @@ class Phase3AdapterTest(unittest.TestCase):
             "dom_n(j) = col_ns%decomp_npools_vr(c,j,i_dom)",
             "dom_p(j) = col_ps%decomp_ppools_vr(c,j,i_dom)",
             "mineral_n(j) = col_ns%smin_nh4_vr(c,j)",
+            "mineral_no3(j) = col_ns%smin_no3_vr(c,j)",
             "mineral_p(j) = col_ps%solutionp_vr(c,j)",
             "col_cs%decomp_cpools_vr(c,j,i_dom) = dom_c(j)",
             "col_ns%decomp_npools_vr(c,j,i_dom) = dom_n(j)",
             "col_ps%decomp_ppools_vr(c,j,i_dom) = dom_p(j)",
             "col_ns%smin_nh4_vr(c,j) = mineral_n(j)",
-            "col_ns%sminn_vr(c,j) = mineral_n(j) + col_ns%smin_no3_vr(c,j)",
+            "col_ns%smin_no3_vr(c,j) = mineral_no3(j)",
+            "col_ns%sminn_vr(c,j) = mineral_n(j) + mineral_no3(j)",
             "col_ps%solutionp_vr(c,j) = mineral_p(j)",
         ):
             self.assertIn(statement, self.adapter)
@@ -147,6 +149,12 @@ class Phase3AdapterTest(unittest.TestCase):
             ("MM_CH4_OXID", "gC/m^2/s"),
             ("MM_CH4_PROD_UNSAT", "gC/m^2/s"),
             ("MM_CH4_PROD_SAT", "gC/m^2/s"),
+            ("MM_CH4_PROD_ACET", "gC/m^2/s"),
+            ("MM_CH4_PROD_ACET_UNSAT", "gC/m^2/s"),
+            ("MM_CH4_PROD_ACET_SAT", "gC/m^2/s"),
+            ("MM_CH4_PROD_H2", "gC/m^2/s"),
+            ("MM_CH4_PROD_H2_UNSAT", "gC/m^2/s"),
+            ("MM_CH4_PROD_H2_SAT", "gC/m^2/s"),
             ("MM_CH4_OXID_UNSAT", "gC/m^2/s"),
             ("MM_CH4_OXID_SAT", "gC/m^2/s"),
             ("MM_CH4_OXID_AER", "gC/m^2/s"),
@@ -178,7 +186,9 @@ class Phase3AdapterTest(unittest.TestCase):
         ):
             self.assertIn(rate, self.adapter)
 
-        production_start = self.adapter.index("this%ch4_production_unsat_col(c) =")
+        production_start = self.adapter.index(
+            "this%ch4_acetoclastic_production_unsat_col(c) = &"
+        )
         oxidation_start = self.adapter.index("this%ch4_oxidation_unsat_col(c) =", production_start)
         production_diagnostic = self.adapter[production_start:oxidation_start]
         self.assertEqual(
@@ -187,6 +197,12 @@ class Phase3AdapterTest(unittest.TestCase):
         )
         self.assertIn(
             "this%ch4_production_col(c) = this%ch4_production_unsat_col(c)",
+            self.adapter,
+        )
+        self.assertIn(
+            "this%ch4_production_unsat_col(c) = &\n"
+            "            this%ch4_acetoclastic_production_unsat_col(c) + &\n"
+            "            this%ch4_hydrogenotrophic_production_unsat_col(c)",
             self.adapter,
         )
         self.assertIn(
@@ -306,6 +322,13 @@ class Phase3AdapterTest(unittest.TestCase):
         self.assertIn("2._r8 / 14._r8", self.adapter)
         self.assertIn("%unsaturated_rates%oxygen_stress", self.adapter)
         self.assertIn("%saturated_rates%oxygen_stress", self.adapter)
+
+    def test_fermentation_retains_original_depth_and_oxygen_baseline(self) -> None:
+        self.assertNotIn("ParamsShareInst%decomp_depth_efolding", self.adapter)
+        self.assertIn("moisture_scalar * saturation_scalar", self.adapter)
+        self.assertIn("saturated_environment%dom_fermentation_scalar = moisture_scalar", self.adapter)
+        self.assertNotIn("MM_FERMENT_DEPTH_SCALAR", self.adapter)
+        self.assertNotIn("MM_FERMENT_O2_INHIB", self.adapter)
 
 
 if __name__ == "__main__":

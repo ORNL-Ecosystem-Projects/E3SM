@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Mapping, Sequence
 
 
@@ -49,6 +50,27 @@ def bulk_concentration(
         (1.0 - fraction) * unsaturated_concentration
         + fraction * saturated_concentration
     )
+
+
+def observed_dom_profile_restoration(
+    dom_c: Sequence[float],
+    dom_n: Sequence[float],
+    dom_p: Sequence[float],
+    target_dom_c: Sequence[float],
+    cn_dom: float,
+    cp_dom: float,
+    relaxation_timescale_days: float,
+    dt: float,
+) -> tuple[list[float], list[float], list[float], list[float]]:
+    fraction = 1.0 - math.exp(-dt / (86400.0 * relaxation_timescale_days))
+    updated_c = [old + fraction * (target - old)
+                 for old, target in zip(dom_c, target_dom_c)]
+    updated_n = [old + fraction * (target / cn_dom - old)
+                 for old, target in zip(dom_n, target_dom_c)]
+    updated_p = [old + fraction * (target / cp_dom - old)
+                 for old, target in zip(dom_p, target_dom_c)]
+    source = [(new - old) / dt for new, old in zip(updated_c, dom_c)]
+    return updated_c, updated_n, updated_p, source
 
 
 def vertical_diffusion(
@@ -272,21 +294,39 @@ def dom_cnp_relaxation(
     return updated_c, updated_n, updated_p, residuals
 
 
+def nh4_dissolved_fraction(
+    liquid_fraction: float,
+    dry_bulk_density: float,
+    partition_coefficient: float,
+) -> float:
+    """Equilibrium fraction of total NH4-N present in soil water."""
+    theta = max(0.0, liquid_fraction)
+    sorption_capacity = max(0.0, dry_bulk_density) * max(0.0, partition_coefficient)
+    denominator = theta + sorption_capacity
+    return theta / denominator if denominator > 0.0 else 0.0
+
+
 def aqueous_tracer_transport(
     concentration: Sequence[float],
     layer_thickness: Sequence[float],
     liquid_fraction: Sequence[float],
     diffusion_conductivity: Sequence[float],
     water_flux: Sequence[float],
-    mobile_fraction: float,
+    mobile_fraction: float | Sequence[float],
     minimum_liquid_fraction: float,
     dt: float,
 ) -> tuple[list[float], list[float], list[float], list[float], float, float]:
     """Implicit porewater advection-diffusion of a bulk-soil inventory."""
     n = len(concentration)
+    if isinstance(mobile_fraction, (int, float)):
+        layer_mobile_fraction = [float(mobile_fraction)] * n
+    else:
+        layer_mobile_fraction = list(mobile_fraction)
+        if len(layer_mobile_fraction) != n:
+            raise ValueError("mobile_fraction must be scalar or have one value per layer")
     porewater_factor = [
-        mobile_fraction / theta if theta >= minimum_liquid_fraction else 0.0
-        for theta in liquid_fraction
+        mobile / theta if theta >= minimum_liquid_fraction else 0.0
+        for mobile, theta in zip(layer_mobile_fraction, liquid_fraction)
     ]
     conductance = [0.0] * (n + 1)
     for layer in range(n - 1):
@@ -709,6 +749,43 @@ def effective_aqueous_diffusivity(
         * multiplier
         * (max(0.0, temperature) / reference_temperature) ** exponent
         * _clamp(hydrologic_transport_scalar)
+    )
+
+
+def saturated_dom_macrodispersion_conductivity(
+    liquid_fraction: float,
+    relative_liquid_saturation: float,
+    thawed_fraction: float,
+    macrodispersion: float,
+    saturation_threshold: float,
+) -> float:
+    """Layer theta*D contribution for thawed, nearly saturated DOM mixing."""
+    saturation = _clamp(relative_liquid_saturation)
+    threshold = _clamp(saturation_threshold)
+    if threshold < 1.0:
+        saturation_scalar = _clamp((saturation - threshold) / (1.0 - threshold))
+    else:
+        saturation_scalar = 1.0 if saturation >= 1.0 else 0.0
+    return (
+        max(0.0, liquid_fraction)
+        * _clamp(thawed_fraction)
+        * max(0.0, macrodispersion)
+        * saturation_scalar
+    )
+
+
+def zwt_saturated_layer_fraction(
+    layer_top: float,
+    layer_bottom: float,
+    water_table_depth: float,
+) -> float:
+    """Fraction of a soil layer below the connected water table."""
+    if layer_bottom <= layer_top:
+        raise ValueError("layer_bottom must be deeper than layer_top")
+    water_table = max(0.0, water_table_depth)
+    return _clamp(
+        (layer_bottom - max(layer_top, water_table))
+        / (layer_bottom - layer_top)
     )
 
 

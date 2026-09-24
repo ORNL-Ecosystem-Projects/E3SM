@@ -122,6 +122,13 @@ The initial parity model treats these guilds as carbon-only, so their growth
 does not yet impose an additional N or P demand beyond the DOM transformations
 handled by the C-N-P transaction.
 
+Fermentation retains the original CLM-Microbe baseline: it is controlled by
+DOM availability, moisture/saturation, temperature, pH, and acetate feedback,
+but does not reuse ELM's standard `decomp_depth_efolding` parameter and does not
+apply a separate oxygen-inhibition term. The latter was present only as a
+commented expression in CLM-SPRUCE. Oxygen still limits aerobic methane and
+acetate oxidation through the reaction kernel's shared oxygen budget.
+
 Hydrology and oxygen determine which methane pathways can operate and whether
 their products reach the atmosphere. Each layer contains saturated and
 unsaturated subarea state. Changes in inundated fraction conservatively move
@@ -163,6 +170,10 @@ purpose, though not in detailed formulation, to legacy `CH4PROD` and
 `FCH4TOCO2`. The acetoclastic contribution to `MM_CH4_PROD` is the reaction
 extent multiplied by the non-biomass fraction and the CH4 yield; counting the
 whole process extent would incorrectly include biomass and CO2 carbon as CH4.
+`MM_CH4_PROD_ACET` and `MM_CH4_PROD_H2` expose those two gross production
+pathways separately. Their `_UNSAT` and `_SAT` fields are area-weighted
+subarea contributions, and the two bulk pathway fields sum exactly to
+`MM_CH4_PROD`.
 `MM_CH4_PROD_UNSAT`, `MM_CH4_PROD_SAT`, `MM_CH4_OXID_UNSAT`, and
 `MM_CH4_OXID_SAT` are area-weighted contributions that sum to the bulk
 diagnostics. `MM_CH4_OXID_AER` and `MM_CH4_OXID_AOM` separate aerobic
@@ -173,6 +184,17 @@ area weighting used. `MM_CH4_SURF_DIFF`, `MM_CH4_SURF_AERE`, and
 `MM_CH4_SURF_EBUL` expose the three surface pathways. Each has `_UNSAT` and
 `_SAT` area-weighted contributions that sum to its bulk field; all use
 `g C m-2 s-1` and are positive toward the atmosphere.
+
+The prognostic `MM_CONC_CH4_UNSAT` and `MM_CONC_CH4_SAT` fields are conserved
+bulk-soil inventory densities (`mol m-3 soil`), not direct porewater
+measurements. For profile evaluation, `MM_CH4_POREWATER_UNSAT` and
+`MM_CH4_POREWATER_SAT` diagnose dissolved methane from that inventory using
+actual liquid and air volume fractions and the temperature-dependent Henry-law
+capacity; `MM_CH4_POREWATER` is their saturated-area-weighted combination.
+These inactive-by-default fields use `mol m-3 water`, numerically equivalent to
+`mmol L-1`. They are derived history diagnostics only: they do not change the
+prognostic state, transport capacity selected by the namelist, restart schema,
+or carbon budget.
 
 The expected land-carbon response is therefore not a uniform increase or
 decrease in SOM. Carbon is diverted into rapidly cycling DOM and living
@@ -729,6 +751,11 @@ bounded DOM-fermentation and aerobic-acetate-oxidation scalars; defining those
 scalars and applying the kernel across saturated/unsaturated state belongs to
 Steps 3-4.
 
+The adapter does not impose ELM's standard decomposition depth response on
+DOM fermentation. Saturated and unsaturated fermentation instead differ
+through their moisture/saturation state, while oxygen remains available to
+limit the aerobic pathways.
+
 For a process extent `R`, the implemented carbon and gas stoichiometry is:
 
 - DOM fermentation: `-1.5 DOM-C + 1 acetate-C + 0.5 CO2 + 1/6 H2`;
@@ -871,14 +898,23 @@ numerical repairs rather than port regressions.
 An explicit parity test is available behind
 `use_clm_microbe_dom_relaxation=.true.`. The executed source treats
 `dom_diffus=1.8e-7` as an adjacent-layer relaxation rate in s-1, despite its
-diffusivity metadata. The port applies that rate after reactions using a
+diffusivity metadata. Xu et al. (2015) did not define this parameter: its
+incubation simulations treated each soil sample as an independent single
+layer. `dom_diffus` was introduced with the later 10-layer ELM-SPRUCE
+integration, for which Ricciuto et al. (2021) described the intended operation
+as Fickian diffusion and optimized the value over a +/-20% range. In the
+released source equation, however, the value implies about a 64-day
+equal-layer relaxation time at 298 K and is not dimensionally transferable to
+a physical m2 s-1 coefficient. The port applies that rate after reactions using a
 closed-boundary backward-Euler finite-volume solve. The same transport matrix
-is applied independently to DOM C, N, and P, so their column inventories are
-conserved and a uniform C:N:P ratio remains uniform. This switch is off by
-default and does not replace ELM's standard decomposition-pool transport. It
-is a diagnostic for the large CLM-versus-ELM deep-DOM difference, particularly
-because the ELM peat accumulation branch sets its base SOM diffusion to zero
-and the normal 10x DOM multiplier therefore provides no diffusive mixing there.
+is applied independently to DOM C, N, and P and to the saturated and
+unsaturated acetate stores, matching the released source's treatment of both
+DOC and acetate. Their column inventories are conserved and a uniform DOM
+C:N:P ratio remains uniform. This switch is off by default and does not replace
+ELM's standard decomposition-pool transport. It is a diagnostic for the large
+CLM-versus-ELM deep-DOM difference, particularly because the ELM peat
+accumulation branch sets its base SOM diffusion to zero and the normal 10x DOM
+multiplier therefore provides no diffusive mixing there.
 
 For the scientific transport path, enable
 `use_microbe_aqueous_transport=.true.`. This option is mutually exclusive with
@@ -897,15 +933,31 @@ interface flux and centered diffusion/dispersion using porewater concentration:
 C_water = f_mobile C_bulk / theta_liq
 J = q C_water - theta_liq D_eff d(C_water)/dz
 D_eff = D_molecular S_liq^tortuosity f_temperature f_thaw
+        + D_saturated_macro f_saturated f_thaw
         + dispersivity |q| / theta_liq
 ```
 
 Equivalently, the code combines `theta_liq*D_molecular` and
 `dispersivity*|q|` into the conductivity multiplying the porewater gradient.
+The default-zero DOM macrodispersion term normally ramps on only above the
+named 0.99 reaction-saturation threshold and reaches full strength at complete
+saturation. The default-off `use_microbe_zwt_macrodispersion` sensitivity
+instead scales it by the fraction of each layer below the diagnosed connected
+water table. This allows the partially saturated layer containing the water
+table to participate while retaining the liquid-volume and thawed-fraction
+multipliers. Both alternatives use harmonic face conductance so adjoining
+layers must have positive conductivity. This is a metric, grid-aware
+hypothesis for unresolved saturated peat mixing, not a reinterpretation of
+molecular diffusion or the CLM relaxation rate.
 The same matrix is applied independently to DOM C, N, and P, preserving a
 spatially uniform stoichiometric ratio while allowing an existing nonuniform
-ratio to advect and diffuse conservatively. Clean infiltration carries zero
-solute. Negative top soil-water flux associated with ground evaporation is
+ratio to advect and diffuse conservatively. It now also transports standard
+ELM mineral NH4 and NO3. NO3 is fully dissolved. NH4 remains one authoritative
+total pool and uses instantaneous linear equilibrium sorption,
+`f_dissolved = theta_liq / (theta_liq + rho_bulk Kd)`; only this dissolved
+fraction is advected and diffused, so transport never treats the complete NH4
+pool as aqueous. Clean infiltration carries zero solute. Negative top
+soil-water flux associated with ground evaporation is
 clipped to zero for solutes, because DOM and acetate cannot leave with water
 vapor. The bottom interface is an open advective export when ELM diagnoses
 downward water flow. Explicit coupling to later drainage and runoff terms is a
@@ -923,34 +975,26 @@ interface fluxes, total aqueous C/N/P export, bottom DOM C/N/P export, and
 per-timestep elemental residuals. Aqueous exports are included in column and
 grid carbon balance, column N/P balance, and the monthly carbon budget.
 
-The existing reconstructed `use_peatland_roots=.true.` control addresses a
-separate coupling exposed by aqueous DOM-N transport. In peatland RD cases,
-the standard uptake profile is the prescribed fine-root profile and does not
-respond when transported DOM-N is mineralized below the surface root maximum.
-The optional profile retains root presence as a hard constraint but weights
-rooted, unsaturated layers by their current NH4 plus NO3 concentration:
+The reconstructed `use_peatland_roots=.true.` control retains a separate plant
+uptake constraint. In peatland RD cases, vascular mineral-N demand follows the
+prescribed fine-root profile and is clipped at the connected water table:
 
 ```text
-w_j = root_profile_j max(NH4_j + NO3_j, 0),  if theta_liq,j < porosity_j
-w_j = 0,                                     otherwise
+w_j = root_profile_j f_above_zwt,j,  if theta_total,j < porosity_j
+w_j = 0,                             otherwise
 uptake_profile_j = w_j / sum_k(w_k dz_k)
 ```
 
-The adaptive weighting is evaluated only on columns whose topounit has
-positive peat depth and only for vascular PFTs. Uplands retain the ordinary
-ELM uptake profile, while moss and other nonvascular PFTs retain their
-prescribed shallow profiles. If no eligible mineral N exists on a peatland
-column, the ordinary root profile is used. The
-normalized profile only redistributes the existing column plant-N demand; the
-standard RD competition code remains the sole plant-uptake flux and therefore
-retains its N conservation and NH4/NO3 competition. This is intentionally a
-general rooted-layer treatment rather than a hard-coded layer-6/7 rule. It is
-part of the general peatland-root capability, defaults on with HUMHOL, and is
-not owned by the methane module. It does not alter P uptake. A binary
-below-porosity gate is used for the first experiment;
-its sensitivity near saturation and the strong response to large deep-N
-gradients require explicit validation before this becomes a recommended
-configuration.
+This profile is evaluated only on columns whose topounit has positive peat
+depth and only for vascular PFTs. It contains no mineral-N concentration
+weighting and therefore provides no adaptive unsaturated access to deep N.
+Uplands retain the ordinary ELM uptake profile. Moss and other nonvascular
+PFTs retain their prescribed shallow profiles, with the existing separate,
+default-off Sphagnum capillary-connectivity option available for sensitivity
+tests. The standard RD competition code remains the sole plant-uptake flux and
+therefore retains its N conservation and NH4/NO3 competition. This is part of
+the general peatland-root capability, defaults on with HUMHOL, and is not owned
+by the methane module. It does not alter P uptake.
 
 #### 9.3.2 Default Fickian and optional ELM gas-transport mappings
 
@@ -1157,6 +1201,27 @@ nitrification/denitrification calculation. In revised mode that object is a
 compatibility carrier; the legacy CH4 solver is not called. As in legacy
 `CH4Mod`, nitrification's N flux is lag-coupled by ELM's existing call order;
 it is not retroactively changed after nutrient allocation.
+
+In revised mode, native nitrification uses
+`microbe_methane_soil_ph_fallback`, matching the pH supplied to the methane
+reaction kernel. Non-revised backends retain the inherited native-nitrogen pH
+placeholder of 6.5. Standard ELM denitrification does not apply an explicit pH
+response: the Del Grosso/Parton potential rate remains limited by carbon,
+nitrate, freezing, and the O2-derived anaerobic fraction. In particular, the
+methanogen pH response must not be applied to denitrification. At SPRUCE the
+alignment from the former nitrogen placeholder of 6.5 to the configured 4.5
+reduces the nitrification pH scalar from 0.920 to 0.364. A one-year continuation
+reduced gross nitrification but left denitrification nearly unchanged because
+nitrate storage and the carbon/anoxia controls buffered the flux. The separate
+`microbe_methane_denitrification_rate_multiplier` therefore scales potential
+denitrification only in the revised backend. Unity preserves the inherited
+equation. A value of 0.5 reduced realized hummock/hollow denitrification by
+only 20.4% because the lower potential demand received a larger share of
+available nitrate during allocation. A provisional value of 0.2 produced a
+49.7% realized reduction in the matched one-year test. An 18-year pH-only
+continuation did not sustain a denitrification decline: nitrification rebounded
+and nitrate storage increased, so the direct multiplier remains a distinct
+calibration sensitivity rather than a substitute for the pH correction.
 
 The root-respiration term must not be read from `col_cf%rr_vr` in revised
 mode. That array is a legacy CH4Mod work product and remains at its fill value
@@ -1443,8 +1508,14 @@ exact inventory is:
   `microbe_methane_dom_diffusivity`,
   `microbe_methane_dom_relaxation_rate`,
   `microbe_methane_aqueous_dom_molecular_diffusivity`,
+  `microbe_methane_aqueous_dom_saturated_macrodispersion`,
   `microbe_methane_aqueous_acetate_molecular_diffusivity`,
+  `microbe_methane_aqueous_nh4_molecular_diffusivity`,
+  `microbe_methane_aqueous_no3_molecular_diffusivity`,
+  `microbe_methane_aqueous_nh4_partition_coefficient`,
+  `microbe_methane_aqueous_mineral_n_advection_multiplier`,
   `microbe_methane_aqueous_dom_mobile_fraction`,
+  `microbe_methane_aqueous_dom_mobile_saturation_exponent`,
   `microbe_methane_aqueous_acetate_mobile_fraction`,
   `microbe_methane_aqueous_solute_dispersivity`,
   `microbe_methane_aqueous_solute_tortuosity_exponent`,
@@ -1766,7 +1837,7 @@ recovery or science-owner approval before production use.
 
 Implement Phase 3 as separately reviewable steps:
 
-1. Parameter and state foundation: conditionally read the 64 named variables
+1. Parameter and state foundation: conditionally read the 83 named variables
    from the standard ELM parameter file; allocate saturated/unsaturated acetate,
    four functional-guild, and four bulk-soil gas-inventory states; add cold-start,
    inactive-by-default history fields, and complete restart I/O. Keep legacy
@@ -1942,6 +2013,20 @@ The integration is complete only when:
 - the applicable ELM regression suite passes against the frozen baseline.
 
 ## 19. Remaining scientific validation and parameter work
+
+### Observed-DOM calibration harness
+
+Short methane-kinetics experiments may set
+`use_microbe_observed_dom_calibration=.true.` to restore bulk DOM C, N, and P
+toward a smooth fit to the 2013 SPRUCE porewater-DOC profile. This is a
+calibration harness, not a production process representation. The standard ELM
+parameter file supplies `microbe_methane_observed_dom_relaxation_timescale`,
+`microbe_methane_observed_dom_deep_concentration`,
+`microbe_methane_observed_dom_surface_amplitude`, and
+`microbe_methane_observed_dom_efold_depth`. The signed external carbon source
+or sink is reported as `MM_DOM_PROFILE_RESTORE`; DOM N and P are restored at
+the configured microbial-decomposition DOM stoichiometry. The switch is false
+by default and requires `use_microbe_methane=.true.`.
 
 The implemented equations and interfaces are not yet a production-calibrated
 model. The current Phase 2 and Phase 3 parameter files are integration-test
@@ -2194,6 +2279,17 @@ site-specific fit at SPRUCE alone is not evidence of transferable parameter
 values.
 
 ### 19.6 Required validation experiments and release evidence
+
+An additional default-off preferential-flow experiment is exposed as
+`use_microbe_dom_preferential_flow`. It uses
+`microbe_methane_dom_preferential_flow_fraction` of positive infiltration to
+sample mobile DOM throughout the layers above the diagnosed water table and
+transfers that C, N,
+and P directly to the first layer intersecting the water table. This is a
+conservative event-flushing sensitivity, but it intentionally omits
+intermediate-layer mixing and reaction. It is not the proposed final transport
+model; its purpose is to determine whether unresolved preferential flow is
+large enough to explain high surface and low deep porewater DOC.
 
 Before calibration, the implementation must pass exact restart, timestep
 convergence, C/N/P and revised-carbon closure, nonnegative-state, and long-run

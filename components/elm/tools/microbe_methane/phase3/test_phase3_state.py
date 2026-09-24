@@ -20,6 +20,7 @@ import phase3  # noqa: E402
 MANIFEST = PHASE3_DIR / "phase3_reference_parameters.json"
 PARAMS_FORTRAN = ELM_DIR / "src" / "biogeochem" / "MicrobeMethaneParamsMod.F90"
 STATE_FORTRAN = ELM_DIR / "src" / "biogeochem" / "MicrobeMethaneMod.F90"
+NITRIF_DENITRIF_FORTRAN = ELM_DIR / "src" / "biogeochem" / "NitrifDenitrifMod.F90"
 READ_PARAMS_FORTRAN = ELM_DIR / "src" / "main" / "readParamsMod.F90"
 RESTART_FORTRAN = ELM_DIR / "src" / "main" / "restFileMod.F90"
 DRIVER_FORTRAN = ELM_DIR / "src" / "main" / "elm_driver.F90"
@@ -127,13 +128,14 @@ class Phase3StateTest(unittest.TestCase):
         cls.parameters = phase3.parameter_map(cls.document)
         cls.parameter_source = PARAMS_FORTRAN.read_text(encoding="utf-8")
         cls.state_source = STATE_FORTRAN.read_text(encoding="utf-8")
+        cls.nitrif_denitrif_source = NITRIF_DENITRIF_FORTRAN.read_text(encoding="utf-8")
 
     def test_parameter_manifest_exactly_matches_fortran_reader(self) -> None:
         manifest_names = set(self.parameters)
         read_names = set(re.findall(
             r"call read_scalar\(ncid, '([^']+)'", self.parameter_source
         ))
-        self.assertEqual(len(manifest_names), 73)
+        self.assertEqual(len(manifest_names), 85)
         self.assertEqual(
             self.document["schema"],
             "elm_microbe_methane_phase3_aqueous_transport_v1",
@@ -144,7 +146,7 @@ class Phase3StateTest(unittest.TestCase):
             self.assertTrue(source_id)
             self.assertTrue(units)
             self.assertTrue(provenance)
-        self.assertIn("REFERENCE TEST VALUES ONLY", self.document["warning"])
+        self.assertIn("EXECUTION-PARITY TEST VALUES ONLY", self.document["warning"])
 
         design_names = set(re.findall(
             r"`(microbe_methane_[a-z0-9_]+)`",
@@ -159,6 +161,35 @@ class Phase3StateTest(unittest.TestCase):
         self.assertAlmostEqual(thaw[1], 273.05)
         self.assertEqual(aom[3], "clm_microbe_9c2e0a_source_bug_corrected_kelvin")
         self.assertEqual(thaw[3], "clm_microbe_9c2e0a_source_bug_corrected_kelvin")
+
+    def test_native_nitrification_uses_revised_backend_ph(self) -> None:
+        multiplier = self.parameters[
+            "microbe_methane_denitrification_rate_multiplier"
+        ]
+        self.assertEqual(multiplier[1], 1.0)
+        self.assertRegex(
+            self.nitrif_denitrif_source,
+            r"if \(use_microbe_methane \.and\. \.not\. "
+            r"use_legacy_ch4_with_microbe\) then",
+        )
+        self.assertIn(
+            "pH(bounds%begc:bounds%endc) = "
+            "MicrobeMethaneParamsInst%soil_ph_fallback",
+            self.nitrif_denitrif_source,
+        )
+        self.assertIn(
+            "pH(bounds%begc:bounds%endc) = 6.5",
+            self.nitrif_denitrif_source,
+        )
+        self.assertIn(
+            "potential-rate equation has no",
+            self.nitrif_denitrif_source,
+        )
+        self.assertRegex(
+            self.nitrif_denitrif_source,
+            r"f_denit_base_vr\(c,j\) \* anaerobic_frac\(c,j\) \*\s*&\s*"
+            r"denitrification_rate_multiplier",
+        )
 
     def test_runtime_file_values_are_converted_to_elm_declared_units(self) -> None:
         self.assertEqual(
@@ -197,7 +228,21 @@ class Phase3StateTest(unittest.TestCase):
         ))
         diagnostic_pointers = {
             "o2_stress_unsat_col", "o2_stress_sat_col",
-            "dom_advective_flux_col", "dom_diffusive_flux_col",
+            "ch4_porewater_col", "ch4_porewater_unsat_col", "ch4_porewater_sat_col",
+            "dom_porewater_c_col", "dom_advective_flux_col", "dom_diffusive_flux_col",
+            "dom_macrodispersion_scalar_col", "dom_diffusion_conductivity_col",
+            "dom_cascade_production_col", "dom_litter1_production_col",
+            "dom_other_litter_production_col", "dom_som_production_col",
+            "dom_standard_microbe_return_col", "dom_guild_mortality_return_col",
+            "dom_standard_microbe_uptake_col", "dom_fermentation_col",
+            "dom_to_som_col", "dom_cascade_respiration_col",
+            "dom_internal_transport_convergence_col", "dom_drainage_loss_col",
+            "dom_net_tendency_col", "dom_profile_restoring_col",
+            "dom_budget_residual_col", "dom_complete_bypass_tendency_col",
+            "mineral_nh4_porewater_col", "mineral_no3_porewater_col",
+            "mineral_nh4_mobile_fraction_col",
+            "mineral_nh4_advective_flux_col", "mineral_nh4_diffusive_flux_col",
+            "mineral_no3_advective_flux_col", "mineral_no3_diffusive_flux_col",
         }
         self.assertTrue(diagnostic_pointers <= pointers)
         prognostic_pointers = pointers - diagnostic_pointers
@@ -212,6 +257,18 @@ class Phase3StateTest(unittest.TestCase):
             self.assertIn(f"{state}_c_sat_col" if not state.startswith("conc_")
                           else f"{state}_sat_col", prognostic_pointers)
         self.assertIn("sat_fraction_previous_col(:)", self.state_source)
+
+    def test_ch4_porewater_diagnostic_is_derived_without_changing_state(self) -> None:
+        for name in ("MM_CH4_POREWATER", "MM_CH4_POREWATER_UNSAT",
+                     "MM_CH4_POREWATER_SAT"):
+            self.assertIn(f"fname='{name}'", self.state_source)
+        self.assertIn("value = henry_solubility * bulk_inventory / capacity", self.state_source)
+        self.assertIn("capacity = air_fraction + liquid_fraction * henry_solubility", self.state_source)
+        self.assertIn("liquid_fraction = porosity * thawed_fraction", self.state_source)
+        restart_block = self.state_source.split("subroutine Restart", 1)[1].split(
+            "end subroutine Restart", 1
+        )[0]
+        self.assertNotIn("MM_CH4_POREWATER", restart_block)
 
     def test_cold_start_uses_named_seed_and_zero_substrates_and_gases(self) -> None:
         self.assertIn(
@@ -293,6 +350,89 @@ class Phase3StateTest(unittest.TestCase):
                 dataset.variables["microbe_methane_mfg_biomass_min"][:] = 2.0e-15
             with self.assertRaisesRegex(SystemExit, "microbe_methane_mfg_biomass_min"):
                 phase3.validate_parameter_file(output_path, MANIFEST)
+
+    def test_parameter_file_injection_updates_legacy_scalar_parameters(self) -> None:
+        try:
+            import netCDF4  # type: ignore
+        except ImportError:
+            self.skipTest("netCDF4 is unavailable; Docker runs this test")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            input_path = temporary / "legacy.nc"
+            output_path = temporary / "updated.nc"
+            with netCDF4.Dataset(input_path, "w") as dataset:
+                dataset.createDimension("pft", 4)
+                dataset.createDimension("allpfts", 1)
+                legacy = dataset.createVariable(
+                    "microbe_methane_observed_dom_relaxation_timescale", "f8"
+                )
+                legacy.assignValue(7.0)
+                legacy_float = dataset.createVariable(
+                    "microbe_methane_observed_dom_deep_concentration", "f4"
+                )
+                legacy_float.assignValue(1.0)
+
+            phase3.inject_parameters(input_path, output_path, MANIFEST)
+            phase3.validate_parameter_file(output_path, MANIFEST)
+
+            with netCDF4.Dataset(output_path) as dataset:
+                variable = dataset.variables[
+                    "microbe_methane_observed_dom_relaxation_timescale"
+                ]
+                self.assertEqual(variable.dimensions, ())
+                self.assertEqual(float(variable[...]), 14.0)
+                self.assertAlmostEqual(
+                    float(dataset.variables[
+                        "microbe_methane_observed_dom_deep_concentration"
+                    ][...]),
+                    17.47653726,
+                    places=5,
+                )
+
+    def test_parameter_file_injection_can_preserve_calibrated_values(self) -> None:
+        try:
+            import netCDF4  # type: ignore
+        except ImportError:
+            self.skipTest("netCDF4 is unavailable; Docker runs this test")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            input_path = temporary / "calibrated.nc"
+            output_path = temporary / "augmented.nc"
+            with netCDF4.Dataset(input_path, "w") as dataset:
+                dataset.createDimension("pft", 4)
+                dataset.createDimension("allpfts", 1)
+                calibrated = dataset.createVariable(
+                    "microbe_methane_k_aerobic_oxidation_ch4", "f8"
+                )
+                calibrated.assignValue(50.0)
+                calibrated.units = "mmol m-3"
+                calibrated.long_name = "calibrated aerobic oxidation methane half saturation"
+
+            phase3.inject_parameters(
+                input_path,
+                output_path,
+                MANIFEST,
+                preserve_existing=True,
+            )
+            phase3.validate_parameter_file(
+                output_path,
+                MANIFEST,
+                allow_nonreference_values=True,
+            )
+
+            with netCDF4.Dataset(output_path) as dataset:
+                self.assertEqual(
+                    float(dataset.variables[
+                        "microbe_methane_k_aerobic_oxidation_ch4"
+                    ][...]),
+                    50.0,
+                )
+                self.assertIn(
+                    "microbe_methane_aqueous_nh4_molecular_diffusivity",
+                    dataset.variables,
+                )
 
 
 if __name__ == "__main__":

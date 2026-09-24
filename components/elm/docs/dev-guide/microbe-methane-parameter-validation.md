@@ -16,10 +16,11 @@ parameterization for US-MOz, SPRUCE, or global applications.
 
 The most important review questions are:
 
-1. In the legacy executable, were concentration controls truly evaluated as
-   mol m-3 and specific rates as s-1, as the active equations imply, or were
-   the parameter-file numbers intended to be mM and d-1 despite those
-   equations?
+1. Which intended-unit parameter track should replace software execution
+   parity for science runs? Xu et al. (2015) and the local source support raw
+   concentration controls in mmol m-3 and specific rates on hourly/daily—not
+   second-based—timescales, but several later processes changed operator or
+   lack an unambiguous published mapping.
 2. Which exact `microbepar_in`, PFT parameter NetCDF, source revision, and
    restart were used for a scientifically accepted CLM-SPRUCE simulation?
 3. Are the current microbial C:P ratios defensible, and should DOM, bacterial,
@@ -28,6 +29,17 @@ The most important review questions are:
    large executable-equivalent growth and oxidation rates intended?
 5. Which reaction and transport parameters should be site independent, and
    which require calibration against CH4 profiles and fluxes?
+
+For short reaction/transport calibration experiments only, an observed-DOM
+restoring harness is available behind `use_microbe_observed_dom_calibration`.
+Its named parameters are
+`microbe_methane_observed_dom_relaxation_timescale`,
+`microbe_methane_observed_dom_deep_concentration`,
+`microbe_methane_observed_dom_surface_amplitude`, and
+`microbe_methane_observed_dom_efold_depth`. These describe a smooth fit to the
+2013 SPRUCE DOC profile and are not proposed as production-science parameters.
+The imposed signed carbon source or sink is diagnosed separately as
+`MM_DOM_PROFILE_RESTORE`.
 
 ## Reproducible baseline
 
@@ -103,8 +115,105 @@ The executed legacy arithmetic therefore behaves as though the constants are
 that executed behavior. Values of 1 and 4 mmol m-3 instead preserve the units
 stated in the legacy declaration; they are not a strict behavioral port.
 
+### Published Xu et al. (2015) unit contract
+
+Xu et al. (2015), the paper describing the original microbial-functional-group
+CH4 kernel, provides stronger evidence about scientific intent than the later
+CLM-Microbe source declarations alone:
+
+- Appendix A states that the reaction time step is hourly and that all state
+  variables are expressed as mmol per m3 of soil/water.
+- Table 1 gives concentration controls in mmol m-3 (with two aerobic-oxidation
+  constants reported in mmol L-1), microbial specific rates in d-1, and the
+  maximum acetate-production rate in mmol m-3 h-1.
+- The original application was a one-layer, sealed incubation calculation.
+  Transport and ecosystem coupling added later therefore cannot be validated
+  from the incubation paper alone.
+- Xu et al. explicitly identify limited growth/death data, unproven anaerobic
+  oxidation in the incubation, theoretical pH feedback, and absence of
+  vegetation as validation limitations. Those parameters should not be
+  treated as independently field-validated merely because they appear in
+  Table 1.
+
+Reference: Xu et al. (2015),
+<https://doi.org/10.1002/2015JG002935>.
+
+This evidence makes it unlikely that a single legacy-file conversion rule was
+scientifically intended. The following examples distinguish three different
+objects: the Xu publication value, the later CLM-SPRUCE/CLM-Microbe raw value,
+and the value needed to reproduce the later executable's arithmetic in ELM.
+
+| Process parameter | Xu et al. (2015), converted to ELM units | Later raw value | Current execution-parity ELM value | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| Available-C half saturation | 12 mmol m-3 | 16 | 16,000 mmol m-3 | Later raw value is close to Xu only if it is already mmol m-3 |
+| Maximum acetate production | 0.84 mmol m-3 d-1 | 2.4e-6 to 2.48e-6 | 207.36 to 214.272 mmol m-3 d-1 | Treating the raw rate as mmol m-3 s-1 gives 0.207 to 0.214 mmol m-3 d-1 and removes the concentration x1000 |
+| H2-methanogen growth | 0.25 d-1 | 0.01 | 864 d-1 | Nearby source comments imply h-1; raw x24 gives 0.24 d-1, almost exactly Xu |
+| Acetate-methanogen growth | 0.035 d-1 | 0.007034 to 0.008 | 607.738 to 691.2 d-1 | Raw x24 gives 0.169 to 0.192 d-1, a plausible later calibration |
+| Aerobic-methanotroph growth | 0.15 d-1 | 0.008 | 691.2 d-1 | Raw x24 gives 0.192 d-1, close to Xu |
+| Acetoclastic CH4 half saturation | 5 mmol m-3 | 0.05 | 50 mmol m-3 | The later raw and executable-parity values bracket, but do not match, Xu |
+| Aerobic CH4 half saturation | 2.5 mmol m-3 (0.0025 mmol L-1) | 1 | 1,000 mmol m-3 | The candidate 1 mmol m-3 setting is a later declared-unit hypothesis, not the Xu value |
+| Aerobic O2 half saturation | 500 mmol m-3 (0.5 mmol L-1) | 4 | 4,000 mmol m-3 | The candidate 4 mmol m-3 setting is far below Xu; 4,000 is eightfold above it |
+| CH4 bubbling threshold | 0.0005 mmol m-3 | 0.05 | 50 mmol m-3 | Threshold semantics and units changed substantially after Xu |
+| Plant transport coefficient | 0.68 d-1 | 0.007 | 0.007 m s-1 in ELM | The later transport operator is dimensionally different and needs independent validation |
+
+The matching CLM-SPRUCE source strengthens this conclusion. Its declarations
+label the microbial growth and death parameters as d-1 and the Monod constants
+as mmol m-3. Comments beside several growth/death constants nevertheless
+multiply them by 24 and cite hourly ranges, indicating that the active raw
+values were probably intended as h-1. In `microbeMod.F90`, `dt` is assigned directly from
+`get_step_size()` in seconds and is multiplied by the unconverted reaction and
+mortality rates. The gas and substrate states are also formed by dividing
+g m-3 by molecular weight, which numerically produces mol m-3 (or mmol L-1),
+and are compared directly with constants labeled mmol m-3. Thus the later
+source contains two independent dimensional inconsistencies:
+
+1. hour- or day-based specific rates are stepped as if they were s-1; and
+2. mmol m-3 half-saturation constants are compared with mol m-3 state values.
+
+Supply limiters keep these mistakes from necessarily causing a numerical
+blow-up, but they can turn reactions into near-instantaneous, substrate-limited
+events and can pin biomass at its lower bound. That is consistent with the
+behavior seen in the current execution-parity tests.
+
+The repository history identifies the transition. CLM-SPRUCE commit
+`8daeedb3ee20969a4bbf30350d5e59a45a6c5a26` is titled “Update to consider
+model time steps (1800 seconds).” It added `dt=get_step_size()` and multiplied
+reaction, oxidation, mortality, and transport tendencies by that second-based
+`dt`, while leaving the nominal guild growth/death constants unchanged. It
+also retuned selected parameters by unrelated factors (for example maximum
+acetate production changed from `0.0015` to `0.00005`, a factor of 30, rather
+than an hourly-to-second factor of 3,600). This is the clearest point at which
+the original hourly incubation formulation became a mixed-unit ecosystem
+implementation. Later optimized values were therefore calibrated through
+that implementation and cannot all be repaired by one algebraic conversion.
+
+The Xu values do **not** establish a ready-to-use SPRUCE parameter set: the
+later ecosystem model was restructured, recalibrated, and optimized against
+field observations. They do establish that the current executable-parity set
+must not be described as the likely scientific unit interpretation. We will
+therefore retain three explicitly named validation tracks:
+
+1. **execution parity** -- reproduces the later legacy arithmetic, including
+   its apparent unit mistakes;
+2. **later-source intended units** -- treats later raw concentration values as
+   mmol m-3, volumetric rates as mmol m-3 s-1, and specific guild rates as
+   h-1 where the source's x24 comments support that interpretation; and
+3. **Xu-published science values** -- maps the 2015 Table 1 values through the
+   current ELM equations, changing only parameters for which the process
+   mapping is unambiguous.
+
+The later-source intended-unit track is a reconstruction hypothesis, not a
+claim to reproduce the calibrated Ricciuto simulation. Its purpose is to
+restore physically interpretable units before recalibration.
+
+Inhibition scales, pH-feedback scales, transport thresholds, and ebullition
+thresholds must be audited individually. They should not automatically follow
+either the concentration half-saturation conversion or the specific-rate
+conversion.
+
 All active runtime-file half-saturation constants were checked at their use
-sites. No additional factor-of-1,000 correction is needed:
+sites. No additional factor-of-1,000 correction is needed **for execution
+parity**:
 
 | Legacy name | Raw value | ELM execution-parity value, mmol m-3 |
 | --- | ---: | ---: |
@@ -209,7 +318,7 @@ means it was absent there and came from active source or a declaration.
 | `microbe_methane_mfg_biomass_min` | `MFGbiomin` | 1.2011e-14 g C m-3 | Declaration default converted from mol C m-3 |
 | `microbe_methane_k_acetate` | `m_dKAce` | 16,000 mmol C m-3 | Runtime; execution-parity concentration conversion verified |
 | `microbe_methane_acetate_prod_max` | `m_dAceProdACmax` | 207.36 mmol C m-3 d-1 | Runtime; volumetric-rate conversion |
-| `microbe_methane_k_acetate_prod_o2` | `m_dKAceProdO2` | 4 mmol O2 m-3 | Runtime; concentration conversion |
+| `microbe_methane_k_acetate_prod_o2` | `m_dKAceProdO2` | 4 mmol O2 m-3 | Runtime; half-saturation for aerobic acetate oxidation; concentration conversion. The commented CLM-SPRUCE fermentation-inhibition expression is not enabled. |
 | `microbe_methane_dom_to_acetate_q10` | `m_dACMinQ10` | 3 | Runtime |
 | `microbe_methane_acetogenesis_max` | `m_dH2ProdAcemax` | 4.32 mmol C m-3 d-1 | Runtime; volumetric-rate conversion |
 | `microbe_methane_k_acetogenesis_h2` | `m_dKH2ProdAce` | 1.65 mmol H2 m-3 | Runtime; concentration conversion |
@@ -260,6 +369,7 @@ means it was absent there and came from active source or a declaration.
 | --- | --- | --- | --- |
 | `microbe_methane_ph_min`, `_ph_opt`, `_ph_max` | `pHmin`, `pHopt`, `pHmax` | 4, 7, 10 | Declaration defaults |
 | `microbe_methane_soil_ph_fallback` | none | 7 globally; 4.5 for the initial SPRUCE test | Temporary site-level fallback while native ELM soil pH is unavailable |
+| `microbe_methane_denitrification_rate_multiplier` | none | 1 reference; 0.2 provisional SPRUCE sensitivity | Revised-backend-only potential-rate multiplier; unity preserves the inherited equation, while 0.2 produced an approximately 50% reduction in realized denitrification in the short continuation test |
 | `microbe_methane_saturation_reaction_threshold` | `micfinundated` literal | 0.99 | Active literal mapped to current ELM hydrology |
 | `microbe_methane_reaction_t_ref` | temperature literal | 286.65 K | Active 13.5 degrees C reference expressed in K |
 | `microbe_methane_aom_t_ref` | AOM temperature literal | 286.65 K | Repairs a Celsius literal compared directly with Kelvin state |
@@ -277,6 +387,66 @@ must not be treated as a spatial soil-pH product or calibration. A spatial,
 depth-resolved ELM pH input is still required before calibrating pH-sensitive
 rates.
 
+The native nitrogen module previously retained its independent pH placeholder
+of 6.5 during revised-methane runs. At SPRUCE this made the Parton
+nitrification pH scalar 0.920, whereas the methane kernel used the configured
+fallback pH of 4.5; the corresponding nitrification scalar is 0.364. Revised
+methane now passes the same fallback pH to native nitrification while all
+other backends retain the inherited 6.5 behavior. The Del Grosso/Parton
+denitrification potential-rate equation has no explicit pH response, so it
+does not reuse the methanogen pH curve. Its pH sensitivity remains indirect,
+through the nitrate supplied by nitrification.
+
+A one-year continuation from the completed 100-year AD plus 10-year final
+spinup reduced hummock/hollow gross nitrification from 1.51/1.16 to 0.95/0.89
+g N m-2 yr-1 after aligning pH, but denitrification remained 1.24/1.03 versus
+1.23/1.04 g N m-2 yr-1. The existing nitrate inventory and the carbon/anoxia
+limits therefore buffer denitrification on this timescale. The independent
+`microbe_methane_denitrification_rate_multiplier` scales potential
+denitrification only for the revised backend. Its reference value of 1
+preserves the inherited equation and is not a pH response. Because nitrate is
+allocated competitively among denitrification, plant uptake, and microbial
+immobilization, halving the potential rate did not halve the realized flux: a
+multiplier of 0.5 reduced the hummock/hollow weighted flux by only 20.4%, from
+1.098 to 0.874 g N m-2 yr-1. A provisional multiplier of 0.2 produced 0.552
+g N m-2 yr-1, a 49.7% realized reduction in the same one-year continuation.
+
+An 18-year continuation with the aligned pH and a unity denitrification
+multiplier did not produce the expected progressive denitrification decline.
+Hummock/hollow weighted nitrification was 0.911 and denitrification was 1.098
+g N m-2 yr-1 in year 1, but their year 15--18 means were 1.595 and 1.477 g N
+m-2 yr-1, respectively. The mineral-soil nitrate stock increased from 3.82
+to a year 15--18 mean of 4.95 g N m-2. In this simulation, ammonium supply,
+gross mineralization, competition, and interannual environmental variability
+allow nitrification to rebound; the pre-existing nitrate reservoir is not
+drawn down. Thus the pH correction changes short-term kinetics but does not,
+by itself, deliver a sustained 50% reduction in denitrification.
+
+A cold-start 100-year accelerated plus 10-year final-spinup experiment with
+the aligned pH and a 0.2 multiplier did produce the expected ecosystem
+feedback. Relative to the existing 100+10 reference, the final-decade
+hummock/hollow denitrification flux decreased from 1.419 to 1.103 g N m-2
+yr-1 (22.3%), plant mineral-N uptake increased from 3.057 to 4.131 g N m-2
+yr-1 (35.1%), and NPP increased from 193.1 to 254.9 g C m-2 yr-1 (32.0%).
+Mineral N more than doubled, from 5.61 to 12.10 g N m-2, and `FPG` increased
+from 0.796 to 0.811. The realized denitrification reduction is much smaller
+than the one-year response because greater mineralization and substrate
+stocks compensate for the lower potential-rate coefficient. This is not a
+strict single-parameter attribution: the earlier reference retained native
+nitrification's pH 6.5 placeholder, while the treatment uses the corrected
+pH 4.5. A matched pH-4.5, unity-multiplier 100+10 control is required before
+assigning the productivity response specifically to denitrification.
+
+Oxygen handling is shared but not equation-identical. The revised adapter
+publishes its saturated and unsaturated O2 concentrations and accepted O2
+demands through the legacy `ch4_vars` carrier. Native denitrification converts
+those quantities to an anaerobic fraction with the Arah/Vinten expression;
+it does not consume O2 directly. With `anoxia_wtsat=.false.`, as in the
+100-year AD plus 10-year final-spinup N-deposition experiment, that calculation
+uses only the unsaturated O2 state. Enabling `anoxia_wtsat` would include the
+saturated state and must be tested separately because it is expected to
+increase, rather than reduce, the inferred anaerobic fraction at SPRUCE.
+
 ### Diffusion, plant transport, ebullition, and atmosphere
 
 | ELM parameter | Legacy name | Current value and unit | Source/status |
@@ -284,8 +454,14 @@ rates.
 | `microbe_methane_dom_diffusivity` | `dom_diffus` | 1.8e-7 m2 s-1 | Runtime; legacy operator is not dimensionally identical to ELM finite-volume transport |
 | `microbe_methane_dom_relaxation_rate` | executed `dom_diffus` neighbor relaxation | 1.8e-7 s-1 | Parity-test mapping of the value's actual role in the CLM equation; read only when the test switch is enabled |
 | `microbe_methane_aqueous_dom_molecular_diffusivity` | none | 1.0e-10 m2 s-1 | Initial hypothesis for physical aqueous transport; research/calibration required |
+| `microbe_methane_aqueous_dom_saturated_macrodispersion` | none | 0 m2 s-1 | Default zero preserves the current aqueous operator; positive values test unresolved thawed saturated-zone mixing and require profile validation |
 | `microbe_methane_aqueous_acetate_molecular_diffusivity` | none | 1.0e-9 m2 s-1 | Initial hypothesis for physical aqueous transport; research/calibration required |
+| `microbe_methane_aqueous_nh4_molecular_diffusivity` | none | 1.98e-9 m2 s-1 | Initial 25 C aqueous value; temperature, peat tortuosity, and profile validation required |
+| `microbe_methane_aqueous_no3_molecular_diffusivity` | none | 1.90e-9 m2 s-1 | Initial 25 C aqueous value; temperature, peat tortuosity, and profile validation required |
+| `microbe_methane_aqueous_nh4_partition_coefficient` | none | 0.005 m3 water kg-1 dry soil (5 L kg-1) | Initial linear-equilibrium sorption hypothesis; strongly site-, pH-, and substrate-dependent and must be calibrated |
+| `microbe_methane_aqueous_mineral_n_advection_multiplier` | none | 1.0 | Experimental sensitivity only. Unity keeps mineral-N advection coupled to the modeled water flux; non-unity represents unresolved preferential mass flow or hydraulic redistribution and must not be treated as calibrated. |
 | `microbe_methane_aqueous_dom_mobile_fraction` | none | 1.0 | Initial equilibrium-mobile-fraction hypothesis; research/calibration required |
+| `microbe_methane_aqueous_dom_mobile_saturation_exponent` | none | 0.0 | Zero preserves constant mobility; test 1.0 applies linear liquid-saturation scaling; research/calibration required |
 | `microbe_methane_aqueous_acetate_mobile_fraction` | none | 1.0 | Initial equilibrium-mobile-fraction hypothesis; research/calibration required |
 | `microbe_methane_aqueous_solute_dispersivity` | none | 0.01 m | Initial longitudinal-dispersivity hypothesis; soil/site validation required |
 | `microbe_methane_aqueous_solute_tortuosity_exponent` | none | 2.0 | Initial saturation/tortuosity hypothesis; soil/site validation required |
@@ -738,15 +914,40 @@ the remaining difference to reaction parameters or unit conversions.
 
 ### Conservative DOM C/N/P relaxation diagnostic
 
+`dom_diffus` does not originate in the Xu et al. (2015) incubation model. That
+study ran each topsoil, mineral-soil, and permafrost sample as an independent
+one-layer microcosm, so it contains no vertical DOM transport parameter. The
+parameter appears in the later 10-layer ELM-SPRUCE integration reported by
+Ricciuto et al. (2021), which describes vertical DOC and acetate transport as
+Fickian diffusion and gives an optimized value of `1.8e-7` over a
+`1.44e-7`--`2.16e-7` sensitivity range.
+
 The next source-parity experiment isolates the CLM-Microbe DOM vertical
 update. The source executes `dom_diffus=1.8e-7` as an adjacent-layer rate in
-s-1, not as the m2 s-1 coefficient stated in its metadata. ELM now exposes a
+s-1, not as the m2 s-1 coefficient stated in its metadata. For similarly sized
+adjacent layers at 298 K, the value corresponds to an approximately 64-day
+e-folding time; the actual coefficient also contains the layer-thickness ratio
+and `(T/298)^1.87`. It therefore cannot be compared numerically with a
+finite-volume coefficient in m2 s-1. ELM now exposes a
 separate test-only parameter, `microbe_methane_dom_relaxation_rate`, and the
 default-off namelist switch `use_clm_microbe_dom_relaxation`. After each
 reaction update, one backward-Euler finite-volume matrix is applied to DOM C,
-N, and P with closed vertical boundaries. Each element has an independent
-inventory residual check. This preserves the source's equal-layer relaxation
-timescale without copying its sequential, non-conservative update.
+N, and P and independently to the saturated and unsaturated acetate stores,
+with closed vertical boundaries. Each transported inventory has an independent
+residual check. This matches the source's use of `dom_diffus` for both DOC and
+acetate while preserving the equal-layer relaxation timescale without copying
+its sequential, non-conservative update.
+
+A clean 80-year AD-spinup comparison tested DOM-only relaxation against the
+same relaxation applied independently to saturated and unsaturated acetate.
+The years 74--80 enclosure means were nearly unchanged: methane production was
+7.8470 versus 7.8479 g C m-2 yr-1, net surface flux was 7.8563 versus
+7.8569 g C m-2 yr-1, and DOM inventory was 42.5066 versus 42.5844 g C m-2.
+Endpoint median model/observation ratios changed from 0.174 to 0.169 for DOC,
+0.203 to 0.204 for acetate, and 0.0779 to 0.0838 for CH4. Thus omission of
+acetate relaxation was a real source-structure difference, but it does not
+explain the large profile mismatch. Parameter-unit interpretation and the
+still-evolving spinup state remain much larger suspects.
 
 Paired one-year OLMT SPRUCE cases started from the same CLM-SOM restart and
 used the 0.99 saturated-fraction parity option. `20260920MM27` enabled DOM
@@ -1244,7 +1445,659 @@ The corrected run had a closed lower boundary in the native hydrology solve,
 so diagnosed bottom DOM export was zero; lateral/runoff solute export remains
 a separate future development.
 
+### Saturation-dependent DOM mobility sensitivity
+
+The aqueous operator now accepts a layer-dependent DOM mobile fraction. The
+standard parameter file contains
+`microbe_methane_aqueous_dom_mobile_saturation_exponent`; the layer value is
+
+`f_mobile = f_mobile,max * S_liq ** exponent`.
+
+An exponent of zero is an explicit exact-preservation branch for the existing
+constant-mobile-fraction formulation. Positive exponents are experimental.
+The mobile fraction multiplies the porewater concentration used by both
+upwind advection and diffusion/dispersion. This is distinct from the existing
+saturation/tortuosity factor in molecular conductivity: the former partitions
+the DOM inventory between mobile and immobile material, while the latter
+represents connectivity of the aqueous pathway. With exponent one and
+`theta = porosity*S_liq`, the mobile concentration becomes `DOM/porosity`
+rather than `DOM/theta`, avoiding an inverse-water-content concentration
+increase as soil dries. This remains an instantaneous equilibrium assumption,
+not a calibrated sorption or mobile/immobile exchange model.
+
+Three native-ARM OLMT members started from the same year-51 restart and used
+the same one-year SPRUCE forcing, executable, surface data, and methane
+parameters. The enclosure mean excludes fen and renormalizes to 34% hollow
+and 66% hummock.
+
+| DOM transport | Final DOM stock (g C m-2) | CH4 production (g C m-2 yr-1) | CH4 oxidation | Net FCH4 |
+| --- | ---: | ---: | ---: | ---: |
+| Current aqueous, exponent 0 | 103.15 | 3.172 | 2.772 | 0.392 |
+| Saturation-dependent mobile fraction, exponent 1 | 99.19 | 2.659 | 2.591 | 0.147 |
+| CLM adjacent-layer relaxation | 105.84 | 7.238 | 3.330 | 2.183 |
+
+Relative to the current aqueous operator, linear saturation dependence lowered
+the final DOM stock by 3.8%, gross methane production by 16.2%, and net methane
+flux by 62.5%. It did more than uniformly slow transport: because it changes
+the transported concentration profile, the annual net face flux reversed from
+downward to upward around 0.12--0.21 m. Standard bacteria/fungi uptake rose
+from 29.81 to 33.44 g C m-2 yr-1, while revised-methane fermentation fell from
+19.47 to 17.71 g C m-2 yr-1.
+
+The CLM relaxation reference mixed substantially more DOM below 1 m and more
+than doubled methane production. It is therefore useful for source parity but
+is not interchangeable with water-flux-driven transport. All three diagnosed
+DOM budgets closed: maximum absolute layer residuals were below
+`8.2e-12 g C m-3 yr-1`. Exact configurations and plot/CSV artifacts are under
+`olmt_runs/20260922_spruce_microbe_50yr/dom_mobile_sensitivity` outside the
+source tree. A longer continuation is needed before selecting a mobility
+exponent; this one-year test establishes direction and mechanism, not an
+equilibrated profile or calibration.
+
+### Saturated-zone DOM macrodispersion sensitivity
+
+The physical operator retains molecular diffusion and water-flux-driven
+mechanical dispersion but now permits an additional default-zero DOM
+macrodispersion coefficient,
+`microbe_methane_aqueous_dom_saturated_macrodispersion`. This term represents
+unresolved mixing by connected macropores, preferential flow, and water-table
+motion rather than faster molecular diffusion. Its layer conductivity is
+
+`theta_liq * D_sat * f_thaw * f_sat`,
+
+where `f_sat` ramps linearly from zero at
+`microbe_methane_saturation_reaction_threshold` (0.99 in the reference file)
+to one at complete liquid saturation. Harmonic face conductance requires both
+adjoining layers to have a positive contribution, so the added pathway cannot
+cross an unsaturated or frozen intervening layer. DOM C, N, and organic P use
+the same matrix. Acetate is intentionally unchanged pending evidence that its
+effective mobility requires the same unresolved process.
+
+The coefficient is added in an explicit positive-value branch. A value of
+zero therefore executes the pre-existing conductivity expression without a
+floating-point reassociation, preserving the default path bit for bit.
+
+This is distinct from the CLM adjacent-layer relaxation. It remains metric,
+grid-aware, and conservative, while relaxation has an equivalent diffusivity
+that grows with squared layer thickness. The initial sensitivity values are
+`1e-9`, `3e-9`, and `1e-8 m2 s-1`; none is a calibrated default. These tests
+retain a constant DOM mobile fraction (saturation exponent zero) so the two
+hypotheses are not combined.
+
+The process hypothesis is supported by peat tracer studies rather than by a
+direct calibration of `D_sat`. Ours et al. (1997) found preferential transport
+through active macropores, exchange with dead pore space, and longitudinal
+dispersivities ranging from centimeters to tens of centimeters in one-meter
+bog-peat cores
+([doi:10.1016/S0022-1694(96)03247-7](https://doi.org/10.1016/S0022-1694(96)03247-7)).
+Hoag and Price (1997) examined matrix diffusion and solute retardation in peat
+([manuscript](https://uwaterloo.ca/wetlands-hydrology/sites/default/files/uploads/files/1997_-_rob_s_hoag_-_theeffectsofmatrixdiffusiononsolutetransportandretretrieved-2016-07-19.pdf)),
+and Rezanezhad et al. (2012) resolved mobile--immobile exchange and diffusion
+into dead-end pores in breakthrough experiments
+([doi:10.4141/CJSS2011-050](https://doi.org/10.4141/CJSS2011-050)). Liu et al.
+(2020) related preferential transport to peat structure, anisotropy,
+macropores, and saturated conductivity
+([doi:10.1002/hyp.13717](https://doi.org/10.1002/hyp.13717)). Conversely,
+Simhayov et al. (2018) found a conventional convection--dispersion equation
+adequate for conservative chloride in one constructed-fen peat, demonstrating
+that enhanced or dual-domain transport is peat dependent
+([doi:10.5194/soil-4-63-2018](https://doi.org/10.5194/soil-4-63-2018)).
+Ricciuto et al. (2021) remains the SPRUCE profile and flux evaluation target
+([doi:10.1029/2019JG005468](https://doi.org/10.1029/2019JG005468)).
+
+Four native-ARM OLMT members used the same year-51 SPRUCE restart, forcing,
+executable, pH-4.5 parameter file, and constant mobile fraction. A fifth CLM
+relaxation member provides a reference. Enclosure means exclude fen and use
+34% hollow plus 66% hummock weights.
+
+| Saturated mixing | Final DOM stock (g C m-2) | CH4 production (g C m-2 yr-1) | CH4 oxidation | Net FCH4 |
+| --- | ---: | ---: | ---: | ---: |
+| `D_sat=0` | 103.153 | 3.172 | 2.772 | 0.392 |
+| `D_sat=1e-9 m2 s-1` | 103.149 | 3.199 | 2.786 | 0.395 |
+| `D_sat=3e-9 m2 s-1` | 103.155 | 3.233 | 2.801 | 0.405 |
+| `D_sat=1e-8 m2 s-1` | 103.210 | 3.302 | 2.848 | 0.413 |
+| CLM relaxation | 105.839 | 7.238 | 3.330 | 2.183 |
+
+The largest tested coefficient increased final DOM from 1.01 to
+2.00 g C m-3 at 1.04 m and from 0.228 to 0.497 g C m-3 at 1.73 m. It raised
+CH4 production by 4.1% and net flux by 5.4%, establishing the expected
+direction without approaching relaxation's deep DOM or methane response in
+one year. The zero member matched all 103 common numeric history variables
+from the pre-feature control bit for bit. Every positive-coefficient DOM
+budget also closed, with maximum absolute layer residual below
+`8.4e-12 g C m-3 yr-1`. Longer runs are required to determine whether the
+profile response accumulates and whether `D_sat` should remain fixed or be
+linked to diagnosed water-table motion or hydraulic flux.
+
+#### Water-table-overlap gate audit
+
+The initial macrodispersion gate used layer-mean relative liquid saturation.
+In the five-year mature-restart control, neither the layer intersected by the
+water table nor the layer immediately below it ever reached the 0.99 reaction
+threshold in the hummock or hollow. The extra pathway therefore switched on
+only near 0.6 m and deeper, despite an enclosure-mean water-table depth of
+approximately 0.126 m. This is a geometric inconsistency: a layer can contain
+a connected saturated interval below the water table while its layer-mean
+liquid saturation remains below 0.99.
+
+The default-off `use_microbe_zwt_macrodispersion` sensitivity replaces only
+that gate with the fraction of layer thickness below the connected water
+table,
+
+```text
+f_zwt = clamp((z_bottom - max(z_top, max(0, ZWT))) /
+              (z_bottom - z_top), 0, 1).
+```
+
+The existing liquid-volume and thawed-fraction multipliers remain in the
+conductivity. Thus the option does not create water, does not bypass ice
+impedance, and does not alter the conservative transport matrix. With the
+option disabled, the previous 0.99 liquid-saturation threshold remains
+unchanged. `MM_DOM_MACRODISP_SCALAR` and `MM_DOM_DIFF_CONDUCTIVITY` expose the
+applied layer scalar and total diffusion/dispersion conductivity.
+
+Three five-year native-ARM OLMT continuations started from the same mature
+SPRUCE restart. Preferential flow was disabled. The enclosure mean excludes
+fen and combines 34% hollow with 66% hummock.
+
+| Gate and coefficient | Final DOM stock | DOC/obs median | Acetate/obs median | CH4/obs median | CH4 production | CH4 oxidation | Net FCH4 | NPP |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.99 threshold, `D_sat=1e-7` | 45.52 | 0.018 | 0.867 | 0.605 | 3.82 | 3.68 | 1.54 | 297.3 |
+| ZWT overlap, `D_sat=1e-8` | 38.77 | 0.193 | 1.250 | 0.826 | 6.51 | 5.94 | 1.36 | 287.5 |
+| ZWT overlap, `D_sat=1e-7` | 13.54 | 0.131 | 1.540 | 1.041 | 11.99 | 6.94 | 2.50 | 264.6 |
+
+Stocks and NPP are `g C m-2` and `g C m-2 yr-1`, respectively; methane fluxes
+are `g C m-2 yr-1`. The profile ratios are medians of modeled/observed values
+matched by sampling depth and day of year.
+
+The geometric gate corrected the intended activation. At the 0.119 m layer,
+the mean scalar changed from 0.014 in the threshold control to 0.505; at
+0.212 m it changed from 0.025 to 0.823. With `D_sat=1e-7`, DOC at 1.04 m rose
+from effectively zero to 5.48 g C m-3 water and at 1.73 m from zero to
+1.01 g C m-3 water. Those values remain far below the approximately
+50--60 g C m-3 observed at those depths. The fifth-year downward diffusive
+DOM-C flux was 9.53 g C m-2 yr-1 at 1.04 m and 1.17 at 1.73 m, while local
+fermentation losses were 9.73 and 7.94 g C m-2 yr-1. The enhanced transport is
+therefore delivering DOM to depth, but biology consumes most of it instead of
+allowing the observed deep concentration to accumulate.
+
+This experiment supports a ZWT-aware gate as the more internally consistent
+geometry, but does not select `D_sat`. The `1e-7` member strongly depleted the
+column DOM stock over five years, depressed NPP, overshot the acetate profile,
+and still did not reproduce deep DOC. The next attribution should separate
+deep fermentation and standard microbial uptake from DOM supply using the
+full layer budget, then test their kinetics before increasing transport
+further. A longer run is also required because none of these five-year members
+is demonstrably equilibrated.
+
+### Methane transport and storage attribution
+
+A five-member, one-year OLMT experiment isolated the high-flux/low-porewater-
+CH4 result from the observed-DOM calibration. All members started from the
+same productive year-6 restart, retained DOM and acetate relaxation, disabled
+aqueous transport, used identical microbial kinetics, excluded fen from the
+enclosure mean, and changed only the CH4 threshold, plant coefficient, and gas
+diffusion multiplier. The surface history fields separated diffusion,
+aerenchyma, and ebullition. Initial and final restart inventories provided an
+independent storage term.
+
+| Member | Threshold input | Plant coefficient | Diffusion multiplier | Production | Oxidation | Diffusion | Plant | Ebullition | Net flux | Delta storage |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| current | 0.05 | 0.007 | 2 | 5.732 | 0.00060 | 0.077 | 0.098 | 5.561 | 5.736 | -0.005 |
+| corrected threshold | 50 | 0.007 | 2 | 5.732 | 0.00067 | 0.814 | 0 | 2.789 | 3.604 | 2.127 |
+| corrected, no plant | 50 | 0 | 2 | 5.732 | 0.00067 | 0.815 | 0 | 2.789 | 3.604 | 2.127 |
+| diffusion only | 1e9 | 0 | 2 | 5.732 | 0.00069 | 0.877 | 0 | 0 | 0.877 | 4.854 |
+| nearly sealed | 1e9 | 0 | 1e-8 | 5.732 | 0.00069 | 3.0e-7 | 0 | 0 | 3.0e-7 | 5.731 |
+
+Carbon terms are g C m-2 over the experiment year. Every member closed
+`production - oxidation - surface pathways - storage change` to better than
+`1e-7 g C m-2`, and NPP was identical (`614.7 g C m-2`). The state-to-stock
+mapping and pathway diagnostics are therefore internally consistent.
+
+The `0.05` input sends 97% of production directly to ebullition, explaining
+the high surface flux and nearly unchanged, extremely low methane inventory.
+The `50 mmol m-3` parity value cuts ebullition approximately in half and allows
+storage to rise by `2.13 g C m-2`. Corrected-threshold members with and without
+the plant coefficient are indistinguishable because the same threshold also
+acts as the minimum concentration for one-way plant transport. The code should
+eventually use separate parameters for the ebullition threshold and the plant-
+transport minimum; their physical meanings and calibration targets differ.
+
+The original profile analysis incorrectly treated the conserved
+`MM_CONC_CH4_*` bulk-soil inventory density as a dissolved porewater
+concentration. A non-prognostic diagnostic now reconstructs dissolved CH4 from
+the bulk inventory, actual liquid and air volume fractions, and temperature-
+dependent air--water partition capacity. It reports `MM_CH4_POREWATER`, plus
+separate saturated- and unsaturated-subarea values, in `mol m-3 water`
+(numerically `mmol L-1`). This conversion does not alter methane state,
+transport, reactions, restart data, or the carbon budget.
+
+The five cases were rerun with that diagnostic. Their median modeled/observed
+SPRUCE porewater-CH4 ratios were `0.00083`, `0.0920`, `0.0920`, `0.1038`, and
+`0.1269`, respectively. Thus the phase conversion raises the inferred
+concentrations modestly but does not remove the discrepancy: even the nearly
+sealed member remains about eightfold low after one year. All fluxes and stocks
+reproduced the original experiment to numerical precision, and direct versus
+partition-reconstructed porewater diagnostics agreed within
+`5.8e-6 mol m-3`.
+
+Because the corrected-threshold member gained `2.13 g C m-2` of methane during
+its first year, it is not near a repeating seasonal storage state. The site
+forcing spans 2015--2023, so continue it in complete nine-year forcing cycles
+rather than choosing an arbitrary endpoint or comparing meteorologically
+different adjacent years. Treat it as stabilized when two successive cycles
+have end-of-cycle methane stocks within `1%` (and `0.05 g C m-2`), cycle-mean
+annual production and surface fluxes within `2%`, and corresponding seasonal
+porewater profiles within `5%` at the observed depths and dates. Only a
+stabilized profile should be used to tune production or oxidation. The
+immediate finding remains that the current high-flux/low-inventory result is
+dominated by the too-low ebullition threshold, not oxidation kinetics or a
+failure of inventory accounting.
+
+An 18-year continuation from the corrected-threshold member's year-2 restart
+subsequently supplied two complete forcing cycles (simulation years 2--10 and
+11--19). The first and second cycle ended with `0.07716` and
+`0.07575 g C m-2` of CH4. Their absolute difference (`0.00140 g C m-2`) passed
+the absolute stock criterion, but the `1.82%` relative difference narrowly
+failed the relative criterion. Mean production was already forcing-repeatable
+(`5.962` versus `5.986 g C m-2 yr-1`, a `0.39%` difference), whereas mean
+surface flux fell from `2.199` to `0.1288 g C m-2 yr-1` and the cycle-mean
+porewater profile changed by `89.8%` in vector norm. Median modeled/observed
+porewater CH4 declined from `0.0670` to `0.00659`.
+
+This is a microbial-guild establishment transient, not merely slow filling of
+the CH4 reservoir. From restart years 2 to 11, aerobic methanotroph carbon rose
+from `1.69e-11` to `0.0339 g C m-2`, and anaerobic methanotroph carbon rose from
+`4.36e-5` to `0.170 g C m-2`. At year 20 they were `0.0254` and
+`0.173 g C m-2`, respectively. In the second cycle, mean production was
+`5.986`, mean oxidation was `5.857`, mean surface flux was `0.1288`, and the
+total nine-year storage change was only `-0.00140 g C m-2`. The second cycle
+looks close to a repeating state internally, but the first-versus-second-cycle
+test formally fails because the first cycle contains guild growth. A third
+nine-year cycle is required to compare two post-establishment cycles before
+declaring convergence or calibrating the low porewater concentrations.
+
+### Mature methane-pathway audit and biological sensitivity
+
+A pathway-resolved year-20 continuation established that methane production
+was entirely acetoclastic (`5.764 g C m-2 yr-1`; hydrogenotrophic production
+was numerically zero). Total oxidation was `5.624`, partitioned into only
+`0.359` aerobic oxidation and `5.266 g C m-2 yr-1` anaerobic oxidation (AOM).
+The realized/pre-O2 aerobic-oxidation ratio was `0.9993`, ruling out the shared
+O2 limiter as the cause of low aerobic oxidation. Net surface flux was
+`0.140 g C m-2 yr-1`. Both the production-pathway and oxidation-pathway sums
+closed, and the full methane budget residual was `0.0002 g C m-2 yr-1` at
+history-output precision.
+
+An eight-member, nine-year sensitivity ensemble then started every case from
+the same mature year-20 restart and used the corrected `50 mmol m-3` transport
+threshold. The enclosure mean again excludes fen.
+
+| Change | Production | Aerobic oxidation | AOM | Net flux | Final CH4 stock | Median model/observed porewater CH4 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline | 6.031 | 0.413 | 5.488 | 0.130 | 0.074 | 0.0071 |
+| acetate production maximum x4 | 21.775 | 1.329 | 20.160 | 0.285 | 0.079 | 0.0075 |
+| `K_acetoclastic=5 mmol C m-3` | 0.257 | 0.020 | 0.201 | 0.033 | 0.105 | 0.0038 |
+| AOM growth rate x1/2 | 6.031 | 1.244 | 0.523 | 3.950 | 2.903 | 0.0913 |
+| AOM growth rate x1/4 | 6.031 | 1.276 | 0.079 | 4.363 | 2.901 | 0.0913 |
+| AOM `K_CH4=15 mmol m-3` | 6.032 | 0.882 | 4.911 | 0.133 | 1.021 | 0.0357 |
+| AOM O2-inhibition scale `0.46` | 6.031 | 0.454 | 5.449 | 0.129 | 0.076 | 0.0069 |
+| AOM off | 6.032 | 1.285 | 0 | 4.434 | 2.902 | 0.0913 |
+
+Flux terms are nine-year annual means in `g C m-2 yr-1`; stock is the final
+year-29 restart value in `g C m-2`. Hydrogenotrophic production remained zero
+in every member. The baseline third cycle is consistent with the prior mature
+cycle. Quadrupling the acetate production ceiling alone mostly grew acetate
+methanogens and anaerobic methanotrophs: AOM rose nearly in step with
+production, so neither storage nor porewater concentration improved
+materially. Reducing the AOM growth parameter below its persistence threshold
+instead collapsed the guild, raised final-year surface flux to about
+`4.65 g C m-2 yr-1`, and increased methane storage, but the porewater median
+still reached only about 9% of observations. Increasing the AOM methane
+half-saturation produced an intermediate storage response without increasing
+the cycle-mean flux.
+
+These tests reject an aerobic-O2-limitation explanation and show that neither
+an unchanged eight-parameter production screen nor single-parameter AOM tuning
+is sufficient. The next sensitivity must cross an acetoclastic-production
+control with a graded AOM control and evaluate porewater profiles, seasonal
+flux, storage drift, and both guild stocks together. AOM-off is a diagnostic
+bound, not a scientifically acceptable calibration. The strong guild
+extinction threshold also requires timestep and longer-cycle checks before any
+AOM-growth value is selected.
+
+The recommended crossed sensitivity was then run for a complete nine-year
+forcing cycle. It combined acetate-production maxima of `13.44`, `26.88`, and
+`53.76 mmol C m-3 d-1` with AOM CH4 half-saturation values of `1.5`, `5`, and
+`15 mmol CH4 m-3`.
+
+| Acetate-production maximum | AOM K_CH4 | Production | AOM | Net flux | Final CH4 stock | Median model/observed porewater CH4 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 13.44 | 1.5 | 6.031 | 5.488 | 0.130 | 0.074 | 0.0071 |
+| 13.44 | 5 | 6.031 | 5.285 | 0.128 | 0.277 | 0.0163 |
+| 13.44 | 15 | 6.032 | 4.911 | 0.133 | 1.021 | 0.0357 |
+| 26.88 | 1.5 | 11.726 | 10.801 | 0.187 | 0.077 | 0.0067 |
+| 26.88 | 5 | 11.726 | 10.566 | 0.184 | 0.250 | 0.0198 |
+| 26.88 | 15 | 11.727 | 10.030 | 0.215 | 0.940 | 0.0426 |
+| 53.76 | 1.5 | 21.775 | 20.160 | 0.285 | 0.079 | 0.0075 |
+| 53.76 | 5 | 21.778 | 19.894 | 0.286 | 0.242 | 0.0217 |
+| 53.76 | 15 | 21.780 | 18.988 | 0.620 | 0.738 | 0.0517 |
+
+Flux terms are nine-year annual means in `g C m-2 yr-1`; stocks are year-29
+restart values in `g C m-2`. Increasing production alone again increased AOM
+biomass and oxidation almost proportionally. Increasing AOM `K_CH4` provided a
+smooth increase in methane storage and porewater concentration, unlike the
+growth-rate extinction experiment, but the strongest combination still
+reached only `5.2%` of the observed porewater median. It also retained
+`18.99 g C m-2 yr-1` of AOM, so increased production cannot overcome the
+current unconstrained AOM response.
+
+The generated baseline confirms AOM maximum growth and mortality rates of
+`0.096` and `0.048 d-1`. The earlier half-growth member therefore set maximum
+growth exactly equal to mortality before CH4, temperature, pH, and O2
+limitations; extinction was a mathematical consequence, not a useful smooth
+calibration response. More importantly, the current AOM equation has no
+represented electron acceptor: it is limited by CH4, temperature, pH, and O2
+inhibition but not sulfate, nitrate, or ferric iron supply. Further tuning of
+production or `K_CH4` should pause until the intended AOM rate units are
+reconfirmed and a scientifically defensible electron-acceptor constraint,
+empirical AOM capacity, or documented AOM-off mode is selected.
+
+### Narrow AOM-growth sweep and literature provenance
+
+A four-member sweep tested whether growth rates moderately above the active
+`0.048 d-1` mortality rate could reduce AOM without eliminating its biomass.
+All cases retained the baseline acetate-production maximum and AOM
+`K_CH4=1.5 mmol m-3` and started from the mature year-20 restart.
+
+| AOM maximum growth (d-1) | AOM | Aerobic oxidation | Net flux | Final CH4 stock | Final AOM biomass | Median model/observed porewater CH4 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.060 | 4.980 | 0.811 | 0.132 | 1.050 | 0.150 | 0.0321 |
+| 0.072 | 5.293 | 0.583 | 0.129 | 0.309 | 0.182 | 0.0132 |
+| 0.084 | 5.419 | 0.480 | 0.130 | 0.105 | 0.184 | 0.0100 |
+| 0.096 | 5.488 | 0.413 | 0.130 | 0.074 | 0.181 | 0.0071 |
+
+Flux terms are first-cycle annual means in `g C m-2 yr-1`; stocks are year-29
+restart values in `g C m-2`. The response is smooth and none of these rates
+caused guild extinction. Because the `0.060` and `0.072 d-1` members gained
+`0.975` and `0.233 g C m-2` CH4 in the first cycle, both were continued through
+a repeated forcing cycle. Their second-cycle storage changes fell to `0.068`
+and `0.015 g C m-2`, while final AOM biomass was `0.143` and
+`0.182 g C m-2`. The corresponding second-cycle AOM rates were `5.149` and
+`5.422`, net fluxes were `0.143` and `0.134 g C m-2 yr-1`, and porewater ratios
+were `0.0312` and `0.0137`. Thus lowering growth moderately above mortality
+does create persistent intermediate concentrations, but it does not remove
+the profile discrepancy or substantially increase emissions.
+
+This behavior follows from the biomass equation. At a persistent state,
+environmentally limited specific growth balances mortality. Lowering maximum
+growth therefore raises the CH4 concentration needed for that balance and can
+reduce the supporting biomass, while total AOM continues to adjust toward the
+available methane supply. A value extremely close to the persistence boundary
+could create a sharp concentration response, but would be vulnerable to
+seasonal forcing, timestep dependence, and extinction.
+
+The parameter provenance is weaker than the phrase "adopted from Xu et al."
+can imply. Xu et al. (2015) Table 1 reports generic/aerobic methanotroph growth,
+death, and yield of `0.15 d-1`, `0.005 d-1`, and `0.40`; it does not give a
+separate AOM growth/death pair. It also concludes that AOM was probably a minor
+incubation contribution because no iron or other electron acceptor was
+observed. Ricciuto et al. (2021) Table 2 gives generic methanotroph growth and
+death ranges of `0.0064--0.0096` and `0.0016--0.0024`, with optima of `0.008`
+and `0.002`, and gives only an AOM-yield range (`0.12--0.18`, optimum `0.15`).
+It does not report separate optimized AOM growth, death, `K_CH4`, or electron-
+acceptor parameters, and AOM controls were not among the five parameters found
+important to surface flux. The later CLM-SPRUCE AOM pair and its ELM unit
+conversion must therefore remain explicitly labeled as weakly constrained.
+
+References: [Xu et al. (2015)](https://doi.org/10.1002/2015JG002935) and
+[Ricciuto et al. (2021)](https://doi.org/10.1029/2019JG005468).
+
+### Literal AOM-rate test and legacy effective limiters
+
+The later CLM-SPRUCE parameter file gives AOM growth and death as `0.004` and
+`0.002`, and the source declarations label both quantities `d-1`. Git history
+shows that this pair was introduced together in the January 2018 parameter
+change and retained thereafter. The earlier `x24` intended-unit hypothesis is
+therefore not supported for this particular pair: `0.004/0.002 d-1` is the
+better literal scientific interpretation, although it cannot reproduce the
+legacy executable because that executable multiplied the values by a timestep
+in seconds.
+
+A four-cycle continuation from the same productive year-20 restart tested the
+literal pair without changing any other parameter. It initially increased
+methane storage and emission because AOM biomass established slowly, but it did
+not solve the equilibrium profile discrepancy:
+
+| Nine-year window | Production | Aerobic oxidation | AOM | Net flux | End CH4 stock | End AOM biomass | Median model/observed porewater CH4 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| years 20--28 | 6.031 | 1.223 | 0.968 | 3.557 | 2.626 | 0.716 | 0.0852 |
+| years 29--37 | 6.184 | 1.022 | 3.870 | 1.534 | 0.441 | 2.783 | 0.0135 |
+| years 38--46 | 6.258 | 0.542 | 5.614 | 0.138 | 0.122 | 3.606 | 0.00740 |
+| years 47--55 | 6.307 | 0.488 | 5.681 | 0.139 | 0.110 | 3.764 | 0.00685 |
+
+Flux terms are annual means in `g C m-2 yr-1`; stocks are `g C m-2`. The final
+window changed total CH4 storage by only `-0.012 g C m-2`, so the delayed AOM
+response had effectively caught up. Lowering both rates by 24 therefore
+changes the establishment timescale and the biomass required to support the
+sink, but not the eventual tendency for AOM to consume nearly all production.
+
+The source audit found no omitted electron-acceptor state or explicit AOM
+capacity limit. It did find three legacy effects that limited or deprioritized
+AOM and are not reproduced by the conservative ELM kernel:
+
+1. The CLM-SPRUCE implementation multiplied nominal per-day growth and death
+   constants directly by the timestep in seconds. With a 1,800-second step,
+   the `0.002` mortality term can remove more than the current biomass in one
+   call; the subsequent `MFGbiomin` clamp repeatedly resets the guild to its
+   floor. This is an accidental timestep-dependent limiter, not a defensible
+   rate conversion.
+2. The legacy substrate-consumption rate already includes `pHeffect`, and the
+   biomass-growth calculation multiplies the resulting uptake by
+   `pHeffect` again. Mortality receives it once. At the SPRUCE fallback pH of
+   4.5, the response is approximately `0.306`, so this extra factor strongly
+   suppresses net guild establishment. ELM applies the environmental response
+   once to uptake and derives growth from yield, avoiding that duplicate.
+3. In the legacy saturated path, aerobic oxidation and plant/ebullition losses
+   are applied before AOM. In the unsaturated path, AOM potential is evaluated
+   before current-step methane production, while transport losses are still
+   removed before the AOM tendency. ELM instead lets aerobic oxidation and AOM
+   compete for initial plus same-step production before surface transport.
+   This gives AOM earlier access to methane and can matter greatly when the
+   stored concentration is small.
+
+The legacy AOM Q10 expression also subtracts a Celsius value (`13.5`) directly
+from Kelvin soil temperature, which accelerates rather than limits AOM and is
+already corrected in ELM. Because the old result reflects interacting unit,
+pH, temperature, clipping, and operator-order defects, these behaviors should
+not be restored as a bundled “parity” switch. The next clean attribution test
+should preserve `0.004/0.002 d-1` and separately test (a) the duplicate legacy
+pH factor on biomass growth and (b) reaction-versus-transport ordering. A
+scientific production configuration still requires an electron-acceptor or
+empirical AOM-capacity formulation.
+
+### Interim AOM-off porewater calibration
+
+Pending an electron-acceptor-limited AOM formulation, the SPRUCE profile
+experiments set
+`microbe_methane_anaerobic_methanotroph_growth_rate=0`. This is an explicit
+interim experiment setting, not a new global parameter default. All cases
+started from the same productive year-20 restart, ran for two complete
+nine-year forcing cycles, and were evaluated over years 29--37. Aqueous
+transport was off; CLM-style DOM and acetate relaxation and the observed-DOM
+calibration were on. Porewater comparisons use the hummock--hollow enclosure
+mean and exclude the fen.
+
+The first crossed ensemble varied acetoclastic production and the shared CH4
+transport threshold. Raising the threshold increased storage much more than it
+changed production. At the original production maximum of
+`13.44 mmol C m-3 d-1`, thresholds of `50`, `250`, and `1000 mmol m-3`
+produced median modeled/observed concentration ratios of `0.091`, `0.325`,
+and `0.733`. At `1000 mmol m-3`, the annual surface flux was only
+`0.356 g C m-2 yr-1`; diffusion supplied `0.356`, plant transport was zero,
+and ebullition supplied only `0.0003`. Doubling production increased the
+ratio to `1.017` and flux to `3.949`, but also made ebullition
+`3.462 g C m-2 yr-1`. The threshold therefore cannot be treated as an
+independent concentration-fitting parameter: it controls both ebullition and
+the minimum aerenchyma release concentration and changes pathway partitioning.
+
+An aerobic-kinetics ensemble then compared `K_CH4/K_O2` pairs of `1/4`,
+`2.5/500`, and `1000/4000 mmol m-3`. The execution-parity pair effectively
+eliminated aerobic oxidation and was rejected even where it reduced profile
+RMSE. The `2.5/500` pair retained aerobic oxidation and was used for a refined
+production-by-threshold ensemble. Its best member used an acetate-production
+maximum of `20.16 mmol C m-3 d-1` and a transport threshold of
+`750 mmol m-3`:
+
+| Diagnostic | Years 29--37 result |
+| --- | ---: |
+| Gross CH4 production | 9.170 g C m-2 yr-1 |
+| Aerobic oxidation | 5.328 g C m-2 yr-1 |
+| Surface flux | 3.831 g C m-2 yr-1 |
+| Diffusive surface flux | 1.093 g C m-2 yr-1 |
+| Ebullition | 2.738 g C m-2 yr-1 |
+| Date-matched median model/observed porewater CH4 | 0.879 |
+| Date-matched RMSE | 0.219 mmol L-1 |
+
+Layer diagnostics showed why the residual error was concentrated near the
+surface. The area-weighted O2 availability scalar was about `0.5--1` in the
+upper `0.25 m` and nearly zero below about `0.4 m`. Deep concentrations were
+therefore already close to observations, while upper-profile concentrations
+were depleted by aerobic oxidation.
+
+A final narrow sweep increased only aerobic `K_CH4`, holding production,
+threshold, `K_O2=500`, and AOM-off fixed:
+
+| Aerobic K_CH4 (mmol m-3) | Aerobic oxidation | Surface flux | Final aerobic biomass | Median model/observed | Date-matched RMSE |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 2.5 | 5.328 | 3.831 | 0.4303 | 0.879 | 0.2186 |
+| 5 | 4.904 | 4.259 | 0.3926 | 0.891 | 0.2166 |
+| 10 | 3.947 | 5.259 | 0.3051 | 0.915 | 0.2132 |
+| 12.5 | 3.028 | 6.229 | 0.2728 | 0.929 | 0.2116 |
+| 15 | 1.514 | 7.733 | 0.2399 | 0.969 | 0.2093 |
+| 17.5 | 0.288 | 8.866 | 0.0442 | 1.063 | 0.2016 |
+| 20 | 0.0497 | 9.092 | 0.0060 | 1.070 | 0.2009 |
+| 25 | 0.0017 | 9.138 | 0.000085 | 1.070 | 0.2008 |
+
+Fluxes and oxidation are in `g C m-2 yr-1`; biomass is `g C m-2`. The
+apparent optimum above `K_CH4=15` is caused by a sharp aerobic-methanotroph
+population collapse, not a credible smooth kinetic improvement. The
+`K_CH4=15` member is the provisional upper bound that improves the profile
+while retaining a substantial methanotroph population. It gives date-specific
+median model/observed ratios of `1.05`, `0.969`, and `0.747` for DOY 121, 182,
+and 244. It still underestimates the observed upper `0.1--0.25 m` late-season
+concentrations and its `7.73 g C m-2 yr-1` surface flux must be checked against
+flux observations before adoption.
+
+These results do not justify replacing the standard parameter values. The
+next scientific checks are a longer continuation of the provisional member,
+independent surface-flux validation, and a model formulation that prevents
+guild persistence from becoming an abrupt calibration switch. AOM should
+remain available through its parameter and should be re-enabled only after a
+defensible electron-acceptor or empirical-capacity constraint is implemented.
+
+### Observed acetic-acid profile calibration
+
+The SPRUCE acetic-acid observations in
+`CLM_SPRUCE/scripts/UQ/constraints_ch4/CACES.txt` cover depths of 0.15--2.0 m
+on three sampling dates in 2013--2014. They range from approximately
+`0.00245` to `0.252 mmol acetate L-1`. The model history variables
+`MM_ACETATE_C_SAT` and `MM_ACETATE_C_UNSAT` are bulk-soil acetate carbon in
+`g C m-3`, not porewater acetate molecules. A valid comparison first divides
+the area-weighted bulk inventory by the matching liquid-water fraction derived
+from `SOILLIQ`, then divides by `2 * 12.011 g C mol-1` because one acetate
+molecule contains two carbon atoms. Directly relabeling the history field as
+`mmol L-1` is invalid.
+
+After that correction, the old test settings
+`K_acetoclastic=0.05 mmol C m-3` and
+`acetate_feedback_half_saturation=0.1 mmol C m-3` produced a median
+modeled/observed concentration ratio of only about `0.0014`. Replacing the
+forced `0.99` saturated area with ELM's diagnosed saturated fraction changed
+that ratio by less than 1%, showing that saturated-area mapping was not the
+cause of the acetate deficit.
+
+The source audit identified a coupled concentration-unit error in the run
+parameters. CLM-SPRUCE first converts acetate carbon to `mol C m-3` and then
+compares it directly with the raw `m_dKCH4ProdAce=0.05`; the strict ELM
+execution-parity value is therefore `50 mmol C m-3`. The active acetate
+feedback literal has the same concentration mismatch: raw `0.1 mol C m-3`
+maps to `100 mmol C m-3`. Correcting only the methanogenesis half-saturation
+while retaining feedback at `0.1` starved the acetoclastic guild and eventually
+pinned its biomass at the lower bound. Both concentration scales must be
+changed together for a meaningful test.
+
+An AOM-off calibration ensemble used ELM's diagnosed saturated area,
+CLM-style DOM and acetate relaxation, observed-DOM restoring, an acetate
+production maximum of `20.16 mmol C m-3 d-1`, and aerobic
+`K_CH4/K_O2=15/500 mmol m-3`. Aqueous transport was off. The observations were
+matched by day of year to a repeated 2015--2023 forcing cycle; this evaluates
+seasonal profile shape but is not an exact meteorological match to the
+2013--2014 samples. The following values are means over the final complete
+nine-year forcing cycle:
+
+| Acetoclastic K (mmol C m-3) | Median modeled/observed acetate | Log10 profile RMSE | CH4 production | CH4 oxidation | Surface CH4 flux | Acetoclastic biomass |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 50 | 0.828 | 0.419 | 8.641 | 2.630 | 6.026 | 0.1385 |
+| 75 | 1.113 | 0.385 | 7.444 | 1.862 | 5.589 | 0.1087 |
+| 100 | 1.305 | 0.398 | 6.515 | 1.195 | 5.324 | 0.0894 |
+
+Fluxes are in `g C m-2 yr-1`; biomass is the enclosure- and profile-mean
+concentration in `g C m-3`. All three members used
+`acetate_feedback_half_saturation=100 mmol C m-3`. The `K=75` member had the
+lowest cycle-mean profile error and provides a provisional SPRUCE calibration.
+At its final year the median modeled/observed ratio was `0.803`, production was
+`8.269`, oxidation was `2.496`, and surface flux was
+`5.329 g C m-2 yr-1`, demonstrating material interannual variability even
+after the long continuation.
+
+These results separate two recommendations. `K=50` and feedback `=100` are the
+strict later-code execution-unit mapping. `K=75` and feedback `=100` are a
+site-level observational calibration under the experimental AOM-off,
+observed-DOM-relaxation configuration; they are not yet justified as global
+defaults. Before adoption, repeat the comparison with independent surface CH4
+flux data, verify the acetate-carbon and acetic-acid measurement semantics with
+the data providers, test additional sites, and re-evaluate the pair after a
+scientifically constrained AOM formulation and prognostic DOM transport are
+selected.
+
 ## Validation experiments and diagnostics
+
+### Preferential-flow rainfall sensitivity
+
+`use_microbe_dom_preferential_flow` is a default-off event-transport
+hypothesis. When enabled with physical aqueous transport,
+`microbe_methane_dom_preferential_flow_fraction` sets the fraction of positive
+infiltration used to sample mobile DOM from all layers above the diagnosed
+water table. The sampled C, N, and P are removed conservatively and deposited in the
+first layer intersecting the diagnosed water table without exchange with
+intermediate layers. Fractions 0.1 and 0.3 are uncalibrated sensitivity values.
+An earlier diagnostic version imposed a 0.3 m donor-depth cap; that artificial
+cap was removed so the donor domain follows the hydrologic unsaturated depth.
+Earlier development runs called this option
+`use_microbe_dom_complete_bypass`; that name was replaced because only a
+specified event fraction follows the fast pathway.
+
+The current implementation represents a simplified fast-domain case. It does not add water to the
+hydrologic state and does not resolve fast-domain storage, travel time, matrix
+exchange, or changes in water-table position. It must therefore be used only
+to ask whether event-scale bypass could plausibly correct the modeled
+surface-to-deep DOM gradient. A production implementation would need a
+dual-domain water and solute budget and observational constraints on connected
+mobile porosity, exchange, and event activation.
+
+A matched five-year continuation from the year-11 cold-start/compaction
+restart tested fractions 0, 0.10, and 0.30. The 0.30 case transferred 17.75 g C
+m-2 yr-1 in year 5, reduced DOC by 9--15% in the upper 0.06 m, and increased
+DOC by 13%, 22%, and 50% at 0.21, 0.37, and 0.62 m, respectively. The absolute
+0.62 m concentration remained only 2.80 g C m-3 water and the approximately
+1.04 m concentration remained near 0.003 g C m-3 water. CH4 production,
+oxidation, and surface flux were 3.86, 3.96, and 1.38 g C m-2 yr-1 versus
+3.82, 3.68, and 1.54 in the control; NPP changed from 297.3 to 295.6 g C m-2
+yr-1. Preferential-flow fraction alone therefore improved the profile in the
+expected direction but did not repair the deep-DOC deficit. During year 5 the
+enclosure-mean water table remained shallower than 0.227 m, so removal of the
+former 0.30 m donor cap did not affect this particular comparison.
 
 Generate coupled site experiments with `elm_olmt` by default. Avoid using a
 CIME clone as the normal test path because OLMT's generated domain, surface,
@@ -1262,6 +2115,13 @@ directly into each case's known run directory. The prefix/date and complete
 case name are already part of that path. Do not reintroduce a shared
 `elm-olmt/temp` staging file: concurrent setup of two cases can otherwise
 corrupt `surfdata.nc` or fail with an HDF5 writer collision.
+
+For concurrent one-rank Docker runs, set
+`OMPI_MCA_hwloc_base_binding_policy=none` before applying `taskset` to
+`case.submit`. OpenMPI can otherwise rebind every actual `e3sm.exe` rank to
+core 0 even when the wrapper processes were assigned distinct cores. Confirm
+placement on the live model PIDs with `taskset -pc`; wrapper affinity alone is
+not evidence that the simulations are running on separate CPUs.
 
 Parameter decisions should be tested in a staged hierarchy:
 
