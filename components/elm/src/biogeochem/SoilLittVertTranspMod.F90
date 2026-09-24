@@ -15,6 +15,10 @@ module SoilLittVertTranspMod
   use abortutils             , only : endrun
   use CNDecompCascadeConType , only : decomp_cascade_con
   use MicrobeDecompMod       , only : MicrobeDecompParamsInst
+  use SharedParamsMod        , only : peat_compaction_surface_density, &
+                                      peat_compaction_deep_density, &
+                                      peat_compaction_efolding_depth, &
+                                      peat_compaction_timescale_years
   use CanopyStateType        , only : canopystate_type
   use CNStateType            , only : cnstate_type
   use elm_varctl             , only : nu_com
@@ -60,14 +64,6 @@ module SoilLittVertTranspMod
   !$acc declare create(peat_som_diffus)
   real(r8), public :: peat_adv_reference_depth = 3._r8
   !$acc declare create(peat_adv_reference_depth)
-  real(r8), public :: peat_compaction_surface_density = 25._r8
-  !$acc declare create(peat_compaction_surface_density)
-  real(r8), public :: peat_compaction_deep_density = 100._r8
-  !$acc declare create(peat_compaction_deep_density)
-  real(r8), public :: peat_compaction_efolding_depth = 0.25_r8
-  !$acc declare create(peat_compaction_efolding_depth)
-  real(r8), public :: peat_compaction_timescale_years = 1._r8
-  !$acc declare create(peat_compaction_timescale_years)
   real(r8), public :: max_depth_cryoturb = 3._r8   ! (m) this is the maximum depth of cryoturbation
   !$acc declare create(max_depth_cryoturb)
   !-----------------------------------------------------------------------

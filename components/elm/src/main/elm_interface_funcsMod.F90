@@ -1351,7 +1351,7 @@ contains
   subroutine elm_bgc_run(elm_interface_data, bounds,        &
                 num_soilc, filter_soilc,                    &
                 num_soilp, filter_soilp,                    &
-                canopystate_vars, soilstate_vars,           &
+                canopystate_vars, soilstate_vars, soilhydrology_vars, &
                 temperature_vars, waterstate_vars,          &
                 cnstate_vars, ch4_vars,                     &
                 carbonstate_vars, carbonflux_vars,          &
@@ -1370,6 +1370,7 @@ contains
     integer                             , intent(in)    :: filter_soilp(:)    ! filter for soil patches
     type(canopystate_type)              , intent(inout) :: canopystate_vars
     type(soilstate_type)                , intent(inout) :: soilstate_vars
+    type(soilhydrology_type)            , intent(in)    :: soilhydrology_vars
     type(temperature_type)              , intent(inout) :: temperature_vars
     type(waterstate_type)               , intent(inout) :: waterstate_vars
     type(cnstate_type)                  , intent(inout) :: cnstate_vars
@@ -1399,7 +1400,7 @@ contains
     ! STEP-2: (ii) run SoilLittDecompAlloc
     call SoilLittDecompAlloc (bounds, num_soilc, filter_soilc,    &
                num_soilp, filter_soilp,                     &
-               canopystate_vars, soilstate_vars,            &
+               canopystate_vars, soilstate_vars, soilhydrology_vars, &
                cnstate_vars, ch4_vars, dt )
 
     ! STEP-2: (iii) update elm_bgc_data from SoilLittDecompAlloc
@@ -1754,4 +1755,3 @@ contains
 
 
 end module elm_interface_funcsMod
-

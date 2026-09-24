@@ -21,7 +21,7 @@ module VegetationDataType
   use elm_varctl      , only : iulog, use_cn, spinup_state, spinup_mortality_factor, use_fates
   use elm_varctl      , only : nu_com, use_crop, use_c13
   use elm_varctl      , only : use_lch4, use_betr
-  use histFileMod     , only : hist_addfld1d, hist_addfld2d, no_snow_normal
+  use histFileMod     , only : hist_addfld1d, hist_addfld2d, hist_addfld_decomp, no_snow_normal
   use ncdio_pio       , only : file_desc_t, ncd_io, ncd_double, ncd_int, ncd_inqvdlen
   use decompMod       , only : bounds_type, get_proc_global
   use subgridAveMod   , only : p2c, p2c_1d_filter
@@ -8981,6 +8981,15 @@ module VegetationDataType
     allocate(this%plant_nh4demand_vr                  (begp:endp,1:nlevdecomp)); this%plant_nh4demand_vr    (:,:) = spval
     allocate(this%plant_no3demand_vr                  (begp:endp,1:nlevdecomp)); this%plant_no3demand_vr    (:,:) = spval
     allocate(this%plant_ndemand_vr                    (begp:endp,1:nlevdecomp)); this%plant_ndemand_vr      (:,:) = spval
+
+    call hist_addfld_decomp(fname='PFT_NDEMAND_vr', units='gN/m^3/s', &
+         type2d='levdcmp', avgflag='A', &
+         long_name='PFT-resolved mineral N demand profile', &
+         ptr_patch=this%plant_ndemand_vr, default='inactive')
+
+    call hist_addfld1d(fname='PFT_SMINN_TO_PLANT', units='gN/m^2/s', avgflag='A', &
+         long_name='PFT-resolved realized soil mineral N uptake', &
+         ptr_patch=this%sminn_to_plant, default='inactive')
     allocate(this%prev_leafn_to_litter                (begp:endp)) ; this%prev_leafn_to_litter                (:) = spval
     allocate(this%prev_frootn_to_litter               (begp:endp)) ; this%prev_frootn_to_litter               (:) = spval
     allocate(this%supplement_to_plantn                (begp:endp)) ; this%supplement_to_plantn                (:) = 0.d0

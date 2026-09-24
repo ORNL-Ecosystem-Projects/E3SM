@@ -31,11 +31,7 @@ module controlMod
   use C14DecayMod             , only: use_c14_bombspike, atm_c14_filename
   use SoilLittVertTranspMod   , only: som_adv_flux, max_depth_cryoturb, &
                                       peat_som_adv_flux, peat_som_diffus, &
-                                      peat_adv_reference_depth, &
-                                      peat_compaction_surface_density, &
-                                      peat_compaction_deep_density, &
-                                      peat_compaction_efolding_depth, &
-                                      peat_compaction_timescale_years
+                                      peat_adv_reference_depth
   use VerticalProfileMod      , only: exponential_rooting_profile, rootprof_exp
   use VerticalProfileMod      , only: surfprof_exp, pftspecific_rootingprofile
   use SharedParamsMod         , only: anoxia_wtsat
@@ -77,11 +73,8 @@ module controlMod
                         use_hydrstress, lateral_connectivity, domain_decomp_type, &
                         use_IM2_hillslope_hydrology, use_humhol, use_fen_bog_drainage, &
                         use_peatland_roots, use_moss_capillary_nutrients, &
-                        moss_capillary_max_demand_fraction, &
-                        moss_capillary_connectivity_timescale_days, &
                         use_peatland_vertical_transport, &
                         use_peatland_compaction_profile, &
-                        soil_ice_impedance_exponent, &
                         use_petsc_thermal_model, &
                         do_budgets, budget_inst, budget_daily, budget_month, &
                         budget_ann, budget_ltann, budget_ltend, &
@@ -310,9 +303,7 @@ contains
     ! vertical soil mixing variables
     namelist /elm_inparm/  &
          som_adv_flux, max_depth_cryoturb, peat_som_adv_flux, &
-         peat_som_diffus, peat_adv_reference_depth, &
-         peat_compaction_surface_density, peat_compaction_deep_density, &
-         peat_compaction_efolding_depth, peat_compaction_timescale_years
+         peat_som_diffus, peat_adv_reference_depth
 
     ! C and N input vertical profiles
     namelist /elm_inparm/  &
@@ -404,10 +395,8 @@ contains
          use_IM2_hillslope_hydrology
 
     namelist /elm_inparm/ use_humhol, use_fen_bog_drainage, use_peatland_roots, &
-         use_moss_capillary_nutrients, moss_capillary_max_demand_fraction, &
-         moss_capillary_connectivity_timescale_days, &
-         use_peatland_vertical_transport, use_peatland_compaction_profile, &
-         soil_ice_impedance_exponent
+         use_moss_capillary_nutrients, use_peatland_vertical_transport, &
+         use_peatland_compaction_profile
 
     namelist /elm_inparm/ &
          use_petsc_thermal_model
@@ -1076,10 +1065,6 @@ contains
        call mpi_bcast (peat_som_adv_flux, 1, MPI_REAL8, 0, mpicom, ier)
        call mpi_bcast (peat_som_diffus, 1, MPI_REAL8, 0, mpicom, ier)
        call mpi_bcast (peat_adv_reference_depth, 1, MPI_REAL8, 0, mpicom, ier)
-       call mpi_bcast (peat_compaction_surface_density, 1, MPI_REAL8, 0, mpicom, ier)
-       call mpi_bcast (peat_compaction_deep_density, 1, MPI_REAL8, 0, mpicom, ier)
-       call mpi_bcast (peat_compaction_efolding_depth, 1, MPI_REAL8, 0, mpicom, ier)
-       call mpi_bcast (peat_compaction_timescale_years, 1, MPI_REAL8, 0, mpicom, ier)
     end if
     if (use_cn .and. use_vertsoilc) then
        ! C and N input vertical profiles
@@ -1184,27 +1169,14 @@ contains
     call mpi_bcast (use_fen_bog_drainage, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_peatland_roots, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_moss_capillary_nutrients, 1, MPI_LOGICAL, 0, mpicom, ier)
-    call mpi_bcast (moss_capillary_max_demand_fraction, 1, MPI_REAL8, 0, mpicom, ier)
-    call mpi_bcast (moss_capillary_connectivity_timescale_days, 1, MPI_REAL8, 0, mpicom, ier)
     call mpi_bcast (use_peatland_vertical_transport, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_peatland_compaction_profile, 1, MPI_LOGICAL, 0, mpicom, ier)
-    call mpi_bcast (soil_ice_impedance_exponent, 1, MPI_REAL8, 0, mpicom, ier)
     !$acc update device(use_peatland_vertical_transport)
     !$acc update device(use_moss_capillary_nutrients)
-    !$acc update device(moss_capillary_max_demand_fraction)
-    !$acc update device(moss_capillary_connectivity_timescale_days)
     !$acc update device(use_peatland_compaction_profile)
-    !$acc update device(soil_ice_impedance_exponent)
-
-    if (soil_ice_impedance_exponent < 0._r8) then
-       call endrun(msg=' ERROR: soil_ice_impedance_exponent must be nonnegative'//&
-            errMsg(__FILE__, __LINE__))
-    end if
 
     if ((use_cn .or. use_fates) .and. use_vertsoilc) then
        !$acc update device(peat_som_adv_flux, peat_som_diffus, peat_adv_reference_depth)
-       !$acc update device(peat_compaction_surface_density, peat_compaction_deep_density)
-       !$acc update device(peat_compaction_efolding_depth, peat_compaction_timescale_years)
     end if
 
     if (use_fen_bog_drainage .and. .not. use_humhol) then
@@ -1221,16 +1193,6 @@ contains
        call endrun(msg=' ERROR: use_moss_capillary_nutrients=.true. requires '//&
             'use_peatland_roots=.true.'//errMsg(__FILE__, __LINE__))
     end if
-    if (moss_capillary_max_demand_fraction < 0._r8 .or. &
-         moss_capillary_max_demand_fraction > 1._r8) then
-       call endrun(msg=' ERROR: moss_capillary_max_demand_fraction must be in [0,1]'//&
-            errMsg(__FILE__, __LINE__))
-    end if
-    if (moss_capillary_connectivity_timescale_days <= 0._r8) then
-       call endrun(msg=' ERROR: moss_capillary_connectivity_timescale_days must be positive'//&
-            errMsg(__FILE__, __LINE__))
-    end if
-
     if (use_peatland_vertical_transport .and. .not. use_humhol) then
        call endrun(msg=' ERROR: use_peatland_vertical_transport=.true. requires '//&
             'use_humhol=.true.'//errMsg(__FILE__, __LINE__))
@@ -1246,16 +1208,6 @@ contains
             'nonnegative and peat_adv_reference_depth must be positive'//&
             errMsg(__FILE__, __LINE__))
     end if
-    if (use_peatland_compaction_profile .and. &
-         (peat_compaction_surface_density <= 0._r8 .or. &
-          peat_compaction_deep_density < peat_compaction_surface_density .or. &
-          peat_compaction_efolding_depth <= 0._r8 .or. &
-          peat_compaction_timescale_years <= 0._r8)) then
-       call endrun(msg=' ERROR: peat compaction densities must be positive, deep density '//&
-            'must be at least surface density, and depth/time scales must be positive'//&
-            errMsg(__FILE__, __LINE__))
-    end if
-
     ! bgc & pflotran interface
     call mpi_bcast (use_elm_interface, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_elm_bgc, 1, MPI_LOGICAL, 0, mpicom, ier)
@@ -1389,13 +1341,8 @@ contains
     write(iulog,*) '    use_fen_bog_drainage = ', use_fen_bog_drainage
     write(iulog,*) '    use_peatland_roots = ', use_peatland_roots
     write(iulog,*) '    use_moss_capillary_nutrients = ', use_moss_capillary_nutrients
-    write(iulog,*) '    moss_capillary_max_demand_fraction = ', &
-         moss_capillary_max_demand_fraction
-    write(iulog,*) '    moss_capillary_connectivity_timescale_days = ', &
-         moss_capillary_connectivity_timescale_days
     write(iulog,*) '    use_peatland_vertical_transport = ', use_peatland_vertical_transport
     write(iulog,*) '    use_peatland_compaction_profile = ', use_peatland_compaction_profile
-    write(iulog,*) '    soil_ice_impedance_exponent = ', soil_ice_impedance_exponent
     write(iulog,*) '    use_shrub_moss_shading = ', use_shrub_moss_shading
     write(iulog,*) '    use_surface_structure_shading = ', use_surface_structure_shading
     write(iulog,*) '    use_atm_downscaling_to_topunit = ', use_atm_downscaling_to_topunit
@@ -1477,10 +1424,6 @@ contains
        write(iulog, *) '   peat_som_adv_flux at reference depth (m/s)             : ', peat_som_adv_flux
        write(iulog, *) '   peat_som_diffus (m2/s)                                 : ', peat_som_diffus
        write(iulog, *) '   peat_adv_reference_depth (m)                           : ', peat_adv_reference_depth
-       write(iulog, *) '   peat_compaction_surface_density (kg C/m3)              : ', peat_compaction_surface_density
-       write(iulog, *) '   peat_compaction_deep_density (kg C/m3)                 : ', peat_compaction_deep_density
-       write(iulog, *) '   peat_compaction_efolding_depth (m)                     : ', peat_compaction_efolding_depth
-       write(iulog, *) '   peat_compaction_timescale_years (yr)                   : ', peat_compaction_timescale_years
 
        write(iulog, *) '   exponential_rooting_profile                           : ', exponential_rooting_profile
        write(iulog, *) '   rootprof_exp                                          : ', rootprof_exp

@@ -30,8 +30,22 @@ module SharedParamsMod
   !$acc declare create(ParamsShareInst)
   logical, public :: anoxia_wtsat = .false.
   integer, public :: nlev_soildecomp_standard = 5
+  real(r8), public :: moss_capillary_max_demand_fraction = 0.10_r8
+  real(r8), public :: moss_capillary_connectivity_timescale_days = 30._r8
+  real(r8), public :: peat_compaction_surface_density = 25._r8
+  real(r8), public :: peat_compaction_deep_density = 100._r8
+  real(r8), public :: peat_compaction_efolding_depth = 0.25_r8
+  real(r8), public :: peat_compaction_timescale_years = 1._r8
+  real(r8), public :: soil_ice_impedance_exponent = 6._r8
   !$acc declare create(anoxia_wtsat)
   !$acc declare create(nlev_soildecomp_standard)
+  !$acc declare copyin(moss_capillary_max_demand_fraction)
+  !$acc declare copyin(moss_capillary_connectivity_timescale_days)
+  !$acc declare copyin(peat_compaction_surface_density)
+  !$acc declare copyin(peat_compaction_deep_density)
+  !$acc declare copyin(peat_compaction_efolding_depth)
+  !$acc declare copyin(peat_compaction_timescale_years)
+  !$acc declare copyin(soil_ice_impedance_exponent)
 
   !-----------------------------------------------------------------------
 
@@ -43,6 +57,8 @@ contains
      use ncdio_pio   , only : file_desc_t,ncd_io
      use abortutils  , only : endrun
      use shr_log_mod , only : errMsg => shr_log_errMsg
+     use elm_varctl  , only : use_humhol, iulog
+     use spmdMod     , only : masterproc
      !
      implicit none
      type(file_desc_t),intent(inout) :: ncid   ! pio netCDF file id
@@ -111,6 +127,85 @@ contains
      call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
      if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
      ParamsShareInst%organic_max=tempr
+
+     ! These parameters only affect runtime-gated peatland processes.  Read
+     ! them from the standard ELM parameter file for HUMHOL cases, while
+     ! retaining the established non-peatland values for BFB compatibility.
+     if (use_humhol) then
+        ! Preserve the previous generated HUMHOL default for old parameter
+        ! files that predate this migration.
+        soil_ice_impedance_exponent = 8._r8
+
+        tString='moss_capillary_max_demand_fraction'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) moss_capillary_max_demand_fraction=tempr
+
+        tString='moss_capillary_connectivity_timescale_days'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) moss_capillary_connectivity_timescale_days=tempr
+
+        tString='peat_compaction_surface_density'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_compaction_surface_density=tempr
+
+        tString='peat_compaction_deep_density'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_compaction_deep_density=tempr
+
+        tString='peat_compaction_efolding_depth'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_compaction_efolding_depth=tempr
+
+        tString='peat_compaction_timescale_years'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_compaction_timescale_years=tempr
+
+        tString='soil_ice_impedance_exponent'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) soil_ice_impedance_exponent=tempr
+
+        if (moss_capillary_max_demand_fraction < 0._r8 .or. &
+             moss_capillary_max_demand_fraction > 1._r8) then
+           call endrun(msg=' ERROR: moss_capillary_max_demand_fraction must be in [0,1]'//&
+                errMsg(__FILE__, __LINE__))
+        end if
+        if (moss_capillary_connectivity_timescale_days <= 0._r8) then
+           call endrun(msg=' ERROR: moss_capillary_connectivity_timescale_days must be positive'//&
+                errMsg(__FILE__, __LINE__))
+        end if
+        if (soil_ice_impedance_exponent < 0._r8) then
+           call endrun(msg=' ERROR: soil_ice_impedance_exponent must be nonnegative'//&
+                errMsg(__FILE__, __LINE__))
+        end if
+        if (peat_compaction_surface_density <= 0._r8 .or. &
+             peat_compaction_deep_density < peat_compaction_surface_density .or. &
+             peat_compaction_efolding_depth <= 0._r8 .or. &
+             peat_compaction_timescale_years <= 0._r8) then
+           call endrun(msg=' ERROR: peat compaction densities must be positive, deep density '//&
+                'must be at least surface density, and depth/time scales must be positive'//&
+                errMsg(__FILE__, __LINE__))
+        end if
+
+        !$acc update device(moss_capillary_max_demand_fraction)
+        !$acc update device(moss_capillary_connectivity_timescale_days)
+        !$acc update device(peat_compaction_surface_density)
+        !$acc update device(peat_compaction_deep_density)
+        !$acc update device(peat_compaction_efolding_depth)
+        !$acc update device(peat_compaction_timescale_years)
+        !$acc update device(soil_ice_impedance_exponent)
+
+        if (masterproc) then
+           write(iulog,*) 'Peatland parameters read from ELM parameter file:'
+           write(iulog,*) '  moss_capillary_max_demand_fraction = ', moss_capillary_max_demand_fraction
+           write(iulog,*) '  moss_capillary_connectivity_timescale_days = ', &
+                moss_capillary_connectivity_timescale_days
+           write(iulog,*) '  peat_compaction_surface_density (kg C/m3) = ', peat_compaction_surface_density
+           write(iulog,*) '  peat_compaction_deep_density (kg C/m3) = ', peat_compaction_deep_density
+           write(iulog,*) '  peat_compaction_efolding_depth (m) = ', peat_compaction_efolding_depth
+           write(iulog,*) '  peat_compaction_timescale_years (yr) = ', peat_compaction_timescale_years
+           write(iulog,*) '  soil_ice_impedance_exponent = ', soil_ice_impedance_exponent
+        end if
+     end if
 
    end subroutine ParamsReadShared
 

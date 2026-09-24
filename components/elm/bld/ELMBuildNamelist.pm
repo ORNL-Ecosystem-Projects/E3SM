@@ -2050,7 +2050,6 @@ sub process_namelist_inline_logic {
   setup_logic_peatland_roots($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
   setup_logic_peatland_vertical_transport($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
   setup_logic_peatland_compaction_profile($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
-  setup_logic_soil_ice_impedance($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
   setup_logic_decomp_performance($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
   setup_logic_snow($opts, $nl_flags, $definition, $defaults, $nl, $physv);
   setup_logic_glacier($opts, $nl_flags, $definition, $defaults, $nl,  $envxml_ref, $physv);
@@ -2328,6 +2327,12 @@ sub setup_logic_peatland_roots {
     add_default($test_files, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl,
                 'use_peatland_roots', 'val'=>$value);
   }
+  if ( ! defined($nl->get_value('use_moss_capillary_nutrients')) ) {
+    my $use_humhol = $nl->get_value('use_humhol') || '.false.';
+    my $value = ($use_humhol =~ /true/i) ? '.true.' : '.false.';
+    add_default($test_files, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl,
+                'use_moss_capillary_nutrients', 'val'=>$value);
+  }
   if (value_is_true($nl->get_value('use_moss_capillary_nutrients')) &&
       !value_is_true($nl->get_value('use_peatland_roots'))) {
     fatal_error("use_moss_capillary_nutrients=.true. requires use_peatland_roots=.true.\n");
@@ -2361,22 +2366,6 @@ sub setup_logic_peatland_compaction_profile {
     my $value = ($use_transport =~ /true/i) ? '.true.' : '.false.';
     add_default($test_files, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl,
                 'use_peatland_compaction_profile', 'val'=>$value);
-  }
-}
-
-#-------------------------------------------------------------------------------
-
-sub setup_logic_soil_ice_impedance {
-  my ($test_files, $nl_flags, $definition, $defaults, $nl) = @_;
-
-  # Preserve an explicit user setting. Otherwise, use the experimentally
-  # selected exponent for peatland topounit hydrology while retaining the
-  # established value for every non-HUMHOL configuration.
-  if ( ! defined($nl->get_value('soil_ice_impedance_exponent')) ) {
-    my $use_humhol = $nl->get_value('use_humhol') || '.false.';
-    my $value = ($use_humhol =~ /true/i) ? '8.0' : '6.0';
-    add_default($test_files, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl,
-                'soil_ice_impedance_exponent', 'val'=>$value);
   }
 }
 

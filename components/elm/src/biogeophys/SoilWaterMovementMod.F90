@@ -269,7 +269,7 @@ contains
     ! !USES:
       !$acc routine seq
     use elm_varctl           , only : use_var_soil_thick, use_humhol, use_peatland_roots, iulog
-    use elm_varctl           , only : soil_ice_impedance_exponent
+    use SharedParamsMod      , only : soil_ice_impedance_exponent
     use shr_kind_mod         , only : r8 => shr_kind_r8
     use shr_const_mod        , only : SHR_CONST_TKFRZ, SHR_CONST_LATICE, SHR_CONST_G
     use decompMod            , only : bounds_type

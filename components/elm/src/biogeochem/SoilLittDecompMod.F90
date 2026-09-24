@@ -26,6 +26,7 @@ module SoilLittDecompMod
   use PhotosynthesisType     , only : photosyns_type
   use CanopyStateType        , only : canopystate_type
   use SoilStateType          , only : soilstate_type
+  use SoilHydrologyType      , only : soilhydrology_type
   use CH4Mod                 , only : ch4_type
   use cropType               , only : crop_type
   use ColumnDataType         , only : col_cs, col_cf
@@ -92,7 +93,7 @@ contains
 !-------------------------------------------------------------------------------------------------
   subroutine SoilLittDecompAlloc (bounds, num_soilc, filter_soilc,    &
                 num_soilp, filter_soilp,                        &
-                canopystate_vars, soilstate_vars,               &
+                canopystate_vars, soilstate_vars, soilhydrology_vars, &
                 cnstate_vars, ch4_vars, dtime)
 
     !-----------------------------------------------------------------------------
@@ -119,6 +120,7 @@ contains
     integer                  , intent(in)    :: filter_soilp(:)    ! filter for soil patches
     type(canopystate_type)   , intent(in)    :: canopystate_vars
     type(soilstate_type)     , intent(in)    :: soilstate_vars
+    type(soilhydrology_type) , intent(in)    :: soilhydrology_vars
     type(cnstate_type)       , intent(inout) :: cnstate_vars
     type(ch4_type)           , intent(in)    :: ch4_vars
 
@@ -393,7 +395,7 @@ contains
       call Allocation2_ResolveNPLimit(bounds,                       &
                num_soilc, filter_soilc, num_soilp, filter_soilp,    &
                cnstate_vars,                                        &
-               soilstate_vars, dtime,                               &
+               soilstate_vars, soilhydrology_vars, dtime,           &
                alm_fates)
       call t_stop_lnd(event)
 

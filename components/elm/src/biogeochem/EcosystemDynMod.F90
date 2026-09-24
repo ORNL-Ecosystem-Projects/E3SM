@@ -583,7 +583,7 @@ contains
        ! if (use_elm_interface & use_elm_bgc), then CNDecomAlloc is called in elm_driver
        call SoilLittDecompAlloc (bounds, num_soilc, filter_soilc,    &
                   num_soilp, filter_soilp,                     &
-                  canopystate_vars, soilstate_vars,            &
+                  canopystate_vars, soilstate_vars, soilhydrology_vars, &
                   cnstate_vars, ch4_vars,                      &
                   dt)
     end if !if(.not.use_elm_interface)

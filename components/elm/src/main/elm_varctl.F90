@@ -495,19 +495,13 @@ module elm_varctl
   logical, public            :: use_fen_bog_drainage         = .false.
   logical, public            :: use_peatland_roots           = .false.
   logical, public            :: use_moss_capillary_nutrients = .false.
-  real(r8), public           :: moss_capillary_max_demand_fraction = 0.10_r8
-  real(r8), public           :: moss_capillary_connectivity_timescale_days = 30._r8
   logical, public            :: use_peatland_vertical_transport = .false.
   logical, public            :: use_peatland_compaction_profile = .false.
-  real(r8), public           :: soil_ice_impedance_exponent  = 6._r8
 
   !$acc declare copyin(use_peatland_roots)
   !$acc declare copyin(use_moss_capillary_nutrients)
-  !$acc declare copyin(moss_capillary_max_demand_fraction)
-  !$acc declare copyin(moss_capillary_connectivity_timescale_days)
   !$acc declare copyin(use_peatland_vertical_transport)
   !$acc declare copyin(use_peatland_compaction_profile)
-  !$acc declare copyin(soil_ice_impedance_exponent)
  
   !-----------------------------------------------------------------------
   ! flux limiter for phenology flux calculation

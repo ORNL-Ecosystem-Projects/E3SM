@@ -8,11 +8,14 @@ module AllocationMod
   ! !USES:
   use shr_kind_mod        , only : r8 => shr_kind_r8
   use shr_log_mod         , only : errMsg => shr_log_errMsg
-  use elm_varcon          , only : dzsoi_decomp
+  use elm_varcon          , only : dzsoi_decomp, denh2o, denice
   use elm_varctl          , only : use_c13, use_c14, spinup_state
   use elm_varctl          , only : nyears_ad_carbon_only
   use elm_varctl          , only : use_fates
-  use elm_varctl          , only : use_peatland_roots
+  use elm_varctl          , only : use_peatland_roots, use_moss_capillary_nutrients
+  use SharedParamsMod     , only : moss_capillary_max_demand_fraction
+  use SharedParamsMod     , only : moss_capillary_connectivity_timescale_days
+  use SharedParamsMod     , only : soil_ice_impedance_exponent
   use abortutils          , only : endrun
   use decompMod           , only : bounds_type
   use subgridAveMod       , only : p2c
@@ -35,6 +38,7 @@ module AllocationMod
   use elm_varctl          , only: use_elm_interface,use_elm_bgc, use_pflotran, pf_cmode
   use elm_varctl          , only : nu_com
   use SoilStatetype       , only : soilstate_type
+  use SoilHydrologyType   , only : soilhydrology_type
   use elm_varctl          , only : NFIX_PTASE_plant
   use ELMFatesInterfaceMod  , only : hlm_fates_interface_type
   use elm_varctl      , only: iulog
@@ -1089,7 +1093,7 @@ contains
  subroutine Allocation2_ResolveNPLimit (bounds, num_soilc, filter_soilc  , &
       num_soilp, filter_soilp                         , &
       cnstate_vars                                    , &
-      soilstate_vars, dt , elm_fates)
+      soilstate_vars, soilhydrology_vars, dt , elm_fates)
    ! PHASE-2 of Allocation:  resolving N/P limitation
    ! !USES:
    !$acc routine seq
@@ -1109,6 +1113,7 @@ contains
    integer                  , intent(in)    :: filter_soilp(:)  ! filter for soil patches
    type(cnstate_type)       , intent(inout) :: cnstate_vars
    type(soilstate_type)     , intent(in)    :: soilstate_vars
+   type(soilhydrology_type) , intent(in)    :: soilhydrology_vars
    real(r8)  ,  intent(in)  :: dt
    type(hlm_fates_interface_type), intent(inout) :: elm_fates
    !
@@ -1151,8 +1156,15 @@ contains
    real(r8), parameter :: cn_stoich_var=0.2    ! variability of CN ratio
    real(r8), parameter :: cp_stoich_var=0.4    ! variability of CP ratio
    real(r8) :: sum1,sum2,sum_immob_no3,sum_immob_nh4,sum_immob_p,sum_pot_immob_p
-   real(r8) :: adaptive_profile_sum, adaptive_weight, uptake_fraction
-   logical  :: use_adaptive_patch_profile, adaptive_profile_has_n
+   real(r8) :: peatland_profile_sum, peatland_weight, uptake_fraction
+   real(r8) :: capillary_profile_sum, capillary_weight, capillary_fraction
+   real(r8) :: hydraulic_path_time, hydraulic_conductivity
+   real(r8) :: liquid_saturation, ice_volume_fraction, ice_pore_fraction
+   real(r8) :: water_table_connectivity
+   real(r8) :: layer_top_depth, layer_bottom_depth, unsaturated_layer_fraction
+   integer  :: root_bottom_layer, water_table_layer
+   logical  :: use_vascular_root_profile
+   logical  :: use_moss_capillary_profile
    integer :: begc, endc 
 
    !-----------------------------------------------------------------------
@@ -1217,6 +1229,7 @@ contains
         actual_immob_no3             => col_nf%actual_immob_no3                , &
         actual_immob_nh4             => col_nf%actual_immob_nh4                , &
         froot_prof                   => cnstate_vars%froot_prof_patch                         , & ! fine root vertical profile Zeng, X. 2001. Global vegetation root distribution for land modeling. J. Hydrometeor. 2:525-530
+        rootfr                       => soilstate_vars%rootfr_patch                           , & ! biophysical layer root fractions
         frootc                       => veg_cs%frootc                         , & ! Input:  [real(r8) (:)   ]
         leafc                        => veg_cs%leafc                          , & ! Input:  [real(r8) (:)   ]
         leafcn                       => veg_vp%leafcn                                     , & ! Input:  [real(r8) (:)   ]  leaf C:N (gC/gN)
@@ -1256,7 +1269,12 @@ contains
         actual_immob_p_vr            => col_pf%actual_immob_p_vr           , & ! Output: [real(r8) (:,:) ]
         bd                           => soilstate_vars%bd_col                               , &
         h2osoi_vol                   => col_ws%h2osoi_vol                      , &
+        h2osoi_liq                   => col_ws%h2osoi_liq                      , &
+        h2osoi_ice                   => col_ws%h2osoi_ice                      , &
         watsat                       => soilstate_vars%watsat_col              , &
+        hksat                        => soilstate_vars%hksat_col               , &
+        bsw                          => soilstate_vars%bsw_col                 , &
+        zwt                          => soilhydrology_vars%zwt_col             , &
         pmnf_decomp_cascade          => col_nf%pmnf_decomp_cascade               , &
         pmpf_decomp_cascade          => col_pf%pmpf_decomp_cascade             , &
         leafc_storage                => veg_cs%leafc_storage                , &
@@ -1378,55 +1396,142 @@ contains
             end do
 
             if (use_peatland_roots) then
-               ! Resolve demand by PFT so that the adaptive increment can be
-               ! restricted to vascular plants.  The weighted sum over patches
-               ! replaces, rather than supplements, the existing column demand.
-               !$acc parallel loop independent gang private(p,c,adaptive_profile_sum, &
-               !$acc& adaptive_weight,use_adaptive_patch_profile,adaptive_profile_has_n) default(present)
+               ! Resolve peatland demand by PFT. Vascular plants retain their
+               ! prescribed fine-root distribution, clipped at the connected
+               ! water table. Only nonvascular PFTs may receive the optional
+               ! capillary-connected extension below their shallow ROOTFR profile.
+               !$acc parallel loop independent gang private(p,c,j,k,peatland_profile_sum, &
+               !$acc& peatland_weight,use_vascular_root_profile, &
+               !$acc& use_moss_capillary_profile,root_bottom_layer,water_table_layer, &
+               !$acc& capillary_profile_sum,capillary_weight,capillary_fraction, &
+               !$acc& hydraulic_path_time,hydraulic_conductivity,liquid_saturation, &
+               !$acc& ice_volume_fraction,ice_pore_fraction,water_table_connectivity, &
+               !$acc& layer_top_depth,layer_bottom_depth,unsaturated_layer_fraction) default(present)
                do fp = 1, num_soilp
                   p = filter_soilp(fp)
                   c = veg_pp%column(p)
-                  adaptive_profile_sum = 0._r8
-                  adaptive_profile_has_n = .false.
-                  use_adaptive_patch_profile = top_pp%peat_depth(col_pp%topounit(c)) > 0._r8 .and. &
+                  peatland_profile_sum = 0._r8
+                  capillary_profile_sum = 0._r8
+                  capillary_fraction = 0._r8
+                  water_table_connectivity = 0._r8
+                  use_vascular_root_profile = top_pp%peat_depth(col_pp%topounit(c)) > 0._r8 .and. &
                        veg_pp%active(p) .and. ivt(p) /= noveg .and. veg_vp%nonvascular(ivt(p)) < 0.5_r8
+                  use_moss_capillary_profile = use_moss_capillary_nutrients .and. &
+                       top_pp%peat_depth(col_pp%topounit(c)) > 0._r8 .and. &
+                       veg_pp%active(p) .and. ivt(p) /= noveg .and. &
+                       veg_vp%nonvascular(ivt(p)) >= 0.5_r8
 
                   if (top_pp%peat_depth(col_pp%topounit(c)) > 0._r8 .and. &
                        veg_pp%active(p) .and. ivt(p) /= noveg) then
-                     !$acc loop vector reduction(+:adaptive_profile_sum)
+                     if (use_moss_capillary_profile) then
+                        ! The ordinary nonvascular nutrient-access profile is
+                        ! the peatland biophysical ROOTFR profile.  Capillary
+                        ! access can extend only from its bottom to the layer
+                        ! intersecting the main water table; deeper saturated
+                        ! layers are deliberately excluded.
+                        root_bottom_layer = 0
+                        water_table_layer = 0
+                        !$acc loop seq
+                        do j = 1, nlevdecomp
+                           plant_ndemand_vr_patch(p,j) = 0._r8
+                           if (rootfr(p,j) > 100._r8 * epsilon(1._r8)) root_bottom_layer = j
+                           if (water_table_layer == 0 .and. zwt(c) <= col_pp%zi(c,j)) then
+                              water_table_layer = j
+                           end if
+                        end do
+
+                        if (water_table_layer > root_bottom_layer .and. root_bottom_layer > 0) then
+                           hydraulic_path_time = 0._r8
+                           !$acc loop seq
+                           do j = 1, water_table_layer
+                              if (watsat(c,j) > tiny(1._r8) .and. hksat(c,j) > tiny(1._r8)) then
+                                 liquid_saturation = h2osoi_liq(c,j) / &
+                                      (max(col_pp%dz(c,j), tiny(1._r8)) * denh2o * watsat(c,j))
+                                 liquid_saturation = min(1._r8, max(0.01_r8, liquid_saturation))
+                                 ice_volume_fraction = h2osoi_ice(c,j) / &
+                                      (max(col_pp%dz(c,j), tiny(1._r8)) * denice)
+                                 ice_pore_fraction = min(1._r8, max(0._r8, &
+                                      ice_volume_fraction / watsat(c,j)))
+                                 hydraulic_conductivity = hksat(c,j) * &
+                                      liquid_saturation**(2._r8 * bsw(c,j) + 3._r8) * &
+                                      10._r8**(-soil_ice_impedance_exponent * ice_pore_fraction)
+                                 hydraulic_path_time = min(1.e30_r8, hydraulic_path_time + &
+                                      1000._r8 * col_pp%dz(c,j) / &
+                                      max(hydraulic_conductivity, tiny(1._r8)))
+                              else
+                                 hydraulic_path_time = 1.e30_r8
+                              end if
+
+                              capillary_weight = 0._r8
+                              if (j > root_bottom_layer) then
+                                 capillary_weight = exp(-min(50._r8, hydraulic_path_time / &
+                                      (moss_capillary_connectivity_timescale_days * secspday))) * &
+                                      max(smin_no3_vr(c,j) + smin_nh4_vr(c,j), 0._r8)
+                              end if
+                              plant_ndemand_vr_patch(p,j) = capillary_weight
+                              capillary_profile_sum = capillary_profile_sum + &
+                                   capillary_weight * dzsoi_decomp(j)
+                           end do
+                           water_table_connectivity = exp(-min(50._r8, hydraulic_path_time / &
+                                (moss_capillary_connectivity_timescale_days * secspday)))
+                           if (capillary_profile_sum > tiny(1._r8)) then
+                              capillary_fraction = moss_capillary_max_demand_fraction * &
+                                   water_table_connectivity
+                           end if
+                        end if
+                     end if
+
+                     !$acc loop vector reduction(+:peatland_profile_sum)
                      do j = 1, nlevdecomp
-                        if (use_adaptive_patch_profile) then
-                           adaptive_weight = 0._r8
-                           if (watsat(c,j) > 0._r8 .and. &
+                        if (use_vascular_root_profile) then
+                           peatland_weight = 0._r8
+                           if (j == 1) then
+                              layer_top_depth = 0._r8
+                           else
+                              layer_top_depth = col_pp%zi(c,j-1)
+                           end if
+                           layer_bottom_depth = col_pp%zi(c,j)
+                           if (zwt(c) >= layer_bottom_depth) then
+                              unsaturated_layer_fraction = 1._r8
+                           else if (zwt(c) > layer_top_depth) then
+                              unsaturated_layer_fraction = (zwt(c) - layer_top_depth) / &
+                                   max(layer_bottom_depth - layer_top_depth, tiny(1._r8))
+                           else
+                              unsaturated_layer_fraction = 0._r8
+                           end if
+                           unsaturated_layer_fraction = min(1._r8, max(0._r8, &
+                                unsaturated_layer_fraction))
+                           if (unsaturated_layer_fraction > 0._r8 .and. watsat(c,j) > 0._r8 .and. &
                                 h2osoi_vol(c,j) < watsat(c,j) - 100._r8 * epsilon(watsat(c,j))) then
-                              adaptive_weight = max(froot_prof(p,j), 0._r8) * &
-                                   max(smin_no3_vr(c,j) + smin_nh4_vr(c,j), 0._r8)
+                              ! Do not redistribute vascular demand toward
+                              ! mineral-N hotspots. Uptake follows the prescribed
+                              ! fine-root profile wherever that profile is above
+                              ! the connected water table.
+                              peatland_weight = max(froot_prof(p,j), 0._r8) * &
+                                   unsaturated_layer_fraction
+                           end if
+                        else if (use_moss_capillary_profile) then
+                           capillary_weight = plant_ndemand_vr_patch(p,j)
+                           peatland_weight = (1._r8 - capillary_fraction) * &
+                                max(rootfr(p,j), 0._r8) / max(dzsoi_decomp(j), tiny(1._r8))
+                           if (capillary_fraction > 0._r8) then
+                              peatland_weight = peatland_weight + capillary_fraction * &
+                                   capillary_weight / capillary_profile_sum
                            end if
                         else
                            ! Mosses and lichens retain their prescribed profile;
                            ! they do not follow deep mineral-N redistribution.
-                           adaptive_weight = max(froot_prof(p,j), 0._r8)
+                           peatland_weight = max(froot_prof(p,j), 0._r8)
                         end if
-                        plant_ndemand_vr_patch(p,j) = adaptive_weight
-                        adaptive_profile_sum = adaptive_profile_sum + adaptive_weight * dzsoi_decomp(j)
+                        plant_ndemand_vr_patch(p,j) = peatland_weight
+                        peatland_profile_sum = peatland_profile_sum + peatland_weight * dzsoi_decomp(j)
                      end do
 
-                     adaptive_profile_has_n = adaptive_profile_sum > tiny(1._r8)
-                     if (use_adaptive_patch_profile .and. .not. adaptive_profile_has_n) then
-                        adaptive_profile_sum = 0._r8
-                        !$acc loop vector reduction(+:adaptive_profile_sum)
-                        do j = 1, nlevdecomp
-                           plant_ndemand_vr_patch(p,j) = max(froot_prof(p,j), 0._r8)
-                           adaptive_profile_sum = adaptive_profile_sum + &
-                                plant_ndemand_vr_patch(p,j) * dzsoi_decomp(j)
-                        end do
-                     end if
-
-                     if (adaptive_profile_sum > tiny(1._r8)) then
+                     if (peatland_profile_sum > tiny(1._r8)) then
                         !$acc loop vector
                         do j = 1, nlevdecomp
                            plant_ndemand_vr_patch(p,j) = plant_ndemand(p) * &
-                                plant_ndemand_vr_patch(p,j) / adaptive_profile_sum
+                                plant_ndemand_vr_patch(p,j) / peatland_profile_sum
                         end do
                      else
                         !$acc loop vector

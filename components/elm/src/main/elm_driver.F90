@@ -1133,7 +1133,7 @@ contains
                     call elm_bgc_run(elm_interface_data, bounds_clump,          &
                            filter(nc)%num_soilc, filter(nc)%soilc,              &
                            filter(nc)%num_soilp, filter(nc)%soilp,              &
-                           canopystate_vars, soilstate_vars,                    &
+                           canopystate_vars, soilstate_vars, soilhydrology_vars, &
                            temperature_vars, waterstate_vars,                   &
                            cnstate_vars, ch4_vars,                              &
                            carbonstate_vars, carbonflux_vars,                   &

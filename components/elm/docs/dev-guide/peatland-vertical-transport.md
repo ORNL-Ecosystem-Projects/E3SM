@@ -73,6 +73,11 @@ The initial capacity-overflow defaults are:
 - `peat_compaction_efolding_depth = 0.25 m`;
 - `peat_compaction_timescale_years = 1 year`.
 
+The four compaction scalars are read from the standard ELM parameter file;
+they are not namelist options. This keeps the process switch in the namelist
+while placing its scientific coefficients with the rest of ELM's calibrated
+parameters.
+
 `peat_som_adv_flux` and `peat_adv_reference_depth` now apply only to the
 compatibility path. They do not affect capacity overflow. The fen/boardwalk
 topounit receives peat transport because its mapped peat depth is positive;

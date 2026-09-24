@@ -8,7 +8,7 @@ module SoilHydrologyMod
   use shr_log_mod       , only : errMsg => shr_log_errMsg
   use decompMod         , only : bounds_type
   use elm_varctl        , only : iulog, use_vichydro, use_humhol, use_fen_bog_drainage
-  use elm_varctl        , only : soil_ice_impedance_exponent
+  use SharedParamsMod   , only : soil_ice_impedance_exponent
   use elm_varctl        , only : use_lnd_rof_two_way, lnd_rof_coupling_nstep
   use elm_varctl        , only : use_modified_infil, use_ocn_lnd_one_way
   use elm_varcon        , only : denh2o, denice, rpi, spval
