@@ -924,12 +924,58 @@ option requires use_humhol and defaults to TRUE when use_humhol is enabled.
 Set it explicitly to FALSE to run peatland hydrology with standard roots.
 </entry>
 
+<entry id="use_moss_capillary_nutrients" type="logical" category="bgc"
+       group="elm_inparm" valid_values="" value=".false.">
+Enable an experimental peatland nonvascular-PFT mineral-N access profile.
+Ordinary access uses the peatland biophysical ROOTFR profile. Up to
+moss_capillary_max_demand_fraction of demand is redistributed between the
+bottom of that profile and the layer intersecting the water table when the
+complete intervening liquid-water pathway is hydraulically conductive. This
+option currently applies only to the RD nutrient-competition scheme and
+requires use_peatland_roots=.true. FALSE preserves existing behavior.
+</entry>
+
+<entry id="moss_capillary_max_demand_fraction" type="real" category="bgc"
+       group="elm_inparm" valid_values="" value="0.10">
+Maximum fraction of nonvascular-PFT mineral-N demand that capillary access can
+redistribute below its ordinary peatland ROOTFR profile. Actual redistribution
+is multiplied by the diagnosed hydraulic connectivity to the water-table
+layer. The default 0.10 is an experimental sensitivity value.
+</entry>
+
+<entry id="moss_capillary_connectivity_timescale_days" type="real" category="bgc"
+       group="elm_inparm" valid_values="" value="30.0">
+Hydraulic travel-time scale in days used to convert the series resistance of
+the surface-to-water-table liquid pathway into moss nutrient connectivity.
+The default 30 days is an experimental sensitivity value.
+</entry>
+
 <entry id="use_peatland_vertical_transport" type="logical" category="physics"
        group="elm_inparm" valid_values="" value=".false.">
 If TRUE, peat-bearing topounits use peat-specific vertical transport
 coefficients for litter and soil organic matter. This option requires
 use_humhol and defaults to TRUE when use_humhol is enabled. Set it explicitly
 to FALSE to retain standard ELM vertical mixing in a peatland configuration.
+</entry>
+
+<entry id="use_peatland_compaction_profile" type="logical" category="physics"
+       group="elm_inparm" valid_values="" value=".false.">
+If TRUE, conservatively bury solid peat material that exceeds a
+depth-dependent target carbon density. Physical-equivalent pool stocks are
+used during accelerated spinup. This option requires
+use_peatland_vertical_transport and defaults to TRUE when peatland vertical
+transport is enabled. Set it explicitly to FALSE to recover historical
+constant-with-depth peat burial.
+</entry>
+
+<entry id="soil_ice_impedance_exponent" type="real" category="physics"
+       group="elm_inparm" valid_values="" value="6.0">
+Exponent in the frozen-soil hydraulic impedance factor
+10^(-soil_ice_impedance_exponent*ice_fraction). The generated default is 8.0
+when use_humhol is enabled and 6.0 otherwise, preserving established ELM
+behavior outside peatland configurations. An explicit setting overrides either
+default. Larger values more strongly suppress liquid-water flow through
+partially frozen soil.
 </entry>
 
 <entry id="use_crop" type="logical" category="physics"
@@ -1815,6 +1861,31 @@ The historical SPRUCE setup used zero peat diffusion.
        group="elm_inparm" valid_values="">
 Peat depth (m) at which peat_som_adv_flux applies. Advection is scaled by the
 mapped topounit peat depth divided by this reference depth.
+</entry>
+
+<entry id="peat_compaction_surface_density" type="real" category="elm_vertcn"
+       group="elm_inparm" valid_values="">
+Target solid-carbon density of uncompacted surface peat (kg C m-3). Material
+above this depth-dependent storage capacity is buried. The default is
+25 kg C m-3.
+</entry>
+
+<entry id="peat_compaction_deep_density" type="real" category="elm_vertcn"
+       group="elm_inparm" valid_values="">
+Asymptotic target solid-carbon density of compacted deep peat (kg C m-3). It
+must be at least peat_compaction_surface_density. The default is 100 kg C m-3.
+</entry>
+
+<entry id="peat_compaction_efolding_depth" type="real" category="elm_vertcn"
+       group="elm_inparm" valid_values="">
+E-folding depth (m) over which prescribed peat carbon density approaches its
+deep value. The default is 0.25 m.
+</entry>
+
+<entry id="peat_compaction_timescale_years" type="real" category="elm_vertcn"
+       group="elm_inparm" valid_values="">
+E-folding time (years) for conservatively burying solid peat carbon in excess
+of the depth-dependent target density. The default is one year.
 </entry>
 
 <entry id="max_depth_cryoturb" type="real" category="elm_vertcn"

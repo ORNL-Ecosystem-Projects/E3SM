@@ -269,11 +269,12 @@ contains
     ! !USES:
       !$acc routine seq
     use elm_varctl           , only : use_var_soil_thick, use_humhol, use_peatland_roots, iulog
+    use elm_varctl           , only : soil_ice_impedance_exponent
     use shr_kind_mod         , only : r8 => shr_kind_r8
     use shr_const_mod        , only : SHR_CONST_TKFRZ, SHR_CONST_LATICE, SHR_CONST_G
     use decompMod            , only : bounds_type
     use elm_varcon           , only : wimp,grav,hfus,tfrz
-    use elm_varcon           , only : e_ice,denh2o, denice, watmin
+    use elm_varcon           , only : denh2o, denice, watmin
     use elm_varpar           , only : nlevsoi, max_patch_per_col, nlevgrnd
     use elm_time_manager     , only : get_step_size
     use column_varcon        , only : icol_roof, icol_road_imperv
@@ -584,7 +585,8 @@ contains
             if (origflag == 1) then
                imped(c,j)=(1._r8-0.5_r8*(fracice(c,j)+fracice(c,min(nlevsoi, j+1))))
             else
-               imped(c,j)=10._r8**(-e_ice*(0.5_r8*(icefrac(c,j)+icefrac(c,min(nlevsoi, j+1)))))
+               imped(c,j)=10._r8**(-soil_ice_impedance_exponent* &
+                    (0.5_r8*(icefrac(c,j)+icefrac(c,min(nlevsoi, j+1)))))
             endif
             hk(c,j) = imped(c,j)*s1*s2
             dhkdw(c,j) = imped(c,j)*(2._r8*bsw(c,j)+3._r8)*s2* &

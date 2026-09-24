@@ -122,7 +122,12 @@ attributes from the config_cache.xml file (with keys converted to upper-case).
 <use_fen_bog_drainage>.false.</use_fen_bog_drainage>
 <!-- Use standard roots unless peatland physics is enabled -->
 <use_peatland_roots>.false.</use_peatland_roots>
+<use_moss_capillary_nutrients>.false.</use_moss_capillary_nutrients>
+<moss_capillary_max_demand_fraction>0.10</moss_capillary_max_demand_fraction>
+<moss_capillary_connectivity_timescale_days>30.0</moss_capillary_connectivity_timescale_days>
 <use_peatland_vertical_transport>.false.</use_peatland_vertical_transport>
+<use_peatland_compaction_profile>.false.</use_peatland_compaction_profile>
+<soil_ice_impedance_exponent>6.0</soil_ice_impedance_exponent>
 
 <!-- ================================================================== -->
 <!-- The default filenames are given relative to the root directory

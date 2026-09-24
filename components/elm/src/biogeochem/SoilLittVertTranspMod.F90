@@ -8,6 +8,7 @@ module SoilLittVertTranspMod
   use elm_varctl             , only : iulog, use_c13, use_c14, spinup_state, use_vertsoilc
   use elm_varctl             , only : use_microbe_methane
   use elm_varctl             , only : use_peatland_vertical_transport
+  use elm_varctl             , only : use_peatland_compaction_profile
   use elm_varctl             , only : use_microbe_aqueous_transport
   use elm_varcon             , only : secspday
   use decompMod              , only : bounds_type
@@ -59,6 +60,14 @@ module SoilLittVertTranspMod
   !$acc declare create(peat_som_diffus)
   real(r8), public :: peat_adv_reference_depth = 3._r8
   !$acc declare create(peat_adv_reference_depth)
+  real(r8), public :: peat_compaction_surface_density = 25._r8
+  !$acc declare create(peat_compaction_surface_density)
+  real(r8), public :: peat_compaction_deep_density = 100._r8
+  !$acc declare create(peat_compaction_deep_density)
+  real(r8), public :: peat_compaction_efolding_depth = 0.25_r8
+  !$acc declare create(peat_compaction_efolding_depth)
+  real(r8), public :: peat_compaction_timescale_years = 1._r8
+  !$acc declare create(peat_compaction_timescale_years)
   real(r8), public :: max_depth_cryoturb = 3._r8   ! (m) this is the maximum depth of cryoturbation
   !$acc declare create(max_depth_cryoturb)
   !-----------------------------------------------------------------------
@@ -242,7 +251,15 @@ contains
     real(r8) :: bet
     real(r8) :: gam(0:nlevdecomp+1)
     real(r8) :: peat_depth_factor
+    real(r8) :: peat_physical_density
+    real(r8) :: peat_target_density
+    real(r8) :: peat_pool_factor
+    real(r8) :: peat_excess_flux
+    real(r8) :: peat_compaction_timescale_seconds
     real(r8) :: dom_diffusion_multiplier
+    logical  :: peat_dynamic_column(num_soilc)
+    logical  :: transport_pool(num_soilc,ndecomp_pools)
+    real(r8) :: peat_c_density(num_soilc,nlevdecomp)
     !-----------------------------------------------------------------------
 
 
@@ -255,11 +272,17 @@ contains
          is_microbial     => decomp_cascade_con%is_microbial_biomass, &
          spinup_factor    => decomp_cascade_con%spinup_factor     , & ! Input:  [real(r8) (:)   ]  spinup accelerated decomposition factor, used to accelerate transport as well
 
+         decomp_cpools_vr => col_cs%decomp_cpools_vr             , &
+         decomp_csources  => col_cf%decomp_cpools_sourcesink     , &
+
          altmax           => canopystate_vars%altmax_col          , & ! Input:  [real(r8) (:)   ]  maximum annual depth of thaw
          altmax_lastyear  => canopystate_vars%altmax_lastyear_col , & ! Input:  [real(r8) (:)   ]  prior year maximum annual depth of thaw
 
          som_adv_coef     => cnstate_vars%som_adv_coef_col       , & ! Output: [real(r8) (:,:) ]  SOM advective flux (m/s)
          som_diffus_coef  => cnstate_vars%som_diffus_coef_col    ,  & ! Output: [real(r8) (:,:) ]  SOM diffusivity due to bio/cryo-turbation (m2/s)
+         peat_c_density_diag => cnstate_vars%peat_c_density_col  , &
+         peat_c_target_diag => cnstate_vars%peat_c_target_density_col, &
+         peat_c_burial_flux_diag => cnstate_vars%peat_c_burial_flux_col, &
          ! !Set parameters of vertical mixing of SOM
           som_diffus                 => SoilLittVertTranspParamsInst%som_diffus   , &
           cryoturb_diffusion_k       => SoilLittVertTranspParamsInst%cryoturb_diffusion_k  , &
@@ -274,7 +297,9 @@ contains
       !$acc enter data copyin(dom_diffusion_multiplier)
       !$acc enter data create(a_tri(:,:,:),b_tri(:,:,:),&
       !$acc     c_tri(:,:,:),r_tri(:,:,:), &
-      !$acc     conc_trcr(:,:,:), gam(:) )
+      !$acc     conc_trcr(:,:,:), gam(:), &
+      !$acc     peat_dynamic_column(:), transport_pool(:,:), &
+      !$acc     peat_c_density(:,:) )
       ntype = 3
       if ( use_c13 ) then
          ntype = ntype+1
@@ -286,6 +311,80 @@ contains
       !$acc enter data create(spinup_term, i_type) 
       spinup_term = 1._r8
       !$acc update device(spinup_term)
+
+      peat_compaction_timescale_seconds = peat_compaction_timescale_years * &
+           secspday * 365._r8
+      !$acc enter data copyin(peat_compaction_timescale_seconds)
+
+      ! Build the physical-equivalent solid-C density used by the peat
+      ! capacity-overflow calculation. In AD spinup the prognostic slow-pool
+      ! concentrations are deliberately reduced, so reconstruct the physical
+      ! density with the same pool factors used by vertical transport.
+      !$acc parallel loop independent gang vector default(present) private(c,t)
+      do fc = 1,num_soilc
+         c = filter_soilc(fc)
+         t = col_pp%topounit(c)
+         peat_dynamic_column(fc) = use_peatland_compaction_profile .and. &
+              top_pp%peat_depth(t) > 0._r8
+      end do
+
+      !$acc parallel loop independent gang default(present)
+      do j = 1,nlevdecomp
+         !$acc loop vector independent &
+         !$acc& private(c,peat_physical_density,peat_target_density, &
+         !$acc& peat_pool_factor,s)
+         do fc = 1,num_soilc
+            c = filter_soilc(fc)
+            peat_physical_density = 0._r8
+            peat_target_density = 0._r8
+            if (peat_dynamic_column(fc)) then
+               !$acc loop seq
+               do s = 1,ndecomp_pools
+                  if (.not. is_dissolved(s)) then
+                     peat_pool_factor = 1._r8
+                     if (spinup_state == 1) then
+                        peat_pool_factor = spinup_factor(s)
+                        if (spinup_factor(s) > 1._r8 .and. year_curr >= 40) then
+                           peat_pool_factor = peat_pool_factor / &
+                                max(cnstate_vars%scalaravg_col(c,j), epsilon)
+                        end if
+                     end if
+                     peat_physical_density = peat_physical_density + &
+                          max(decomp_cpools_vr(c,j,s) + decomp_csources(c,j,s), 0._r8) * &
+                          peat_pool_factor
+                  end if
+               end do
+               peat_target_density = 1000._r8 * &
+                    (peat_compaction_surface_density + &
+                     (peat_compaction_deep_density - &
+                      peat_compaction_surface_density) * &
+                     (1._r8 - exp(-max(zsoi(j),0._r8) / &
+                      peat_compaction_efolding_depth)))
+            end if
+            peat_c_density(fc,j) = peat_physical_density
+            peat_c_density_diag(c,j) = peat_physical_density
+            peat_c_target_diag(c,j) = peat_target_density
+            peat_c_burial_flux_diag(c,j) = 0._r8
+         end do
+      end do
+
+      !$acc parallel loop independent gang default(present)
+      do s = 1,ndecomp_pools
+         !$acc loop vector independent private(c)
+         do fc = 1,num_soilc
+            c = filter_soilc(fc)
+            if (peat_dynamic_column(fc)) then
+               ! Capacity overflow buries the complete solid peat matrix.
+               transport_pool(fc,s) = .not. is_dissolved(s)
+            else
+               ! Preserve the standard ELM pool selection outside dynamic
+               ! peat columns.
+               transport_pool(fc,s) = .not. is_cwd(s) .and. &
+                    .not. is_microbial(s) .and. &
+                    .not. (use_microbe_aqueous_transport .and. is_dissolved(s))
+            end if
+         end do
+      end do
 
       if (use_vertsoilc) then
          !------ first get diffusivity / advection terms -------!
@@ -323,7 +422,9 @@ contains
          else
             !$acc parallel loop independent gang default(present)
             do j = 1,nlevdecomp+1
-               !$acc loop vector independent private(c,t,peat_depth_factor)
+               !$acc loop vector independent &
+               !$acc& private(c,t,l,peat_depth_factor,peat_physical_density, &
+               !$acc& peat_target_density,peat_excess_flux)
                do fc = 1, num_soilc
                   c = filter_soilc (fc)
                   if  ( ( max(altmax(c), altmax_lastyear(c)) <= max_altdepth_cryoturbation ) .and. &
@@ -342,7 +443,38 @@ contains
                      peat_depth_factor = max(top_pp%peat_depth(t), 0._r8) / &
                           peat_adv_reference_depth
                      if (peat_depth_factor > 0._r8) then
-                        som_adv_coef(c,j) = peat_som_adv_flux * peat_depth_factor
+                        if (use_peatland_compaction_profile) then
+                           ! The coefficient at j is the velocity through the
+                           ! upper interface of layer j. There is no external
+                           ! C supply at the surface and no loss through the
+                           ! bottom of the decomposition column. Interior
+                           ! velocities relax only donor-layer C above its
+                           ! depth-dependent storage capacity.
+                           som_adv_coef(c,j) = 0._r8
+                           if (j > 1 .and. j <= nlevdecomp .and. &
+                                zisoi(j-1) <= top_pp%peat_depth(t)) then
+                              l = j - 1
+                              peat_physical_density = peat_c_density(fc,l)
+                              peat_target_density = 1000._r8 * &
+                                   (peat_compaction_surface_density + &
+                                    (peat_compaction_deep_density - &
+                                     peat_compaction_surface_density) * &
+                                    (1._r8 - exp(-max(zsoi(l),0._r8) / &
+                                     peat_compaction_efolding_depth)))
+                              if (peat_physical_density > peat_target_density) then
+                                 peat_excess_flux = &
+                                      (peat_physical_density - peat_target_density) * &
+                                      dzsoi_decomp(l) / peat_compaction_timescale_seconds
+                                 som_adv_coef(c,j) = peat_excess_flux / &
+                                      max(peat_physical_density, epsilon)
+                                 peat_c_burial_flux_diag(c,l) = peat_excess_flux
+                              end if
+                           end if
+                        else
+                           ! Compatibility path for the historical prescribed
+                           ! velocity and total-peat-depth scaling.
+                           som_adv_coef(c,j) = peat_som_adv_flux * peat_depth_factor
+                        end if
                         som_diffus_coef(c,j) = peat_som_diffus
                      else
                         som_adv_coef(c,j) = som_adv_flux
@@ -367,10 +499,9 @@ contains
 
             !$acc parallel loop independent gang default(present)
             do s = 1, ndecomp_pools
-               if ( .not. is_cwd(s) .and. .not. is_microbial(s) .and. &
-                    .not. (use_microbe_aqueous_transport .and. is_dissolved(s)) ) then
-                  !$acc loop independent worker vector private(c)
-                  do fc = 1, num_soilc ! dummy terms here
+               !$acc loop independent worker vector private(c)
+               do fc = 1, num_soilc ! dummy terms here
+                  if (transport_pool(fc,s)) then
                      c = filter_soilc (fc)
                      conc_trcr(fc,0,s) = 0._r8
                      conc_trcr(fc,nlevdecomp+1,s) = 0._r8
@@ -385,8 +516,8 @@ contains
                      b_tri(fc,nlevdecomp+1,s) = 1._r8
                      c_tri(fc,nlevdecomp+1,s) = 0._r8
                      r_tri(fc,nlevdecomp+1,s) = 0._r8
-                  end do
-               end if
+                  end if
+               end do
             end do
 
             !$acc parallel loop independent gang worker vector collapse(3) default(present) 
@@ -394,8 +525,7 @@ contains
                do j = 1,nlevdecomp
                   do fc = 1, num_soilc
                      c = filter_soilc (fc)
-                     if(.not. is_cwd(s) .and. .not. is_microbial(s) .and. &
-                          .not. (use_microbe_aqueous_transport .and. is_dissolved(s))) then
+                     if (transport_pool(fc,s)) then
 
                         if ( spinup_state .eq. 1 ) then
                            ! increase transport (both advection and diffusion) by the same factor as accelerated decomposition for a given pool
@@ -432,6 +562,13 @@ contains
                            a_tri(fc,j,s) = -(d_m1_zm1 * aaa(pe_m1) + max( adv_flux_j, 0._r8)) ! Eqn 5.47 Patankar
                            c_tri(fc,j,s) = -(d_p1_zp1 * aaa(pe_p1) + max(-adv_flux_jp1, 0._r8))
                            b_tri(fc,j,s) = -a_tri(fc,j,s) - c_tri(fc,j,s) + a_p_0
+                           if (peat_dynamic_column(fc)) then
+                              ! The historical operator assumed a constant
+                              ! velocity. Include flux divergence for the
+                              ! layer-varying capacity-overflow velocity.
+                              b_tri(fc,j,s) = b_tri(fc,j,s) + &
+                                   adv_flux_jp1 - adv_flux_j
+                           end if
                            r_tri(fc,j,s) = transport_ptr_list(i_type)%src_ptr(c,j,s) * dzsoi_decomp(j) /dtime_mod + (a_p_0 - adv_flux_j) * conc_trcr(fc,j,s)
                         else
                           ! Use distance from j-1 node to interface with j divided by distance between nodes
@@ -469,6 +606,10 @@ contains
                            a_tri(fc,j,s) = -(d_m1_zm1 * aaa(pe_m1) + max( adv_flux_j, 0._r8)) ! Eqn 5.47 Patankar
                            c_tri(fc,j,s) = -(d_p1_zp1 * aaa(pe_p1) + max(-adv_flux_jp1, 0._r8))
                            b_tri(fc,j,s) = -a_tri(fc,j,s) - c_tri(fc,j,s) + a_p_0
+                           if (peat_dynamic_column(fc)) then
+                              b_tri(fc,j,s) = b_tri(fc,j,s) + &
+                                   adv_flux_jp1 - adv_flux_j
+                           end if
                            r_tri(fc,j,s) = transport_ptr_list(i_type)%src_ptr(c,j,s) * dzsoi_decomp(j) /dtime_mod + a_p_0 * conc_trcr(fc,j,s)
                         end if
                      end if
@@ -482,8 +623,7 @@ contains
                do j = 1, nlevdecomp
                   do fc = 1, num_soilc
                      c = filter_soilc (fc)
-                     if(.not. is_cwd(s) .and. .not. is_microbial(s) .and. &
-                          .not. (use_microbe_aqueous_transport .and. is_dissolved(s))) then
+                     if (transport_pool(fc,s)) then
                         transport_ptr_list(i_type)%trcr_tend_ptr(c,j,s) = 0._r8 - (conc_trcr(fc,j,s) + transport_ptr_list(i_type)%src_ptr(c,j,s))
                      end if
                   end do
@@ -495,8 +635,7 @@ contains
             !$acc parallel loop independent gang worker vector collapse(2) default(present) private(bet, gam(0:nlevdecomp+1))
             do s = 1, ndecomp_pools
                do fc = 1,num_soilc
-                  if(.not. is_cwd(s) .and. .not. is_microbial(s) .and. &
-                       .not. (use_microbe_aqueous_transport .and. is_dissolved(s))) then
+                  if (transport_pool(fc,s)) then
                      bet = b_tri(fc,0,s)
 
                      !$acc loop seq
@@ -522,37 +661,40 @@ contains
             !$acc parallel loop independent gang collapse(2) default(present)
             do s = 1, ndecomp_pools
                do j = 1, nlevdecomp
-                  if(.not. is_cwd(s) .and. .not. is_microbial(s) .and. &
-                       .not. (use_microbe_aqueous_transport .and. is_dissolved(s))) then
-                     !$acc loop vector independent private(c)
-                     do fc = 1, num_soilc
+                  !$acc loop vector independent private(c)
+                  do fc = 1, num_soilc
+                     if (transport_pool(fc,s)) then
                         c = filter_soilc (fc)
-                        transport_ptr_list(i_type)%trcr_tend_ptr(c,j,s) = (transport_ptr_list(i_type)%trcr_tend_ptr(c,j,s) + conc_trcr(fc,j,s))/dtime_mod
-                     end do
-                  end if
+                        transport_ptr_list(i_type)%trcr_tend_ptr(c,j,s) = &
+                             (transport_ptr_list(i_type)%trcr_tend_ptr(c,j,s) + &
+                              conc_trcr(fc,j,s)) / dtime_mod
+                     end if
+                  end do
                   !
                end do
             end do
 
-            ! CWD, living microbial biomass, and physically transported DOM
-            ! remain in their source layers here. The aqueous operator moves
-            ! DOM after its reaction sources have been applied.
+            ! Pools not selected for matrix transport remain in their source
+            ! layers. Dynamic peat columns bury all solid pools; dissolved
+            ! matter remains available to the separate aqueous operator.
             !$acc parallel loop independent gang default(present)
             do s = 1, ndecomp_pools
-               if(is_cwd(s) .or. is_microbial(s) .or. &
-                    (use_microbe_aqueous_transport .and. is_dissolved(s))) then
-                  !$acc loop worker vector collapse(2) independent private(c)
-                  do j = 1,nlevdecomp
-                     do fc = 1, num_soilc
+               !$acc loop worker vector collapse(2) independent private(c)
+               do j = 1,nlevdecomp
+                  do fc = 1, num_soilc
+                     if (.not. transport_pool(fc,s)) then
                         c = filter_soilc (fc)
-                        conc_trcr(fc,j,s) = transport_ptr_list(i_type)%conc_ptr(c,j,s) + transport_ptr_list(i_type)%src_ptr(c,j,s)
+                        conc_trcr(fc,j,s) = &
+                             transport_ptr_list(i_type)%conc_ptr(c,j,s) + &
+                             transport_ptr_list(i_type)%src_ptr(c,j,s)
                         if (is_microbial(s) .or. &
-                             (use_microbe_aqueous_transport .and. is_dissolved(s))) then
+                             (use_microbe_aqueous_transport .and. is_dissolved(s)) .or. &
+                             (peat_dynamic_column(fc) .and. is_dissolved(s))) then
                            transport_ptr_list(i_type)%trcr_tend_ptr(c,j,s) = 0._r8
                         end if
-                     end do
+                     end if
                   end do
-               end if
+               end do
             end do
 
 
@@ -590,7 +732,9 @@ contains
    
       !$acc exit data delete(a_tri(:,:,:),b_tri(:,:,:),&
       !$acc     c_tri(:,:,:),r_tri(:,:,:), gam(:), &
-      !$acc     conc_trcr(:,:,:), spinup_term, i_type, dom_diffusion_multiplier)
+      !$acc     conc_trcr(:,:,:), spinup_term, i_type, dom_diffusion_multiplier, &
+      !$acc     peat_compaction_timescale_seconds, peat_dynamic_column(:), &
+      !$acc     transport_pool(:,:), peat_c_density(:,:))
     end associate
 
   end subroutine SoilLittVertTransp

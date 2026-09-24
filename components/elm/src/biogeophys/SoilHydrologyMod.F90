@@ -8,9 +8,10 @@ module SoilHydrologyMod
   use shr_log_mod       , only : errMsg => shr_log_errMsg
   use decompMod         , only : bounds_type
   use elm_varctl        , only : iulog, use_vichydro, use_humhol, use_fen_bog_drainage
+  use elm_varctl        , only : soil_ice_impedance_exponent
   use elm_varctl        , only : use_lnd_rof_two_way, lnd_rof_coupling_nstep
   use elm_varctl        , only : use_modified_infil, use_ocn_lnd_one_way
-  use elm_varcon        , only : e_ice, denh2o, denice, rpi, spval
+  use elm_varcon        , only : denh2o, denice, rpi, spval
   use EnergyFluxType    , only : energyflux_type
   use SoilHydrologyType , only : soilhydrology_type
   use SoilStateType     , only : soilstate_type
@@ -583,9 +584,12 @@ contains
                         + top_max_moist(c) * basis**(1._r8 + b_infil(c)))/dtime
                 end if
                 rsurf_vic = min(qflx_in_soil(c), rsurf_vic)
-                qinmax = (1._r8 - fsat(c)) * 10._r8**(-e_ice*top_icefrac)*(qflx_in_soil(c) - rsurf_vic)
+                qinmax = (1._r8 - fsat(c)) * &
+                     10._r8**(-soil_ice_impedance_exponent*top_icefrac) * &
+                     (qflx_in_soil(c) - rsurf_vic)
              else
-                infil_ice_imped(1:3) = 10._r8**(-e_ice*icefrac(c,1:3))
+                infil_ice_imped(1:3) = &
+                     10._r8**(-soil_ice_impedance_exponent*icefrac(c,1:3))
                 if (use_humhol .and. top_pp%peat_depth(t) > 0._r8) then
                    infil_ice_imped(1:3) = max(infil_ice_imped(1:3), humhol_frozen_infil_min_imped)
                 end if
@@ -871,7 +875,7 @@ contains
                    s_node = h2osoi_liq(c,j)/(dz(c,j)*denh2o*watsat(c,j))
                    s_node = min(1._r8, max(0.01_r8, s_node))
                    s1 = min(1._r8, 0.5_r8*(1._r8+s_node))
-                   imped = 10._r8**(-e_ice*icefrac(c,j))
+                   imped = 10._r8**(-soil_ice_impedance_exponent*icefrac(c,j))
                    ka_col(c) = ka_col(c) + imped*hksat(c,j)*s1**(2._r8*bsw(c,j)+3._r8) * &
                         dzmm(c,j)/unfrozen_dzmm
                 enddo
@@ -884,7 +888,7 @@ contains
                    s_node = h2osoi_liq(c,j)/(dz(c,j)*denh2o*watsat(c,j))
                    s_node = min(1._r8, max(0.01_r8, s_node))
                    s1 = min(1._r8, 0.5_r8*(1._r8+s_node))
-                   imped = 10._r8**(-e_ice*icefrac(c,j))
+                   imped = 10._r8**(-soil_ice_impedance_exponent*icefrac(c,j))
                    ka_col(c) = imped*hksat(c,j)*s1**(2._r8*bsw(c,j)+3._r8)
                 endif
                 sy_top(t) = watsat(c,j) * &
@@ -1682,7 +1686,8 @@ contains
              wtsub = 0._r8
              q_perch = 0._r8
              do k = jwt(c)+1, k_frz
-                imped=10._r8**(-e_ice*(0.5_r8*(icefrac(c,k)+icefrac(c,min(nlevbed, k+1)))))
+                imped=10._r8**(-soil_ice_impedance_exponent * &
+                     (0.5_r8*(icefrac(c,k)+icefrac(c,min(nlevbed, k+1)))))
                 q_perch = q_perch + imped*hksat(c,k)*dzmm(c,k)
                 wtsub = wtsub + dzmm(c,k)
              end do
@@ -1765,7 +1770,8 @@ contains
                 wtsub = 0._r8
                 q_perch = 0._r8
                 do k = k_perch, k_frz
-                   imped=10._r8**(-e_ice*(0.5_r8*(icefrac(c,k)+icefrac(c,min(nlevbed, k+1)))))
+                   imped=10._r8**(-soil_ice_impedance_exponent * &
+                        (0.5_r8*(icefrac(c,k)+icefrac(c,min(nlevbed, k+1)))))
                    q_perch = q_perch + imped*hksat(c,k)*dzmm(c,k)
                    wtsub = wtsub + dzmm(c,k)
                 end do
@@ -1826,11 +1832,12 @@ contains
                 end if
              else
                 if (use_vichydro) then
-                   imped=10._r8**(-e_ice*min(1.0_r8,ice(c,nlayer)/max_moist(c,nlayer)))
+                   imped=10._r8**(-soil_ice_impedance_exponent * &
+                        min(1.0_r8,ice(c,nlayer)/max_moist(c,nlayer)))
                    dsmax_tmp(c) = Dsmax(c) * dtime/ secspday !mm/day->mm/dtime
                    rsub_top_max = dsmax_tmp(c)
                 else
-                   imped=10._r8**(-e_ice*(icefracsum/dzsum))
+                   imped=10._r8**(-soil_ice_impedance_exponent*(icefracsum/dzsum))
                    rsub_top_max = min(10._r8 * sin((rpi/180.) * col_pp%topo_slope(c)), rsub_top_globalmax)
                 end if
              endif
@@ -2179,7 +2186,7 @@ contains
      ! !USES:
       !$acc routine seq
      use elm_varpar       , only : nlevsoi, nlevgrnd, nlayer, nlayert
-     use elm_varcon       , only : pondmx, tfrz, watmin,rpi, secspday, nlvic, e_ice
+     use elm_varcon       , only : pondmx, tfrz, watmin,rpi, secspday, nlvic
      use pftvarcon        , only : rsub_top_globalmax
      use domainMod        , only : ldomain
      use ocn2lndType      , only : ocn2lnd_type 
@@ -2259,7 +2266,7 @@ contains
              dzsum  = dzsum + dz(c,j)*1.e3_r8
              icefracsum = icefracsum + icefrac(c,j) * dz(c,j)*1.e3_r8
           end do
-          imped=10._r8**(-e_ice*(icefracsum/dzsum))
+          imped=10._r8**(-soil_ice_impedance_exponent*(icefracsum/dzsum))
 
           ! Lateral flow to ocean
           T1 = 0._r8
@@ -2599,7 +2606,8 @@ contains
              wtsub = 0._r8
              q_perch = 0._r8
              do k = jwt(c)+1, k_frz
-                imped=10._r8**(-e_ice*(0.5_r8*(icefrac(c,k)+icefrac(c,min(nlevsoi, k+1)))))
+                imped=10._r8**(-soil_ice_impedance_exponent * &
+                     (0.5_r8*(icefrac(c,k)+icefrac(c,min(nlevsoi, k+1)))))
                 q_perch = q_perch + imped*hksat(c,k)*dzmm(c,k)
                 wtsub = wtsub + dzmm(c,k)
              end do
@@ -2678,7 +2686,8 @@ contains
                 wtsub = 0._r8
                 q_perch = 0._r8
                 do k = k_perch, k_frz
-                   imped=10._r8**(-e_ice*(0.5_r8*(icefrac(c,k)+icefrac(c,min(nlevsoi, k+1)))))
+                   imped=10._r8**(-soil_ice_impedance_exponent * &
+                        (0.5_r8*(icefrac(c,k)+icefrac(c,min(nlevsoi, k+1)))))
                    q_perch = q_perch + imped*hksat(c,k)*dzmm(c,k)
                    wtsub = wtsub + dzmm(c,k)
                 end do
@@ -2740,11 +2749,12 @@ contains
                 end if
              else
                 if (use_vichydro) then
-                   imped=10._r8**(-e_ice*min(1.0_r8,ice(c,nlayer)/max_moist(c,nlayer)))
+                   imped=10._r8**(-soil_ice_impedance_exponent * &
+                        min(1.0_r8,ice(c,nlayer)/max_moist(c,nlayer)))
                    dsmax_tmp(c) = Dsmax(c) * dtime/ secspday !mm/day->mm/dtime
                    rsub_top_max = dsmax_tmp(c)
                 else
-                   imped=10._r8**(-e_ice*(icefracsum/dzsum))
+                   imped=10._r8**(-soil_ice_impedance_exponent*(icefracsum/dzsum))
                    rsub_top_max = min(10._r8 * sin((rpi/180.) * col_pp%topo_slope(c)), rsub_top_globalmax)
                 end if
              endif

@@ -84,6 +84,9 @@ module CNStateType
      real(r8) , pointer :: pdep_prof_col               (:,:)   ! col (1/m) profile for P deposition additions 
      real(r8) , pointer :: som_adv_coef_col            (:,:)   ! col SOM advective flux (m/s) 
      real(r8) , pointer :: som_diffus_coef_col         (:,:)   ! col SOM diffusivity due to bio/cryo-turbation (m2/s) 
+     real(r8) , pointer :: peat_c_density_col          (:,:)   ! col physical-equivalent solid peat C density (gC/m3)
+     real(r8) , pointer :: peat_c_target_density_col   (:,:)   ! col target solid peat C density (gC/m3)
+     real(r8) , pointer :: peat_c_burial_flux_col      (:,:)   ! col excess solid peat C burial flux (gC/m2/s)
 
      real(r8) , pointer :: tempavg_t2m_patch           (:)     ! patch temporary average 2m air temperature (K)
      real(r8) , pointer :: annavg_t2m_patch            (:)     ! patch annual average 2m air temperature (K)
@@ -274,6 +277,9 @@ contains
     allocate(this%ndep_prof_col       (begc:endc,1:nlevdecomp_full)) ; this%ndep_prof_col       (:,:) = spval
     allocate(this%som_adv_coef_col    (begc:endc,1:nlevdecomp_full)) ; this%som_adv_coef_col    (:,:) = spval
     allocate(this%som_diffus_coef_col (begc:endc,1:nlevdecomp_full)) ; this%som_diffus_coef_col (:,:) = spval
+    allocate(this%peat_c_density_col  (begc:endc,1:nlevdecomp_full)) ; this%peat_c_density_col  (:,:) = spval
+    allocate(this%peat_c_target_density_col(begc:endc,1:nlevdecomp_full)); this%peat_c_target_density_col(:,:) = spval
+    allocate(this%peat_c_burial_flux_col(begc:endc,1:nlevdecomp_full)); this%peat_c_burial_flux_col(:,:) = spval
 
     allocate(this%tempavg_t2m_patch   (begp:endp))                   ; this%tempavg_t2m_patch   (:)   = spval
     allocate(this%annsum_counter_col  (begc:endc))                   ; this%annsum_counter_col  (:)   = spval
@@ -443,6 +449,21 @@ contains
     call hist_addfld_decomp (fname='SOM_DIFFUS_COEF', units='m^2/s',  type2d='levdcmp', &
          avgflag='A', long_name='diffusion coefficient for vertical SOM translocation', &
          ptr_col=this%som_diffus_coef_col, default='inactive')
+
+    this%peat_c_density_col(begc:endc,:) = spval
+    call hist_addfld_decomp (fname='PEAT_C_DENSITY', units='gC/m^3', type2d='levdcmp', &
+         avgflag='A', long_name='physical-equivalent solid peat carbon density', &
+         ptr_col=this%peat_c_density_col, default='inactive')
+
+    this%peat_c_target_density_col(begc:endc,:) = spval
+    call hist_addfld_decomp (fname='PEAT_C_TARGET_DENSITY', units='gC/m^3', type2d='levdcmp', &
+         avgflag='A', long_name='target solid peat carbon density for capacity overflow', &
+         ptr_col=this%peat_c_target_density_col, default='inactive')
+
+    this%peat_c_burial_flux_col(begc:endc,:) = spval
+    call hist_addfld_decomp (fname='PEAT_C_BURIAL_FLUX', units='gC/m^2/s', type2d='levdcmp', &
+         avgflag='A', long_name='downward solid peat carbon flux driven by capacity overflow', &
+         ptr_col=this%peat_c_burial_flux_col, default='inactive')
 
     this%lfc2_col(begc:endc) = spval
     call hist_addfld1d (fname='LFC2', units='per sec', &
@@ -1061,6 +1082,9 @@ contains
           this%fpi_p_vr_col(c,1:nlevdecomp_full)          = 0._r8 
           this%som_adv_coef_col(c,1:nlevdecomp_full)    = 0._r8 
           this%som_diffus_coef_col(c,1:nlevdecomp_full) = 0._r8 
+          this%peat_c_density_col(c,1:nlevdecomp_full) = 0._r8
+          this%peat_c_target_density_col(c,1:nlevdecomp_full) = 0._r8
+          this%peat_c_burial_flux_col(c,1:nlevdecomp_full) = 0._r8
           !this%scalaravg_col(c,1:nlevdecomp_full)       = 0._r8
 
           ! initialize the profiles for converting to vertically resolved carbon pools
