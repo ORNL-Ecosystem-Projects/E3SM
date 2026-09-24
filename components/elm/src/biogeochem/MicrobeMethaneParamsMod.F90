@@ -11,7 +11,8 @@ module MicrobeMethaneParamsMod
   use shr_log_mod, only : errMsg => shr_log_errMsg
   use abortutils, only : endrun
   use elm_varctl, only : iulog, use_clm_microbe_dom_relaxation, &
-       use_microbe_aqueous_transport
+       use_microbe_observed_dom_calibration, &
+       use_microbe_aqueous_transport, use_microbe_dom_preferential_flow
   use spmdMod, only : masterproc
   use, intrinsic :: ieee_arithmetic, only : ieee_is_finite
 
@@ -59,15 +60,27 @@ module MicrobeMethaneParamsMod
      real(r8) :: ph_max
      real(r8) :: ph_opt
      real(r8) :: soil_ph_fallback
+     real(r8) :: denitrification_rate_multiplier
      real(r8) :: dom_diffusivity
      real(r8) :: dom_relaxation_rate
+     real(r8) :: observed_dom_relaxation_timescale
+     real(r8) :: observed_dom_deep_concentration
+     real(r8) :: observed_dom_surface_amplitude
+     real(r8) :: observed_dom_efold_depth
      real(r8) :: aqueous_dom_molecular_diffusivity
+     real(r8) :: aqueous_dom_saturated_macrodispersion
      real(r8) :: aqueous_acetate_molecular_diffusivity
+     real(r8) :: aqueous_nh4_molecular_diffusivity
+     real(r8) :: aqueous_no3_molecular_diffusivity
+     real(r8) :: aqueous_nh4_partition_coefficient
+     real(r8) :: aqueous_mineral_n_advection_multiplier
      real(r8) :: aqueous_dom_mobile_fraction
+     real(r8) :: aqueous_dom_mobile_saturation_exponent
      real(r8) :: aqueous_acetate_mobile_fraction
      real(r8) :: aqueous_solute_dispersivity
      real(r8) :: aqueous_solute_tortuosity_exponent
      real(r8) :: aqueous_solute_min_liquid_fraction
+     real(r8) :: dom_complete_bypass_fraction
      real(r8) :: aqueous_gas_diffusion_multiplier
      real(r8) :: plant_transport_coefficient
      real(r8) :: h2_plant_transport_threshold
@@ -174,26 +187,61 @@ contains
     call read_scalar(ncid, 'microbe_methane_ph_opt', MicrobeMethaneParamsInst%ph_opt)
     call read_scalar(ncid, 'microbe_methane_soil_ph_fallback', &
          MicrobeMethaneParamsInst%soil_ph_fallback)
+    call read_scalar(ncid, 'microbe_methane_denitrification_rate_multiplier', &
+         MicrobeMethaneParamsInst%denitrification_rate_multiplier)
     call read_scalar(ncid, 'microbe_methane_dom_diffusivity', MicrobeMethaneParamsInst%dom_diffusivity)
     MicrobeMethaneParamsInst%dom_relaxation_rate = 0._r8
     if (use_clm_microbe_dom_relaxation) then
        call read_scalar(ncid, 'microbe_methane_dom_relaxation_rate', &
             MicrobeMethaneParamsInst%dom_relaxation_rate)
     end if
+    MicrobeMethaneParamsInst%observed_dom_relaxation_timescale = 0._r8
+    MicrobeMethaneParamsInst%observed_dom_deep_concentration = 0._r8
+    MicrobeMethaneParamsInst%observed_dom_surface_amplitude = 0._r8
+    MicrobeMethaneParamsInst%observed_dom_efold_depth = 0._r8
+    if (use_microbe_observed_dom_calibration) then
+       call read_scalar(ncid, 'microbe_methane_observed_dom_relaxation_timescale', &
+            MicrobeMethaneParamsInst%observed_dom_relaxation_timescale)
+       call read_scalar(ncid, 'microbe_methane_observed_dom_deep_concentration', &
+            MicrobeMethaneParamsInst%observed_dom_deep_concentration)
+       call read_scalar(ncid, 'microbe_methane_observed_dom_surface_amplitude', &
+            MicrobeMethaneParamsInst%observed_dom_surface_amplitude)
+       call read_scalar(ncid, 'microbe_methane_observed_dom_efold_depth', &
+            MicrobeMethaneParamsInst%observed_dom_efold_depth)
+    end if
     MicrobeMethaneParamsInst%aqueous_dom_molecular_diffusivity = 0._r8
+    MicrobeMethaneParamsInst%aqueous_dom_saturated_macrodispersion = 0._r8
     MicrobeMethaneParamsInst%aqueous_acetate_molecular_diffusivity = 0._r8
+    MicrobeMethaneParamsInst%aqueous_nh4_molecular_diffusivity = 0._r8
+    MicrobeMethaneParamsInst%aqueous_no3_molecular_diffusivity = 0._r8
+    MicrobeMethaneParamsInst%aqueous_nh4_partition_coefficient = 0._r8
+    MicrobeMethaneParamsInst%aqueous_mineral_n_advection_multiplier = 1._r8
     MicrobeMethaneParamsInst%aqueous_dom_mobile_fraction = 0._r8
+    MicrobeMethaneParamsInst%aqueous_dom_mobile_saturation_exponent = 0._r8
     MicrobeMethaneParamsInst%aqueous_acetate_mobile_fraction = 0._r8
     MicrobeMethaneParamsInst%aqueous_solute_dispersivity = 0._r8
     MicrobeMethaneParamsInst%aqueous_solute_tortuosity_exponent = 0._r8
     MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction = 0._r8
+    MicrobeMethaneParamsInst%dom_complete_bypass_fraction = 0._r8
     if (use_microbe_aqueous_transport) then
        call read_scalar(ncid, 'microbe_methane_aqueous_dom_molecular_diffusivity', &
             MicrobeMethaneParamsInst%aqueous_dom_molecular_diffusivity)
+       call read_scalar(ncid, 'microbe_methane_aqueous_dom_saturated_macrodispersion', &
+            MicrobeMethaneParamsInst%aqueous_dom_saturated_macrodispersion)
        call read_scalar(ncid, 'microbe_methane_aqueous_acetate_molecular_diffusivity', &
             MicrobeMethaneParamsInst%aqueous_acetate_molecular_diffusivity)
+       call read_scalar(ncid, 'microbe_methane_aqueous_nh4_molecular_diffusivity', &
+            MicrobeMethaneParamsInst%aqueous_nh4_molecular_diffusivity)
+       call read_scalar(ncid, 'microbe_methane_aqueous_no3_molecular_diffusivity', &
+            MicrobeMethaneParamsInst%aqueous_no3_molecular_diffusivity)
+       call read_scalar(ncid, 'microbe_methane_aqueous_nh4_partition_coefficient', &
+            MicrobeMethaneParamsInst%aqueous_nh4_partition_coefficient)
+       call read_scalar(ncid, 'microbe_methane_aqueous_mineral_n_advection_multiplier', &
+            MicrobeMethaneParamsInst%aqueous_mineral_n_advection_multiplier)
        call read_scalar(ncid, 'microbe_methane_aqueous_dom_mobile_fraction', &
             MicrobeMethaneParamsInst%aqueous_dom_mobile_fraction)
+       call read_scalar(ncid, 'microbe_methane_aqueous_dom_mobile_saturation_exponent', &
+            MicrobeMethaneParamsInst%aqueous_dom_mobile_saturation_exponent)
        call read_scalar(ncid, 'microbe_methane_aqueous_acetate_mobile_fraction', &
             MicrobeMethaneParamsInst%aqueous_acetate_mobile_fraction)
        call read_scalar(ncid, 'microbe_methane_aqueous_solute_dispersivity', &
@@ -202,6 +250,10 @@ contains
             MicrobeMethaneParamsInst%aqueous_solute_tortuosity_exponent)
        call read_scalar(ncid, 'microbe_methane_aqueous_solute_min_liquid_fraction', &
             MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction)
+    end if
+    if (use_microbe_dom_preferential_flow) then
+       call read_scalar(ncid, 'microbe_methane_dom_preferential_flow_fraction', &
+            MicrobeMethaneParamsInst%dom_complete_bypass_fraction)
     end if
     call read_scalar(ncid, 'microbe_methane_aqueous_gas_diffusion_multiplier', &
          MicrobeMethaneParamsInst%aqueous_gas_diffusion_multiplier)
@@ -335,6 +387,8 @@ contains
     call require_finite('ph_max', MicrobeMethaneParamsInst%ph_max)
     call require_finite('ph_opt', MicrobeMethaneParamsInst%ph_opt)
     call require_finite('soil_ph_fallback', MicrobeMethaneParamsInst%soil_ph_fallback)
+    call require_nonnegative('denitrification_rate_multiplier', &
+         MicrobeMethaneParamsInst%denitrification_rate_multiplier)
     if (.not. (MicrobeMethaneParamsInst%ph_min < MicrobeMethaneParamsInst%ph_opt .and. &
          MicrobeMethaneParamsInst%ph_opt < MicrobeMethaneParamsInst%ph_max)) then
        call parameter_error('pH response must satisfy ph_min < ph_opt < ph_max')
@@ -347,13 +401,35 @@ contains
     if (use_clm_microbe_dom_relaxation) then
        call require_positive('dom_relaxation_rate', MicrobeMethaneParamsInst%dom_relaxation_rate)
     end if
+    if (use_microbe_observed_dom_calibration) then
+       call require_positive('observed_dom_relaxation_timescale', &
+            MicrobeMethaneParamsInst%observed_dom_relaxation_timescale)
+       call require_nonnegative('observed_dom_deep_concentration', &
+            MicrobeMethaneParamsInst%observed_dom_deep_concentration)
+       call require_nonnegative('observed_dom_surface_amplitude', &
+            MicrobeMethaneParamsInst%observed_dom_surface_amplitude)
+       call require_positive('observed_dom_efold_depth', &
+            MicrobeMethaneParamsInst%observed_dom_efold_depth)
+    end if
     if (use_microbe_aqueous_transport) then
        call require_positive('aqueous_dom_molecular_diffusivity', &
             MicrobeMethaneParamsInst%aqueous_dom_molecular_diffusivity)
+       call require_nonnegative('aqueous_dom_saturated_macrodispersion', &
+            MicrobeMethaneParamsInst%aqueous_dom_saturated_macrodispersion)
        call require_positive('aqueous_acetate_molecular_diffusivity', &
             MicrobeMethaneParamsInst%aqueous_acetate_molecular_diffusivity)
+       call require_positive('aqueous_nh4_molecular_diffusivity', &
+            MicrobeMethaneParamsInst%aqueous_nh4_molecular_diffusivity)
+       call require_positive('aqueous_no3_molecular_diffusivity', &
+            MicrobeMethaneParamsInst%aqueous_no3_molecular_diffusivity)
+       call require_nonnegative('aqueous_nh4_partition_coefficient', &
+            MicrobeMethaneParamsInst%aqueous_nh4_partition_coefficient)
+       call require_positive('aqueous_mineral_n_advection_multiplier', &
+            MicrobeMethaneParamsInst%aqueous_mineral_n_advection_multiplier)
        call require_positive_fraction('aqueous_dom_mobile_fraction', &
             MicrobeMethaneParamsInst%aqueous_dom_mobile_fraction)
+       call require_nonnegative('aqueous_dom_mobile_saturation_exponent', &
+            MicrobeMethaneParamsInst%aqueous_dom_mobile_saturation_exponent)
        call require_positive_fraction('aqueous_acetate_mobile_fraction', &
             MicrobeMethaneParamsInst%aqueous_acetate_mobile_fraction)
        call require_nonnegative('aqueous_solute_dispersivity', &
@@ -362,6 +438,10 @@ contains
             MicrobeMethaneParamsInst%aqueous_solute_tortuosity_exponent)
        call require_positive_fraction('aqueous_solute_min_liquid_fraction', &
             MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction)
+    end if
+    if (use_microbe_dom_preferential_flow) then
+       call require_positive_fraction('dom_preferential_flow_fraction', &
+            MicrobeMethaneParamsInst%dom_complete_bypass_fraction)
     end if
     call require_positive('aqueous_gas_diffusion_multiplier', &
          MicrobeMethaneParamsInst%aqueous_gas_diffusion_multiplier)

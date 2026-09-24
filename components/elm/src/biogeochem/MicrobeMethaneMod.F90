@@ -10,7 +10,9 @@ module MicrobeMethaneMod
        use_elm_microbe_methane_transport, &
        use_microbe_nonbog_lateral_gas_transport, &
        use_clm_microbe_humhol_saturation, use_clm_microbe_dom_relaxation, &
-       use_microbe_aqueous_transport, use_humhol
+       use_microbe_observed_dom_calibration, &
+       use_microbe_aqueous_transport, use_microbe_dom_preferential_flow, &
+       use_microbe_zwt_macrodispersion, use_humhol
   use pio, only : file_desc_t
 
   implicit none
@@ -32,6 +34,11 @@ module MicrobeMethaneMod
      real(r8), pointer :: anaerobic_methanotroph_c_sat_col(:,:) => null()
      real(r8), pointer :: conc_ch4_unsat_col(:,:) => null()
      real(r8), pointer :: conc_ch4_sat_col(:,:) => null()
+     ! Diagnostic dissolved concentration reconstructed from the conserved
+     ! bulk inventory using liquid volume and equilibrium phase capacity.
+     real(r8), pointer :: ch4_porewater_col(:,:) => null()
+     real(r8), pointer :: ch4_porewater_unsat_col(:,:) => null()
+     real(r8), pointer :: ch4_porewater_sat_col(:,:) => null()
      real(r8), pointer :: conc_o2_unsat_col(:,:) => null()
      real(r8), pointer :: conc_o2_sat_col(:,:) => null()
      real(r8), pointer :: conc_co2_unsat_col(:,:) => null()
@@ -53,8 +60,42 @@ module MicrobeMethaneMod
      real(r8), pointer :: lateral_carbon_flux_col(:) => null()
      ! Physical aqueous-transport diagnostics. Interface arrays store the
      ! downward-positive flux through the lower face of each decomposition layer.
+     real(r8), pointer :: dom_porewater_c_col(:,:) => null()
      real(r8), pointer :: dom_advective_flux_col(:,:) => null()
      real(r8), pointer :: dom_diffusive_flux_col(:,:) => null()
+     real(r8), pointer :: dom_macrodispersion_scalar_col(:,:) => null()
+     real(r8), pointer :: dom_diffusion_conductivity_col(:,:) => null()
+     ! Mineral-N transport uses the same conservative aqueous operator as DOM.
+     ! NH4 remains one authoritative total (dissolved plus sorbed) pool; only
+     ! its instantaneous equilibrium dissolved fraction is mobile.
+     real(r8), pointer :: mineral_nh4_porewater_col(:,:) => null()
+     real(r8), pointer :: mineral_no3_porewater_col(:,:) => null()
+     real(r8), pointer :: mineral_nh4_mobile_fraction_col(:,:) => null()
+     real(r8), pointer :: mineral_nh4_advective_flux_col(:,:) => null()
+     real(r8), pointer :: mineral_nh4_diffusive_flux_col(:,:) => null()
+     real(r8), pointer :: mineral_no3_advective_flux_col(:,:) => null()
+     real(r8), pointer :: mineral_no3_diffusive_flux_col(:,:) => null()
+     real(r8), pointer :: dom_complete_bypass_tendency_col(:,:) => null()
+     real(r8), pointer :: dom_complete_bypass_carbon_flux_col(:) => null()
+     real(r8), pointer :: dom_complete_bypass_nitrogen_flux_col(:) => null()
+     real(r8), pointer :: dom_complete_bypass_phosphorus_flux_col(:) => null()
+     ! Layer-resolved DOM budget rates. Positive source and loss fields are
+     ! stored as magnitudes; net tendency and convergence retain their signs.
+     real(r8), pointer :: dom_cascade_production_col(:,:) => null()
+     real(r8), pointer :: dom_litter1_production_col(:,:) => null()
+     real(r8), pointer :: dom_other_litter_production_col(:,:) => null()
+     real(r8), pointer :: dom_som_production_col(:,:) => null()
+     real(r8), pointer :: dom_standard_microbe_return_col(:,:) => null()
+     real(r8), pointer :: dom_guild_mortality_return_col(:,:) => null()
+     real(r8), pointer :: dom_standard_microbe_uptake_col(:,:) => null()
+     real(r8), pointer :: dom_fermentation_col(:,:) => null()
+     real(r8), pointer :: dom_to_som_col(:,:) => null()
+     real(r8), pointer :: dom_cascade_respiration_col(:,:) => null()
+     real(r8), pointer :: dom_internal_transport_convergence_col(:,:) => null()
+     real(r8), pointer :: dom_drainage_loss_col(:,:) => null()
+     real(r8), pointer :: dom_net_tendency_col(:,:) => null()
+     real(r8), pointer :: dom_profile_restoring_col(:,:) => null()
+     real(r8), pointer :: dom_budget_residual_col(:,:) => null()
      real(r8), pointer :: aqueous_carbon_export_col(:) => null()
      real(r8), pointer :: aqueous_nitrogen_export_col(:) => null()
      real(r8), pointer :: aqueous_phosphorus_export_col(:) => null()
@@ -64,6 +105,10 @@ module MicrobeMethaneMod
      real(r8), pointer :: dom_carbon_transport_residual_col(:) => null()
      real(r8), pointer :: dom_nitrogen_transport_residual_col(:) => null()
      real(r8), pointer :: dom_phosphorus_transport_residual_col(:) => null()
+     real(r8), pointer :: mineral_nh4_export_col(:) => null()
+     real(r8), pointer :: mineral_no3_export_col(:) => null()
+     real(r8), pointer :: mineral_nh4_transport_residual_col(:) => null()
+     real(r8), pointer :: mineral_no3_transport_residual_col(:) => null()
      real(r8), pointer :: surface_ch4_flux_col(:) => null()
      real(r8), pointer :: surface_co2_flux_col(:) => null()
      ! Area-weighted CH4 surface pathways in g C m-2 s-1, positive to air.
@@ -81,6 +126,12 @@ module MicrobeMethaneMod
      ! Area-weighted contributions; each pair sums to its bulk diagnostic.
      real(r8), pointer :: ch4_production_unsat_col(:) => null()
      real(r8), pointer :: ch4_production_sat_col(:) => null()
+     real(r8), pointer :: ch4_acetoclastic_production_col(:) => null()
+     real(r8), pointer :: ch4_acetoclastic_production_unsat_col(:) => null()
+     real(r8), pointer :: ch4_acetoclastic_production_sat_col(:) => null()
+     real(r8), pointer :: ch4_hydrogenotrophic_production_col(:) => null()
+     real(r8), pointer :: ch4_hydrogenotrophic_production_unsat_col(:) => null()
+     real(r8), pointer :: ch4_hydrogenotrophic_production_sat_col(:) => null()
      real(r8), pointer :: ch4_oxidation_unsat_col(:) => null()
      real(r8), pointer :: ch4_oxidation_sat_col(:) => null()
      real(r8), pointer :: ch4_aerobic_oxidation_col(:) => null()
@@ -145,6 +196,11 @@ contains
          this%anaerobic_methanotroph_c_sat_col = nan
     allocate(this%conc_ch4_unsat_col(begc:endc,1:nlevdecomp_full)); this%conc_ch4_unsat_col = nan
     allocate(this%conc_ch4_sat_col(begc:endc,1:nlevdecomp_full)); this%conc_ch4_sat_col = nan
+    allocate(this%ch4_porewater_col(begc:endc,1:nlevdecomp_full)); this%ch4_porewater_col = nan
+    allocate(this%ch4_porewater_unsat_col(begc:endc,1:nlevdecomp_full)); &
+         this%ch4_porewater_unsat_col = nan
+    allocate(this%ch4_porewater_sat_col(begc:endc,1:nlevdecomp_full)); &
+         this%ch4_porewater_sat_col = nan
     allocate(this%conc_o2_unsat_col(begc:endc,1:nlevdecomp_full)); this%conc_o2_unsat_col = nan
     allocate(this%conc_o2_sat_col(begc:endc,1:nlevdecomp_full)); this%conc_o2_sat_col = nan
     allocate(this%conc_co2_unsat_col(begc:endc,1:nlevdecomp_full)); this%conc_co2_unsat_col = nan
@@ -159,8 +215,66 @@ contains
     allocate(this%lateral_carbon_flux_col(begc:endc)); this%lateral_carbon_flux_col = nan
     allocate(this%dom_advective_flux_col(begc:endc,1:nlevdecomp_full)); &
          this%dom_advective_flux_col = nan
+    allocate(this%dom_porewater_c_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_porewater_c_col = nan
     allocate(this%dom_diffusive_flux_col(begc:endc,1:nlevdecomp_full)); &
          this%dom_diffusive_flux_col = nan
+    allocate(this%dom_macrodispersion_scalar_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_macrodispersion_scalar_col = nan
+    allocate(this%dom_diffusion_conductivity_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_diffusion_conductivity_col = nan
+    allocate(this%mineral_nh4_porewater_col(begc:endc,1:nlevdecomp_full)); &
+         this%mineral_nh4_porewater_col = nan
+    allocate(this%mineral_no3_porewater_col(begc:endc,1:nlevdecomp_full)); &
+         this%mineral_no3_porewater_col = nan
+    allocate(this%mineral_nh4_mobile_fraction_col(begc:endc,1:nlevdecomp_full)); &
+         this%mineral_nh4_mobile_fraction_col = nan
+    allocate(this%mineral_nh4_advective_flux_col(begc:endc,1:nlevdecomp_full)); &
+         this%mineral_nh4_advective_flux_col = nan
+    allocate(this%mineral_nh4_diffusive_flux_col(begc:endc,1:nlevdecomp_full)); &
+         this%mineral_nh4_diffusive_flux_col = nan
+    allocate(this%mineral_no3_advective_flux_col(begc:endc,1:nlevdecomp_full)); &
+         this%mineral_no3_advective_flux_col = nan
+    allocate(this%mineral_no3_diffusive_flux_col(begc:endc,1:nlevdecomp_full)); &
+         this%mineral_no3_diffusive_flux_col = nan
+    allocate(this%dom_complete_bypass_tendency_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_complete_bypass_tendency_col = nan
+    allocate(this%dom_complete_bypass_carbon_flux_col(begc:endc)); &
+         this%dom_complete_bypass_carbon_flux_col = nan
+    allocate(this%dom_complete_bypass_nitrogen_flux_col(begc:endc)); &
+         this%dom_complete_bypass_nitrogen_flux_col = nan
+    allocate(this%dom_complete_bypass_phosphorus_flux_col(begc:endc)); &
+         this%dom_complete_bypass_phosphorus_flux_col = nan
+    allocate(this%dom_cascade_production_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_cascade_production_col = nan
+    allocate(this%dom_litter1_production_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_litter1_production_col = nan
+    allocate(this%dom_other_litter_production_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_other_litter_production_col = nan
+    allocate(this%dom_som_production_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_som_production_col = nan
+    allocate(this%dom_standard_microbe_return_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_standard_microbe_return_col = nan
+    allocate(this%dom_guild_mortality_return_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_guild_mortality_return_col = nan
+    allocate(this%dom_standard_microbe_uptake_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_standard_microbe_uptake_col = nan
+    allocate(this%dom_fermentation_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_fermentation_col = nan
+    allocate(this%dom_to_som_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_to_som_col = nan
+    allocate(this%dom_cascade_respiration_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_cascade_respiration_col = nan
+    allocate(this%dom_internal_transport_convergence_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_internal_transport_convergence_col = nan
+    allocate(this%dom_drainage_loss_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_drainage_loss_col = nan
+    allocate(this%dom_net_tendency_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_net_tendency_col = nan
+    allocate(this%dom_profile_restoring_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_profile_restoring_col = nan
+    allocate(this%dom_budget_residual_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_budget_residual_col = nan
     allocate(this%aqueous_carbon_export_col(begc:endc)); this%aqueous_carbon_export_col = nan
     allocate(this%aqueous_nitrogen_export_col(begc:endc)); this%aqueous_nitrogen_export_col = nan
     allocate(this%aqueous_phosphorus_export_col(begc:endc)); &
@@ -177,6 +291,12 @@ contains
          this%dom_nitrogen_transport_residual_col = nan
     allocate(this%dom_phosphorus_transport_residual_col(begc:endc)); &
          this%dom_phosphorus_transport_residual_col = nan
+    allocate(this%mineral_nh4_export_col(begc:endc)); this%mineral_nh4_export_col = nan
+    allocate(this%mineral_no3_export_col(begc:endc)); this%mineral_no3_export_col = nan
+    allocate(this%mineral_nh4_transport_residual_col(begc:endc)); &
+         this%mineral_nh4_transport_residual_col = nan
+    allocate(this%mineral_no3_transport_residual_col(begc:endc)); &
+         this%mineral_no3_transport_residual_col = nan
     allocate(this%surface_ch4_flux_col(begc:endc)); this%surface_ch4_flux_col = nan
     allocate(this%surface_co2_flux_col(begc:endc)); this%surface_co2_flux_col = nan
     allocate(this%ch4_surface_diffusion_col(begc:endc)); this%ch4_surface_diffusion_col = nan
@@ -196,6 +316,18 @@ contains
     allocate(this%ch4_oxidation_col(begc:endc)); this%ch4_oxidation_col = nan
     allocate(this%ch4_production_unsat_col(begc:endc)); this%ch4_production_unsat_col = nan
     allocate(this%ch4_production_sat_col(begc:endc)); this%ch4_production_sat_col = nan
+    allocate(this%ch4_acetoclastic_production_col(begc:endc)); &
+         this%ch4_acetoclastic_production_col = nan
+    allocate(this%ch4_acetoclastic_production_unsat_col(begc:endc)); &
+         this%ch4_acetoclastic_production_unsat_col = nan
+    allocate(this%ch4_acetoclastic_production_sat_col(begc:endc)); &
+         this%ch4_acetoclastic_production_sat_col = nan
+    allocate(this%ch4_hydrogenotrophic_production_col(begc:endc)); &
+         this%ch4_hydrogenotrophic_production_col = nan
+    allocate(this%ch4_hydrogenotrophic_production_unsat_col(begc:endc)); &
+         this%ch4_hydrogenotrophic_production_unsat_col = nan
+    allocate(this%ch4_hydrogenotrophic_production_sat_col(begc:endc)); &
+         this%ch4_hydrogenotrophic_production_sat_col = nan
     allocate(this%ch4_oxidation_unsat_col(begc:endc)); this%ch4_oxidation_unsat_col = nan
     allocate(this%ch4_oxidation_sat_col(begc:endc)); this%ch4_oxidation_sat_col = nan
     allocate(this%ch4_aerobic_oxidation_col(begc:endc)); this%ch4_aerobic_oxidation_col = nan
@@ -246,6 +378,9 @@ contains
     this%anaerobic_methanotroph_c_sat_col = 0._r8
     this%conc_ch4_unsat_col = 0._r8
     this%conc_ch4_sat_col = 0._r8
+    this%ch4_porewater_col = 0._r8
+    this%ch4_porewater_unsat_col = 0._r8
+    this%ch4_porewater_sat_col = 0._r8
     this%conc_o2_unsat_col = 0._r8
     this%conc_o2_sat_col = 0._r8
     this%conc_co2_unsat_col = 0._r8
@@ -259,7 +394,36 @@ contains
     this%surface_carbon_flux_col = 0._r8
     this%lateral_carbon_flux_col = 0._r8
     this%dom_advective_flux_col = 0._r8
+    this%dom_porewater_c_col = 0._r8
     this%dom_diffusive_flux_col = 0._r8
+    this%dom_macrodispersion_scalar_col = 0._r8
+    this%dom_diffusion_conductivity_col = 0._r8
+    this%mineral_nh4_porewater_col = 0._r8
+    this%mineral_no3_porewater_col = 0._r8
+    this%mineral_nh4_mobile_fraction_col = 0._r8
+    this%mineral_nh4_advective_flux_col = 0._r8
+    this%mineral_nh4_diffusive_flux_col = 0._r8
+    this%mineral_no3_advective_flux_col = 0._r8
+    this%mineral_no3_diffusive_flux_col = 0._r8
+    this%dom_complete_bypass_tendency_col = 0._r8
+    this%dom_complete_bypass_carbon_flux_col = 0._r8
+    this%dom_complete_bypass_nitrogen_flux_col = 0._r8
+    this%dom_complete_bypass_phosphorus_flux_col = 0._r8
+    this%dom_cascade_production_col = 0._r8
+    this%dom_litter1_production_col = 0._r8
+    this%dom_other_litter_production_col = 0._r8
+    this%dom_som_production_col = 0._r8
+    this%dom_standard_microbe_return_col = 0._r8
+    this%dom_guild_mortality_return_col = 0._r8
+    this%dom_standard_microbe_uptake_col = 0._r8
+    this%dom_fermentation_col = 0._r8
+    this%dom_to_som_col = 0._r8
+    this%dom_cascade_respiration_col = 0._r8
+    this%dom_internal_transport_convergence_col = 0._r8
+    this%dom_drainage_loss_col = 0._r8
+    this%dom_net_tendency_col = 0._r8
+    this%dom_profile_restoring_col = 0._r8
+    this%dom_budget_residual_col = 0._r8
     this%aqueous_carbon_export_col = 0._r8
     this%aqueous_nitrogen_export_col = 0._r8
     this%aqueous_phosphorus_export_col = 0._r8
@@ -269,6 +433,10 @@ contains
     this%dom_carbon_transport_residual_col = 0._r8
     this%dom_nitrogen_transport_residual_col = 0._r8
     this%dom_phosphorus_transport_residual_col = 0._r8
+    this%mineral_nh4_export_col = 0._r8
+    this%mineral_no3_export_col = 0._r8
+    this%mineral_nh4_transport_residual_col = 0._r8
+    this%mineral_no3_transport_residual_col = 0._r8
     this%surface_ch4_flux_col = 0._r8
     this%surface_co2_flux_col = 0._r8
     this%ch4_surface_diffusion_col = 0._r8
@@ -284,6 +452,12 @@ contains
     this%ch4_oxidation_col = 0._r8
     this%ch4_production_unsat_col = 0._r8
     this%ch4_production_sat_col = 0._r8
+    this%ch4_acetoclastic_production_col = 0._r8
+    this%ch4_acetoclastic_production_unsat_col = 0._r8
+    this%ch4_acetoclastic_production_sat_col = 0._r8
+    this%ch4_hydrogenotrophic_production_col = 0._r8
+    this%ch4_hydrogenotrophic_production_unsat_col = 0._r8
+    this%ch4_hydrogenotrophic_production_sat_col = 0._r8
     this%ch4_oxidation_unsat_col = 0._r8
     this%ch4_oxidation_sat_col = 0._r8
     this%ch4_aerobic_oxidation_col = 0._r8
@@ -366,6 +540,18 @@ contains
          'bulk-soil methane inventory density in unsaturated subarea', this%conc_ch4_unsat_col)
     call add_state('MM_CONC_CH4_SAT', 'mol/m^3', &
          'bulk-soil methane inventory density in saturated subarea', this%conc_ch4_sat_col)
+    call hist_addfld_decomp(fname='MM_CH4_POREWATER', units='mol/m^3 water', &
+         type2d='levdcmp', avgflag='A', &
+         long_name='area-weighted dissolved porewater methane inferred from bulk inventory', &
+         ptr_col=this%ch4_porewater_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_CH4_POREWATER_UNSAT', units='mol/m^3 water', &
+         type2d='levdcmp', avgflag='A', &
+         long_name='unsaturated-subarea dissolved porewater methane inferred from bulk inventory', &
+         ptr_col=this%ch4_porewater_unsat_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_CH4_POREWATER_SAT', units='mol/m^3 water', &
+         type2d='levdcmp', avgflag='A', &
+         long_name='saturated-subarea dissolved porewater methane inferred from bulk inventory', &
+         ptr_col=this%ch4_porewater_sat_col, default='inactive')
     call add_state('MM_CONC_O2_UNSAT', 'mol/m^3', &
          'bulk-soil oxygen inventory density in unsaturated subarea', this%conc_o2_unsat_col)
     call add_state('MM_CONC_O2_SAT', 'mol/m^3', &
@@ -398,13 +584,101 @@ contains
     call hist_addfld_decomp(fname='MM_DOM_ADV_FLUX', units='gC/m^2/s', type2d='levdcmp', &
          avgflag='A', long_name='downward DOM carbon advective flux at lower layer face', &
          ptr_col=this%dom_advective_flux_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_DOM_POREWATER_C', units='gC/m^3', type2d='levdcmp', &
+         avgflag='A', &
+         long_name='mobile porewater DOM carbon; zero below minimum liquid fraction', &
+         ptr_col=this%dom_porewater_c_col, default='inactive')
     call hist_addfld_decomp(fname='MM_DOM_DIFF_FLUX', units='gC/m^2/s', type2d='levdcmp', &
          avgflag='A', long_name='downward DOM carbon diffusive flux at lower layer face', &
          ptr_col=this%dom_diffusive_flux_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_DOM_MACRODISP_SCALAR', units='1', type2d='levdcmp', &
+         avgflag='A', long_name='layer scalar applied to saturated DOM macrodispersion', &
+         ptr_col=this%dom_macrodispersion_scalar_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_DOM_DIFF_CONDUCTIVITY', units='m2/s', type2d='levdcmp', &
+         avgflag='A', long_name='total layer DOM diffusion and dispersion conductivity', &
+         ptr_col=this%dom_diffusion_conductivity_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_NH4_POREWATER', units='gN/m^3 water', type2d='levdcmp', &
+         avgflag='A', long_name='equilibrium dissolved ammonium concentration', &
+         ptr_col=this%mineral_nh4_porewater_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_NO3_POREWATER', units='gN/m^3 water', type2d='levdcmp', &
+         avgflag='A', long_name='dissolved nitrate concentration', &
+         ptr_col=this%mineral_no3_porewater_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_NH4_MOBILE_FRAC', units='1', type2d='levdcmp', &
+         avgflag='A', long_name='equilibrium dissolved fraction of total ammonium', &
+         ptr_col=this%mineral_nh4_mobile_fraction_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_NH4_ADV_FLUX', units='gN/m^2/s', type2d='levdcmp', &
+         avgflag='A', long_name='downward dissolved ammonium advective flux at lower layer face', &
+         ptr_col=this%mineral_nh4_advective_flux_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_NH4_DIFF_FLUX', units='gN/m^2/s', type2d='levdcmp', &
+         avgflag='A', long_name='downward dissolved ammonium diffusive flux at lower layer face', &
+         ptr_col=this%mineral_nh4_diffusive_flux_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_NO3_ADV_FLUX', units='gN/m^2/s', type2d='levdcmp', &
+         avgflag='A', long_name='downward nitrate advective flux at lower layer face', &
+         ptr_col=this%mineral_no3_advective_flux_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_NO3_DIFF_FLUX', units='gN/m^2/s', type2d='levdcmp', &
+         avgflag='A', long_name='downward nitrate diffusive flux at lower layer face', &
+         ptr_col=this%mineral_no3_diffusive_flux_col, default='inactive')
+    call add_dom_budget_rate('MM_DOM_PREFERENTIAL_FLOW_TEND', &
+         'diagnostic complete-bypass DOM carbon tendency; negative donor and positive receiver', &
+         this%dom_complete_bypass_tendency_col)
+    call add_aqueous_flux('MM_DOM_PREFERENTIAL_FLOW_C', 'gC/m^2/s', &
+         'DOM carbon transferred directly from upper peat to the water-table layer', &
+         this%dom_complete_bypass_carbon_flux_col)
+    call add_aqueous_flux('MM_DOM_PREFERENTIAL_FLOW_N', 'gN/m^2/s', &
+         'DOM nitrogen transferred directly from upper peat to the water-table layer', &
+         this%dom_complete_bypass_nitrogen_flux_col)
+    call add_aqueous_flux('MM_DOM_PREFERENTIAL_FLOW_P', 'gP/m^2/s', &
+         'DOM phosphorus transferred directly from upper peat to the water-table layer', &
+         this%dom_complete_bypass_phosphorus_flux_col)
+    call add_dom_budget_rate('MM_DOM_CASCADE_PROD', &
+         'DOM carbon production by standard decomposition-cascade transfers', &
+         this%dom_cascade_production_col)
+    call add_dom_budget_rate('MM_DOM_L1_PROD', &
+         'DOM carbon production by metabolic Litter-1 solubilization', &
+         this%dom_litter1_production_col)
+    call add_dom_budget_rate('MM_DOM_OTHER_LITTER_PROD', &
+         'DOM carbon production by cellulose and lignin litter solubilization', &
+         this%dom_other_litter_production_col)
+    call add_dom_budget_rate('MM_DOM_SOM_PROD', &
+         'DOM carbon production by SOM1 through SOM4 solubilization', &
+         this%dom_som_production_col)
+    call add_dom_budget_rate('MM_DOM_STD_MICROBE_RETURN', &
+         'DOM carbon returned by standard bacteria and fungi turnover', &
+         this%dom_standard_microbe_return_col)
+    call add_dom_budget_rate('MM_DOM_GUILD_MORT_RETURN', &
+         'DOM carbon returned by revised-methane microbial guild mortality', &
+         this%dom_guild_mortality_return_col)
+    call add_dom_budget_rate('MM_DOM_STD_MICROBE_UPTAKE', &
+         'DOM carbon transferred to standard decomposition bacteria and fungi; positive loss', &
+         this%dom_standard_microbe_uptake_col)
+    call add_dom_budget_rate('MM_DOM_FERMENTATION', &
+         'DOM carbon consumed by revised-methane fermentation to acetate; positive loss', &
+         this%dom_fermentation_col)
+    call add_dom_budget_rate('MM_DOM_TO_SOM', &
+         'DOM carbon transferred to standard decomposition SOM pools; positive loss', &
+         this%dom_to_som_col)
+    call add_dom_budget_rate('MM_DOM_CASCADE_RESP', &
+         'direct respiration associated with DOM donor transitions; positive loss', &
+         this%dom_cascade_respiration_col)
+    call add_dom_budget_rate('MM_DOM_TRANSPORT_CONV', &
+         'internal aqueous DOM transport convergence excluding bottom drainage; signed', &
+         this%dom_internal_transport_convergence_col)
+    call add_dom_budget_rate('MM_DOM_DRAINAGE_LOSS', &
+         'lower-boundary DOM drainage assigned to the bottom layer; positive loss', &
+         this%dom_drainage_loss_col)
+    call add_dom_budget_rate('MM_DOM_NET_TENDENCY', &
+         'net DOM carbon tendency from cascade reactions, methane reactions, and aqueous transport', &
+         this%dom_net_tendency_col)
+    call add_dom_budget_rate('MM_DOM_PROFILE_RESTORE', &
+         'calibration-only external DOM carbon source or sink restoring the observed profile; signed', &
+         this%dom_profile_restoring_col)
+    call add_dom_budget_rate('MM_DOM_BUDGET_RESIDUAL', &
+         'DOM net tendency minus the sum of diagnosed source, loss, and transport terms', &
+         this%dom_budget_residual_col)
     call add_aqueous_flux('MM_AQUEOUS_C_EXPORT', 'gC/m^2/s', &
          'DOM plus acetate aqueous carbon export', this%aqueous_carbon_export_col)
     call add_aqueous_flux('MM_AQUEOUS_N_EXPORT', 'gN/m^2/s', &
-         'DOM aqueous nitrogen export', this%aqueous_nitrogen_export_col)
+         'DOM plus mineral aqueous nitrogen export', this%aqueous_nitrogen_export_col)
     call add_aqueous_flux('MM_AQUEOUS_P_EXPORT', 'gP/m^2/s', &
          'DOM aqueous phosphorus export', this%aqueous_phosphorus_export_col)
     call add_aqueous_flux('MM_DOM_BOTTOM_C_EXPORT', 'gC/m^2/s', &
@@ -422,6 +696,17 @@ contains
     call add_aqueous_flux('MM_DOM_P_TRANSPORT_RESIDUAL', 'gP/m^2', &
          'DOM phosphorus aqueous-transport inventory residual per timestep', &
          this%dom_phosphorus_transport_residual_col)
+    call add_aqueous_flux('MM_NH4_BOTTOM_EXPORT', 'gN/m^2/s', &
+         'dissolved ammonium export through the bottom boundary', &
+         this%mineral_nh4_export_col)
+    call add_aqueous_flux('MM_NO3_BOTTOM_EXPORT', 'gN/m^2/s', &
+         'nitrate export through the bottom boundary', this%mineral_no3_export_col)
+    call add_aqueous_flux('MM_NH4_TRANSPORT_RESIDUAL', 'gN/m^2', &
+         'ammonium aqueous-transport inventory residual per timestep', &
+         this%mineral_nh4_transport_residual_col)
+    call add_aqueous_flux('MM_NO3_TRANSPORT_RESIDUAL', 'gN/m^2', &
+         'nitrate aqueous-transport inventory residual per timestep', &
+         this%mineral_no3_transport_residual_col)
     call hist_addfld1d(fname='MM_SURFACE_CH4_FLUX', units='kgC/m^2/s', avgflag='A', &
          long_name='net revised methane CH4 carbon flux; positive to atmosphere', &
          ptr_col=this%surface_ch4_flux_col, default='inactive')
@@ -464,6 +749,24 @@ contains
     call hist_addfld1d(fname='MM_CH4_PROD_SAT', units='gC/m^2/s', avgflag='A', &
          long_name='area-weighted gross methane production from saturated subarea', &
          ptr_col=this%ch4_production_sat_col, default='inactive')
+    call hist_addfld1d(fname='MM_CH4_PROD_ACET', units='gC/m^2/s', avgflag='A', &
+         long_name='gross acetoclastic methane production integrated over the soil column', &
+         ptr_col=this%ch4_acetoclastic_production_col, default='inactive')
+    call hist_addfld1d(fname='MM_CH4_PROD_ACET_UNSAT', units='gC/m^2/s', avgflag='A', &
+         long_name='area-weighted acetoclastic methane production from unsaturated subarea', &
+         ptr_col=this%ch4_acetoclastic_production_unsat_col, default='inactive')
+    call hist_addfld1d(fname='MM_CH4_PROD_ACET_SAT', units='gC/m^2/s', avgflag='A', &
+         long_name='area-weighted acetoclastic methane production from saturated subarea', &
+         ptr_col=this%ch4_acetoclastic_production_sat_col, default='inactive')
+    call hist_addfld1d(fname='MM_CH4_PROD_H2', units='gC/m^2/s', avgflag='A', &
+         long_name='gross hydrogenotrophic methane production integrated over the soil column', &
+         ptr_col=this%ch4_hydrogenotrophic_production_col, default='inactive')
+    call hist_addfld1d(fname='MM_CH4_PROD_H2_UNSAT', units='gC/m^2/s', avgflag='A', &
+         long_name='area-weighted hydrogenotrophic methane production from unsaturated subarea', &
+         ptr_col=this%ch4_hydrogenotrophic_production_unsat_col, default='inactive')
+    call hist_addfld1d(fname='MM_CH4_PROD_H2_SAT', units='gC/m^2/s', avgflag='A', &
+         long_name='area-weighted hydrogenotrophic methane production from saturated subarea', &
+         ptr_col=this%ch4_hydrogenotrophic_production_sat_col, default='inactive')
     call hist_addfld1d(fname='MM_CH4_OXID_UNSAT', units='gC/m^2/s', avgflag='A', &
          long_name='area-weighted gross methane oxidation from unsaturated subarea', &
          ptr_col=this%ch4_oxidation_unsat_col, default='inactive')
@@ -523,6 +826,13 @@ contains
       call hist_addfld1d(fname=name, units=units, avgflag='A', &
            long_name=long_name, ptr_col=field, default='inactive')
     end subroutine add_aqueous_flux
+
+    subroutine add_dom_budget_rate(name, long_name, field)
+      character(len=*), intent(in) :: name, long_name
+      real(r8), pointer, intent(inout) :: field(:,:)
+      call hist_addfld_decomp(fname=name, units='gC/m^3/s', type2d='levdcmp', &
+           avgflag='A', long_name=long_name, ptr_col=field, default='inactive')
+    end subroutine add_dom_budget_rate
   end subroutine InitHistory
 
   subroutine Repartition(this, bounds, num_soilc, filter_soilc, saturated_fraction)
@@ -583,7 +893,7 @@ contains
     use abortutils, only : endrun
     use shr_log_mod, only : errMsg => shr_log_errMsg
     use elm_varctl, only : iulog
-    use elm_varpar, only : nlevdecomp, i_dom
+    use elm_varpar, only : nlevdecomp, i_dom, ndecomp_cascade_transitions
     use elm_varcon, only : denh2o, denice, tfrz, d_con_w, d_con_g, catomw, rgas, spval
     use elm_varcon, only : c_h_inv, kh_theta, kh_tbase
     use ColumnType, only : col_pp
@@ -603,6 +913,7 @@ contains
     use SharedParamsMod, only : ParamsShareInst
     use subgridAveMod, only : p2c
     use MicrobeDecompMod, only : MicrobeDecompParamsInst
+    use CNDecompCascadeConType, only : decomp_cascade_con
     use MicrobeMethaneParamsMod, only : MicrobeMethaneParamsInst
     use MicrobeMethaneReactionMod, only : microbe_methane_reaction_state_type
     use MicrobeMethaneReactionMod, only : microbe_methane_reaction_environment_type
@@ -610,7 +921,10 @@ contains
     use MicrobeMethaneStateUpdateMod, only : advanceMicrobeMethaneReactionLayer
     use MicrobeMethaneStateUpdateMod, only : advanceMicrobeMethaneAcetateTransport
     use MicrobeMethaneStateUpdateMod, only : advanceMicrobeMethaneDOMRelaxation
+    use MicrobeMethaneStateUpdateMod, only : advanceMicrobeMethaneDOMProfileRestoration
+    use MicrobeMethaneStateUpdateMod, only : advanceMicrobeMethaneTracerRelaxation
     use MicrobeMethaneStateUpdateMod, only : advanceMicrobeAqueousTracerTransport
+    use MicrobeMethaneStateUpdateMod, only : advanceMicrobeDOMCompleteBypass
     use MicrobeMethaneStateUpdateMod, only : advanceMicrobeMethaneGasTransport
     use MicrobeMethaneStateUpdateMod, only : microbeMethaneColumnAdditionalCarbon
     use MicrobeMethaneStateUpdateMod, only : microbeMethaneSurfaceCarbonFlux
@@ -659,15 +973,25 @@ contains
     real(r8) :: dom_c(nlevdecomp), dom_n(nlevdecomp), dom_p(nlevdecomp)
     real(r8) :: updated_dom_c(nlevdecomp), updated_dom_n(nlevdecomp)
     real(r8) :: updated_dom_p(nlevdecomp), dom_relaxation_rate(nlevdecomp)
+    real(r8) :: target_dom_c(nlevdecomp), dom_profile_restoring_rate(nlevdecomp)
     real(r8) :: liquid_fraction(nlevdecomp), porosity(nlevdecomp)
     real(r8) :: water_flux(0:nlevdecomp)
+    real(r8) :: mineral_n_water_flux(0:nlevdecomp)
     real(r8) :: dom_diffusion_conductivity(nlevdecomp)
     real(r8) :: acetate_diffusion_conductivity(nlevdecomp)
+    real(r8) :: nh4_diffusion_conductivity(nlevdecomp)
+    real(r8) :: no3_diffusion_conductivity(nlevdecomp)
     real(r8) :: solute_advective_flux(0:nlevdecomp)
     real(r8) :: solute_diffusive_flux(0:nlevdecomp)
     real(r8) :: solute_tendency(nlevdecomp)
+    real(r8) :: dom_transport_tendency(nlevdecomp)
+    real(r8) :: dom_complete_bypass_tendency(nlevdecomp)
     real(r8) :: acetate_concentration(nlevdecomp), updated_acetate(nlevdecomp)
-    real(r8) :: mineral_n(nlevdecomp), mineral_p(nlevdecomp)
+    real(r8) :: dom_mobile_fraction(nlevdecomp), acetate_mobile_fraction(nlevdecomp)
+    real(r8) :: mineral_n(nlevdecomp), mineral_no3(nlevdecomp)
+    real(r8) :: updated_mineral_n(nlevdecomp), updated_mineral_no3(nlevdecomp)
+    real(r8) :: mineral_nh4_mobile_fraction(nlevdecomp)
+    real(r8) :: mineral_no3_mobile_fraction(nlevdecomp), mineral_p(nlevdecomp)
     real(r8) :: layer_thickness(nlevdecomp), layer_depth(nlevdecomp)
     real(r8) :: unsaturated_diffusivity(nlevdecomp,microbe_gas_count)
     real(r8) :: saturated_diffusivity(nlevdecomp,microbe_gas_count)
@@ -708,16 +1032,28 @@ contains
     real(r8) :: unsaturated_acetate_residual, saturated_acetate_residual
     real(r8) :: dom_carbon_residual, dom_nitrogen_residual, dom_phosphorus_residual
     real(r8) :: dom_carbon_export, dom_nitrogen_export, dom_phosphorus_export
+    real(r8) :: mineral_nh4_export, mineral_no3_export
+    real(r8) :: mineral_nh4_residual, mineral_no3_residual
+    real(r8) :: dom_complete_bypass_carbon_flux
+    real(r8) :: dom_complete_bypass_nitrogen_flux
+    real(r8) :: dom_complete_bypass_phosphorus_flux
+    real(r8) :: dom_complete_bypass_carbon_residual
+    real(r8) :: dom_complete_bypass_nitrogen_residual
+    real(r8) :: dom_complete_bypass_phosphorus_residual
     real(r8) :: unsaturated_acetate_export, saturated_acetate_export
     real(r8) :: aqueous_temperature_scalar, relative_liquid_saturation
+    real(r8) :: saturated_macrodispersion_scalar
     logical :: column_valid
     logical :: unsaturated_acetate_valid, saturated_acetate_valid
     logical :: unsaturated_gas_valid, saturated_gas_valid
     logical :: dom_relaxation_valid
+    logical :: dom_profile_restoration_valid
     logical :: dom_carbon_transport_valid, dom_nitrogen_transport_valid
     logical :: dom_phosphorus_transport_valid
+    logical :: mineral_nh4_transport_valid, mineral_no3_transport_valid
+    logical :: dom_complete_bypass_valid
     logical :: aerenchyma_allows_influx(microbe_gas_count)
-    integer :: c, fc, fp, g, gas, j, p
+    integer :: c, donor_pool, fc, fp, g, gas, j, p, receiver_pool, transition
     character(len=512) :: message
 
     if (.not. use_microbe_methane .or. use_legacy_ch4_with_microbe) return
@@ -729,7 +1065,39 @@ contains
     this%surface_carbon_flux_col(bounds%begc:bounds%endc) = 0._r8
     this%lateral_carbon_flux_col(bounds%begc:bounds%endc) = 0._r8
     this%dom_advective_flux_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_porewater_c_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%ch4_porewater_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%ch4_porewater_unsat_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%ch4_porewater_sat_col(bounds%begc:bounds%endc,:) = 0._r8
     this%dom_diffusive_flux_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_macrodispersion_scalar_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_diffusion_conductivity_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%mineral_nh4_porewater_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%mineral_no3_porewater_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%mineral_nh4_mobile_fraction_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%mineral_nh4_advective_flux_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%mineral_nh4_diffusive_flux_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%mineral_no3_advective_flux_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%mineral_no3_diffusive_flux_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_complete_bypass_tendency_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_complete_bypass_carbon_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%dom_complete_bypass_nitrogen_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%dom_complete_bypass_phosphorus_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%dom_cascade_production_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_litter1_production_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_other_litter_production_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_som_production_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_standard_microbe_return_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_guild_mortality_return_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_standard_microbe_uptake_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_fermentation_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_to_som_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_cascade_respiration_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_internal_transport_convergence_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_drainage_loss_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_net_tendency_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_profile_restoring_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_budget_residual_col(bounds%begc:bounds%endc,:) = 0._r8
     this%aqueous_carbon_export_col(bounds%begc:bounds%endc) = 0._r8
     this%aqueous_nitrogen_export_col(bounds%begc:bounds%endc) = 0._r8
     this%aqueous_phosphorus_export_col(bounds%begc:bounds%endc) = 0._r8
@@ -739,6 +1107,10 @@ contains
     this%dom_carbon_transport_residual_col(bounds%begc:bounds%endc) = 0._r8
     this%dom_nitrogen_transport_residual_col(bounds%begc:bounds%endc) = 0._r8
     this%dom_phosphorus_transport_residual_col(bounds%begc:bounds%endc) = 0._r8
+    this%mineral_nh4_export_col(bounds%begc:bounds%endc) = 0._r8
+    this%mineral_no3_export_col(bounds%begc:bounds%endc) = 0._r8
+    this%mineral_nh4_transport_residual_col(bounds%begc:bounds%endc) = 0._r8
+    this%mineral_no3_transport_residual_col(bounds%begc:bounds%endc) = 0._r8
     this%surface_ch4_flux_col(bounds%begc:bounds%endc) = 0._r8
     this%surface_co2_flux_col(bounds%begc:bounds%endc) = 0._r8
     this%ch4_surface_diffusion_col(bounds%begc:bounds%endc) = 0._r8
@@ -754,6 +1126,12 @@ contains
     this%ch4_oxidation_col(bounds%begc:bounds%endc) = 0._r8
     this%ch4_production_unsat_col(bounds%begc:bounds%endc) = 0._r8
     this%ch4_production_sat_col(bounds%begc:bounds%endc) = 0._r8
+    this%ch4_acetoclastic_production_col(bounds%begc:bounds%endc) = 0._r8
+    this%ch4_acetoclastic_production_unsat_col(bounds%begc:bounds%endc) = 0._r8
+    this%ch4_acetoclastic_production_sat_col(bounds%begc:bounds%endc) = 0._r8
+    this%ch4_hydrogenotrophic_production_col(bounds%begc:bounds%endc) = 0._r8
+    this%ch4_hydrogenotrophic_production_unsat_col(bounds%begc:bounds%endc) = 0._r8
+    this%ch4_hydrogenotrophic_production_sat_col(bounds%begc:bounds%endc) = 0._r8
     this%ch4_oxidation_unsat_col(bounds%begc:bounds%endc) = 0._r8
     this%ch4_oxidation_sat_col(bounds%begc:bounds%endc) = 0._r8
     this%ch4_aerobic_oxidation_col(bounds%begc:bounds%endc) = 0._r8
@@ -818,6 +1196,11 @@ contains
        end if
        water_flux = 1.e-3_r8 * col_wf%qflx_adv(c,0:nlevdecomp)
        water_flux(0) = max(0._r8, water_flux(0))
+       ! Experimental unresolved mineral-N mass-flow sensitivity. Scaling the
+       ! advecting velocity only for mineral N preserves tracer conservation
+       ! while leaving hydrology and all other aqueous tracers unchanged.
+       mineral_n_water_flux = water_flux * &
+            MicrobeMethaneParamsInst%aqueous_mineral_n_advection_multiplier
 
        partial_pressure(microbe_gas_ch4) = atmosphericPartialPressure( &
             atm2lnd_vars%forc_pch4_grc(g), atm2lnd_vars%forc_pbot_downscaled_col(c), &
@@ -861,7 +1244,55 @@ contains
           dom_c(j) = col_cs%decomp_cpools_vr(c,j,i_dom)
           dom_n(j) = col_ns%decomp_npools_vr(c,j,i_dom)
           dom_p(j) = col_ps%decomp_ppools_vr(c,j,i_dom)
+          ! The standard cascade has already updated the authoritative DOM
+          ! state by this point. Reconstruct its gross source and loss rates
+          ! from the exact transition fluxes used by CarbonStateUpdate1.
+          this%dom_net_tendency_col(c,j) = &
+               col_cf%decomp_cpools_sourcesink(c,j,i_dom) / dt
+          do transition = 1, ndecomp_cascade_transitions
+             donor_pool = decomp_cascade_con%cascade_donor_pool(transition)
+             receiver_pool = decomp_cascade_con%cascade_receiver_pool(transition)
+             if (receiver_pool == i_dom) then
+                this%dom_cascade_production_col(c,j) = &
+                     this%dom_cascade_production_col(c,j) + &
+                     col_cf%decomp_cascade_ctransfer_vr(c,j,transition)
+                select case (trim(decomp_cascade_con%cascade_step_name(transition)))
+                case ('L1DOM')
+                   this%dom_litter1_production_col(c,j) = &
+                        this%dom_litter1_production_col(c,j) + &
+                        col_cf%decomp_cascade_ctransfer_vr(c,j,transition)
+                case ('L2DOM', 'L3DOM')
+                   this%dom_other_litter_production_col(c,j) = &
+                        this%dom_other_litter_production_col(c,j) + &
+                        col_cf%decomp_cascade_ctransfer_vr(c,j,transition)
+                case ('S1DOM', 'S2DOM', 'S3DOM', 'S4DOM')
+                   this%dom_som_production_col(c,j) = &
+                        this%dom_som_production_col(c,j) + &
+                        col_cf%decomp_cascade_ctransfer_vr(c,j,transition)
+                case ('BDOM', 'FDOM')
+                   this%dom_standard_microbe_return_col(c,j) = &
+                        this%dom_standard_microbe_return_col(c,j) + &
+                        col_cf%decomp_cascade_ctransfer_vr(c,j,transition)
+                end select
+             end if
+             if (donor_pool == i_dom) then
+                this%dom_cascade_respiration_col(c,j) = &
+                     this%dom_cascade_respiration_col(c,j) + &
+                     col_cf%decomp_cascade_hr_vr(c,j,transition)
+                if (receiver_pool > 0) then
+                   if (decomp_cascade_con%is_microbial_biomass(receiver_pool)) then
+                      this%dom_standard_microbe_uptake_col(c,j) = &
+                           this%dom_standard_microbe_uptake_col(c,j) + &
+                           col_cf%decomp_cascade_ctransfer_vr(c,j,transition)
+                   else if (decomp_cascade_con%is_soil(receiver_pool)) then
+                      this%dom_to_som_col(c,j) = this%dom_to_som_col(c,j) + &
+                           col_cf%decomp_cascade_ctransfer_vr(c,j,transition)
+                   end if
+                end if
+             end if
+          end do
           mineral_n(j) = col_ns%smin_nh4_vr(c,j)
+          mineral_no3(j) = col_ns%smin_no3_vr(c,j)
           mineral_p(j) = col_ps%solutionp_vr(c,j)
 
           liquid_saturation = layerLiquidSaturation(c, j)
@@ -870,13 +1301,53 @@ contains
                (denh2o * max(layer_thickness(j), tiny(1._r8)))
           porosity(j) = max(soilstate_vars%watsat_col(c,j), tiny(1._r8))
           relative_liquid_saturation = clampUnitInterval(liquid_fraction(j) / porosity(j))
+          if (MicrobeMethaneParamsInst%aqueous_dom_mobile_saturation_exponent > 0._r8) then
+             dom_mobile_fraction(j) = &
+                  MicrobeMethaneParamsInst%aqueous_dom_mobile_fraction * &
+                  relative_liquid_saturation ** &
+                  MicrobeMethaneParamsInst%aqueous_dom_mobile_saturation_exponent
+          else
+             ! Exponent zero exactly preserves the existing constant-mobile-
+             ! fraction behavior without relying on the 0**0 convention.
+             dom_mobile_fraction(j) = MicrobeMethaneParamsInst%aqueous_dom_mobile_fraction
+          end if
+          acetate_mobile_fraction(j) = &
+               MicrobeMethaneParamsInst%aqueous_acetate_mobile_fraction
+          ! Linear equilibrium partitioning of the authoritative total NH4
+          ! pool: C_total = (theta + rho_b*Kd) C_aq. The existing transport
+          ! operator expects the mobile fraction of total bulk concentration,
+          ! so f_aq = theta/(theta + rho_b*Kd). NO3 is treated as fully mobile.
+          mineral_nh4_mobile_fraction(j) = liquid_fraction(j) / &
+               max(liquid_fraction(j) + max(0._r8, soilstate_vars%bd_col(c,j)) * &
+               MicrobeMethaneParamsInst%aqueous_nh4_partition_coefficient, &
+               tiny(1._r8))
+          mineral_no3_mobile_fraction(j) = 1._r8
           aqueous_temperature_scalar = &
                (max(col_es%t_soisno(c,j), tiny(1._r8)) / &
                MicrobeMethaneParamsInst%aqueous_diffusion_t_ref) ** &
                MicrobeMethaneParamsInst%aqueous_diffusion_temperature_exponent
+          if (use_microbe_zwt_macrodispersion) then
+             saturated_macrodispersion_scalar = &
+                  layerSaturatedThicknessFraction(c, j)
+          else if (MicrobeMethaneParamsInst%saturation_reaction_threshold < 1._r8) then
+             saturated_macrodispersion_scalar = clampUnitInterval( &
+                  (relative_liquid_saturation - &
+                  MicrobeMethaneParamsInst%saturation_reaction_threshold) / &
+                  (1._r8 - MicrobeMethaneParamsInst%saturation_reaction_threshold))
+          else if (relative_liquid_saturation >= 1._r8) then
+             saturated_macrodispersion_scalar = 1._r8
+          else
+             saturated_macrodispersion_scalar = 0._r8
+          end if
           ! These are theta*D_eff [m2 s-1], the conductivity multiplying
           ! a porewater concentration gradient. Mechanical dispersion uses
-          ! alpha*abs(q); both terms shut down as liquid water freezes.
+          ! alpha*abs(q). By default, the DOM-only macrodispersion term ramps
+          ! from zero at the reaction saturation threshold to its full value at
+          ! complete liquid saturation. The optional ZWT mapping instead uses
+          ! the geometric fraction of each layer below the connected water
+          ! table. Harmonic face conductance combines adjacent layer values.
+          ! Liquid volume and thawed fraction suppress both mappings as water
+          ! freezes or disappears.
           dom_diffusion_conductivity(j) = thawed_fraction * &
                (liquid_fraction(j) * &
                MicrobeMethaneParamsInst%aqueous_dom_molecular_diffusivity * &
@@ -885,6 +1356,17 @@ contains
                aqueous_temperature_scalar + &
                MicrobeMethaneParamsInst%aqueous_solute_dispersivity * &
                0.5_r8 * (abs(water_flux(j-1)) + abs(water_flux(j))))
+          ! Keep the default-zero path algebraically identical to the original
+          ! operator so enabling the parameter in a standard file is BFB when
+          ! the new process is not requested.
+          if (MicrobeMethaneParamsInst%aqueous_dom_saturated_macrodispersion > 0._r8) then
+             dom_diffusion_conductivity(j) = dom_diffusion_conductivity(j) + &
+                  thawed_fraction * liquid_fraction(j) * &
+                  MicrobeMethaneParamsInst%aqueous_dom_saturated_macrodispersion * &
+                  saturated_macrodispersion_scalar
+          end if
+          this%dom_macrodispersion_scalar_col(c,j) = saturated_macrodispersion_scalar
+          this%dom_diffusion_conductivity_col(c,j) = dom_diffusion_conductivity(j)
           acetate_diffusion_conductivity(j) = thawed_fraction * &
                (liquid_fraction(j) * &
                MicrobeMethaneParamsInst%aqueous_acetate_molecular_diffusivity * &
@@ -893,12 +1375,39 @@ contains
                aqueous_temperature_scalar + &
                MicrobeMethaneParamsInst%aqueous_solute_dispersivity * &
                0.5_r8 * (abs(water_flux(j-1)) + abs(water_flux(j))))
+          nh4_diffusion_conductivity(j) = thawed_fraction * &
+               (liquid_fraction(j) * &
+               MicrobeMethaneParamsInst%aqueous_nh4_molecular_diffusivity * &
+               relative_liquid_saturation ** &
+               MicrobeMethaneParamsInst%aqueous_solute_tortuosity_exponent * &
+               aqueous_temperature_scalar + &
+               MicrobeMethaneParamsInst%aqueous_solute_dispersivity * &
+               0.5_r8 * (abs(water_flux(j-1)) + abs(water_flux(j))))
+          no3_diffusion_conductivity(j) = thawed_fraction * &
+               (liquid_fraction(j) * &
+               MicrobeMethaneParamsInst%aqueous_no3_molecular_diffusivity * &
+               relative_liquid_saturation ** &
+               MicrobeMethaneParamsInst%aqueous_solute_tortuosity_exponent * &
+               aqueous_temperature_scalar + &
+               MicrobeMethaneParamsInst%aqueous_solute_dispersivity * &
+               0.5_r8 * (abs(water_flux(j-1)) + abs(water_flux(j))))
+          ! The saturated coefficient represents water-path mixing rather than
+          ! a DOM-specific reaction and is therefore shared by dissolved N.
+          if (MicrobeMethaneParamsInst%aqueous_dom_saturated_macrodispersion > 0._r8) then
+             nh4_diffusion_conductivity(j) = nh4_diffusion_conductivity(j) + &
+                  thawed_fraction * liquid_fraction(j) * &
+                  MicrobeMethaneParamsInst%aqueous_dom_saturated_macrodispersion * &
+                  saturated_macrodispersion_scalar
+             no3_diffusion_conductivity(j) = no3_diffusion_conductivity(j) + &
+                  thawed_fraction * liquid_fraction(j) * &
+                  MicrobeMethaneParamsInst%aqueous_dom_saturated_macrodispersion * &
+                  saturated_macrodispersion_scalar
+          end if
           moisture_scalar = soilMoistureResponse(soilstate_vars%soilpsi_col(c,j), &
                soilstate_vars%sucsat_col(c,j), &
                MicrobeMethaneParamsInst%soil_water_potential_min)
           saturation_scalar = clampUnitInterval(liquid_saturation / &
                max(MicrobeMethaneParamsInst%saturation_reaction_threshold, tiny(1._r8)))
-
           unsaturated_environment%soil_temperature = col_es%t_soisno(c,j)
           ! Native ELM allocates chemstate soil pH but does not currently
           ! populate it. External chemistry backends that do populate it are
@@ -926,6 +1435,22 @@ contains
                MicrobeMethaneParamsInst, MicrobeDecompParamsInst%cn_dom, &
                MicrobeDecompParamsInst%cp_dom, dt, reaction(j))
           if (.not. reaction(j)%valid) column_valid = .false.
+          this%dom_fermentation_col(c,j) = 1.5_r8 * catomw * &
+               ((1._r8 - fraction) * reaction(j)%unsaturated_rates%dom_to_acetate_c + &
+               fraction * reaction(j)%saturated_rates%dom_to_acetate_c)
+          this%dom_guild_mortality_return_col(c,j) = catomw * &
+               ((1._r8 - fraction) * &
+               (reaction(j)%unsaturated_rates%acetate_methanogen_mortality_c + &
+               reaction(j)%unsaturated_rates%h2_methanogen_mortality_c + &
+               reaction(j)%unsaturated_rates%aerobic_methanotroph_mortality_c + &
+               reaction(j)%unsaturated_rates%anaerobic_methanotroph_mortality_c) + &
+               fraction * &
+               (reaction(j)%saturated_rates%acetate_methanogen_mortality_c + &
+               reaction(j)%saturated_rates%h2_methanogen_mortality_c + &
+               reaction(j)%saturated_rates%aerobic_methanotroph_mortality_c + &
+               reaction(j)%saturated_rates%anaerobic_methanotroph_mortality_c))
+          this%dom_net_tendency_col(c,j) = this%dom_net_tendency_col(c,j) + &
+               (reaction(j)%dom_c - dom_c(j)) / dt
           this%o2_stress_unsat_col(c,j) = reaction(j)%unsaturated_rates%oxygen_stress
           this%o2_stress_sat_col(c,j) = reaction(j)%saturated_rates%oxygen_stress
           dom_c(j) = reaction(j)%dom_c
@@ -994,7 +1519,43 @@ contains
                MicrobeMethaneParamsInst%aqueous_diffusion_temperature_exponent
        end do
 
+       ! Complete-bypass sensitivity bound: a parameterized fraction of
+       ! positive infiltration samples mobile DOM in the upper donor zone and
+       ! transfers it directly to the first layer intersecting the water table.
+       ! The normal matrix aqueous operator still runs below; this diagnostic
+       ! intentionally represents the limiting no-intermediate-mixing case.
+       dom_complete_bypass_tendency = 0._r8
+       dom_complete_bypass_carbon_flux = 0._r8
+       dom_complete_bypass_nitrogen_flux = 0._r8
+       dom_complete_bypass_phosphorus_flux = 0._r8
+       dom_complete_bypass_carbon_residual = 0._r8
+       dom_complete_bypass_nitrogen_residual = 0._r8
+       dom_complete_bypass_phosphorus_residual = 0._r8
+       dom_complete_bypass_valid = .true.
+       if (use_microbe_dom_preferential_flow) then
+          call advanceMicrobeDOMCompleteBypass(dom_c, dom_n, dom_p, layer_thickness, &
+               liquid_fraction, dom_mobile_fraction, &
+               MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, &
+               soilhydrology_vars%zwt_col(c), water_flux(0), &
+               MicrobeMethaneParamsInst%dom_complete_bypass_fraction, dt, &
+               updated_dom_c, updated_dom_n, updated_dom_p, &
+               dom_complete_bypass_tendency, dom_complete_bypass_carbon_flux, &
+               dom_complete_bypass_nitrogen_flux, dom_complete_bypass_phosphorus_flux, &
+               dom_complete_bypass_carbon_residual, &
+               dom_complete_bypass_nitrogen_residual, &
+               dom_complete_bypass_phosphorus_residual, dom_complete_bypass_valid)
+          dom_c = updated_dom_c
+          dom_n = updated_dom_n
+          dom_p = updated_dom_p
+          this%dom_complete_bypass_tendency_col(c,1:nlevdecomp) = &
+               dom_complete_bypass_tendency
+          this%dom_complete_bypass_carbon_flux_col(c) = dom_complete_bypass_carbon_flux
+          this%dom_complete_bypass_nitrogen_flux_col(c) = dom_complete_bypass_nitrogen_flux
+          this%dom_complete_bypass_phosphorus_flux_col(c) = dom_complete_bypass_phosphorus_flux
+       end if
+
        dom_relaxation_valid = .true.
+       dom_profile_restoration_valid = .true.
        dom_carbon_transport_valid = .true.
        dom_nitrogen_transport_valid = .true.
        dom_phosphorus_transport_valid = .true.
@@ -1004,31 +1565,49 @@ contains
        dom_carbon_export = 0._r8
        dom_nitrogen_export = 0._r8
        dom_phosphorus_export = 0._r8
+       mineral_nh4_export = 0._r8
+       mineral_no3_export = 0._r8
+       mineral_nh4_residual = 0._r8
+       mineral_no3_residual = 0._r8
+       mineral_nh4_transport_valid = .true.
+       mineral_no3_transport_valid = .true.
+       dom_transport_tendency = 0._r8
        if (use_clm_microbe_dom_relaxation) then
           call advanceMicrobeMethaneDOMRelaxation(dom_c, dom_n, dom_p, &
                layer_thickness, dom_relaxation_rate, dt, updated_dom_c, &
                updated_dom_n, updated_dom_p, dom_carbon_residual, &
                dom_nitrogen_residual, dom_phosphorus_residual, dom_relaxation_valid)
+          dom_transport_tendency = (updated_dom_c - dom_c) / dt
+          this%dom_internal_transport_convergence_col(c,1:nlevdecomp) = &
+               dom_transport_tendency + dom_complete_bypass_tendency
           dom_c = updated_dom_c
           dom_n = updated_dom_n
           dom_p = updated_dom_p
        else if (use_microbe_aqueous_transport) then
           call advanceMicrobeAqueousTracerTransport(dom_c, layer_thickness, &
                liquid_fraction, dom_diffusion_conductivity, water_flux, &
-               MicrobeMethaneParamsInst%aqueous_dom_mobile_fraction, &
+               dom_mobile_fraction, &
                MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, &
                updated_dom_c, solute_advective_flux, solute_diffusive_flux, &
                solute_tendency, dom_carbon_export, dom_carbon_residual, &
                dom_carbon_transport_valid)
+          dom_transport_tendency = solute_tendency
           this%dom_advective_flux_col(c,1:nlevdecomp) = &
                solute_advective_flux(1:nlevdecomp)
           this%dom_diffusive_flux_col(c,1:nlevdecomp) = &
                solute_diffusive_flux(1:nlevdecomp)
           this%dom_bottom_carbon_export_col(c) = &
                solute_advective_flux(nlevdecomp) + solute_diffusive_flux(nlevdecomp)
+          this%dom_drainage_loss_col(c,nlevdecomp) = &
+               dom_carbon_export / layer_thickness(nlevdecomp)
+          this%dom_internal_transport_convergence_col(c,1:nlevdecomp) = &
+               dom_transport_tendency + dom_complete_bypass_tendency
+          this%dom_internal_transport_convergence_col(c,nlevdecomp) = &
+               this%dom_internal_transport_convergence_col(c,nlevdecomp) + &
+               this%dom_drainage_loss_col(c,nlevdecomp)
           call advanceMicrobeAqueousTracerTransport(dom_n, layer_thickness, &
                liquid_fraction, dom_diffusion_conductivity, water_flux, &
-               MicrobeMethaneParamsInst%aqueous_dom_mobile_fraction, &
+               dom_mobile_fraction, &
                MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, &
                updated_dom_n, solute_advective_flux, solute_diffusive_flux, &
                solute_tendency, dom_nitrogen_export, dom_nitrogen_residual, &
@@ -1037,7 +1616,7 @@ contains
                solute_advective_flux(nlevdecomp) + solute_diffusive_flux(nlevdecomp)
           call advanceMicrobeAqueousTracerTransport(dom_p, layer_thickness, &
                liquid_fraction, dom_diffusion_conductivity, water_flux, &
-               MicrobeMethaneParamsInst%aqueous_dom_mobile_fraction, &
+               dom_mobile_fraction, &
                MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, &
                updated_dom_p, solute_advective_flux, solute_diffusive_flux, &
                solute_tendency, dom_phosphorus_export, dom_phosphorus_residual, &
@@ -1054,7 +1633,78 @@ contains
           this%dom_nitrogen_transport_residual_col(c) = dom_nitrogen_residual
           this%dom_phosphorus_transport_residual_col(c) = dom_phosphorus_residual
        end if
-       if (use_clm_microbe_dom_relaxation .or. use_microbe_aqueous_transport) then
+
+       if (use_microbe_aqueous_transport) then
+          call advanceMicrobeAqueousTracerTransport(mineral_n, layer_thickness, &
+               liquid_fraction, nh4_diffusion_conductivity, mineral_n_water_flux, &
+               mineral_nh4_mobile_fraction, &
+               MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, &
+               updated_mineral_n, solute_advective_flux, solute_diffusive_flux, &
+               solute_tendency, mineral_nh4_export, mineral_nh4_residual, &
+               mineral_nh4_transport_valid)
+          this%mineral_nh4_advective_flux_col(c,1:nlevdecomp) = &
+               solute_advective_flux(1:nlevdecomp)
+          this%mineral_nh4_diffusive_flux_col(c,1:nlevdecomp) = &
+               solute_diffusive_flux(1:nlevdecomp)
+          call advanceMicrobeAqueousTracerTransport(mineral_no3, layer_thickness, &
+               liquid_fraction, no3_diffusion_conductivity, mineral_n_water_flux, &
+               mineral_no3_mobile_fraction, &
+               MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, &
+               updated_mineral_no3, solute_advective_flux, solute_diffusive_flux, &
+               solute_tendency, mineral_no3_export, mineral_no3_residual, &
+               mineral_no3_transport_valid)
+          this%mineral_no3_advective_flux_col(c,1:nlevdecomp) = &
+               solute_advective_flux(1:nlevdecomp)
+          this%mineral_no3_diffusive_flux_col(c,1:nlevdecomp) = &
+               solute_diffusive_flux(1:nlevdecomp)
+          mineral_n = updated_mineral_n
+          mineral_no3 = updated_mineral_no3
+          this%mineral_nh4_export_col(c) = mineral_nh4_export
+          this%mineral_no3_export_col(c) = mineral_no3_export
+          this%mineral_nh4_transport_residual_col(c) = mineral_nh4_residual
+          this%mineral_no3_transport_residual_col(c) = mineral_no3_residual
+          this%aqueous_nitrogen_export_col(c) = &
+               this%aqueous_nitrogen_export_col(c) + mineral_nh4_export + mineral_no3_export
+       end if
+       dom_profile_restoring_rate = 0._r8
+       if (use_microbe_observed_dom_calibration) then
+          do j = 1, nlevdecomp
+             ! The fitted profile is a pore-volume concentration. Convert it
+             ! to the authoritative bulk-soil DOM pool with porosity rather
+             ! than instantaneous liquid water so freezing does not create a
+             ! spurious seasonal removal and reinjection of substrate.
+             target_dom_c(j) = max(0._r8, porosity(j)) * &
+                  (MicrobeMethaneParamsInst%observed_dom_deep_concentration + &
+                  MicrobeMethaneParamsInst%observed_dom_surface_amplitude * &
+                  exp(-max(0._r8, layer_depth(j)) / &
+                  MicrobeMethaneParamsInst%observed_dom_efold_depth))
+          end do
+          call advanceMicrobeMethaneDOMProfileRestoration(dom_c, dom_n, dom_p, &
+               target_dom_c, MicrobeDecompParamsInst%cn_dom, MicrobeDecompParamsInst%cp_dom, &
+               MicrobeMethaneParamsInst%observed_dom_relaxation_timescale, dt, &
+               updated_dom_c, updated_dom_n, updated_dom_p, &
+               dom_profile_restoring_rate, dom_profile_restoration_valid)
+          dom_c = updated_dom_c
+          dom_n = updated_dom_n
+          dom_p = updated_dom_p
+          this%dom_profile_restoring_col(c,1:nlevdecomp) = dom_profile_restoring_rate
+       end if
+       this%dom_net_tendency_col(c,1:nlevdecomp) = &
+            this%dom_net_tendency_col(c,1:nlevdecomp) + dom_transport_tendency + &
+            dom_complete_bypass_tendency + dom_profile_restoring_rate
+       this%dom_budget_residual_col(c,1:nlevdecomp) = &
+            this%dom_net_tendency_col(c,1:nlevdecomp) - &
+            (this%dom_cascade_production_col(c,1:nlevdecomp) + &
+            this%dom_guild_mortality_return_col(c,1:nlevdecomp) - &
+            this%dom_standard_microbe_uptake_col(c,1:nlevdecomp) - &
+            this%dom_fermentation_col(c,1:nlevdecomp) - &
+            this%dom_to_som_col(c,1:nlevdecomp) - &
+            this%dom_cascade_respiration_col(c,1:nlevdecomp) + &
+            this%dom_internal_transport_convergence_col(c,1:nlevdecomp) - &
+            this%dom_drainage_loss_col(c,1:nlevdecomp) + &
+            this%dom_profile_restoring_col(c,1:nlevdecomp))
+       if (use_clm_microbe_dom_relaxation .or. use_microbe_aqueous_transport .or. &
+            use_microbe_observed_dom_calibration) then
           do j = 1, nlevdecomp
              ! DOM is one authoritative ELM pool; reaction partitions receive
              ! the same post-transport value but do not own duplicate storage.
@@ -1063,8 +1713,11 @@ contains
           end do
        end if
        column_valid = column_valid .and. dom_relaxation_valid .and. &
+            dom_profile_restoration_valid .and. &
+            dom_complete_bypass_valid .and. &
             dom_carbon_transport_valid .and. dom_nitrogen_transport_valid .and. &
-            dom_phosphorus_transport_valid
+            dom_phosphorus_transport_valid .and. mineral_nh4_transport_valid .and. &
+            mineral_no3_transport_valid
 
        do gas = 1, microbe_gas_count
           if (use_elm_microbe_methane_transport) then
@@ -1094,13 +1747,40 @@ contains
           end if
        end do
 
-       if (use_microbe_aqueous_transport) then
+       if (use_clm_microbe_dom_relaxation) then
+          ! The released CLM-SPRUCE implementation applies dom_diffus to both
+          ! DOC and acetate. Relax the two acetate reaction partitions with
+          ! the same conservative adjacent-layer operator used for DOM C/N/P.
+          unsaturated_acetate_export = 0._r8
+          saturated_acetate_export = 0._r8
+          do j = 1, nlevdecomp
+             acetate_concentration(j) = unsaturated_work(j)%acetate_c
+          end do
+          call advanceMicrobeMethaneTracerRelaxation(acetate_concentration, &
+               layer_thickness, dom_relaxation_rate, dt, updated_acetate, &
+               unsaturated_acetate_residual, unsaturated_acetate_valid)
+          unsaturated_candidate = unsaturated_work
+          do j = 1, nlevdecomp
+             unsaturated_candidate(j)%acetate_c = updated_acetate(j)
+          end do
+
+          do j = 1, nlevdecomp
+             acetate_concentration(j) = saturated_work(j)%acetate_c
+          end do
+          call advanceMicrobeMethaneTracerRelaxation(acetate_concentration, &
+               layer_thickness, dom_relaxation_rate, dt, updated_acetate, &
+               saturated_acetate_residual, saturated_acetate_valid)
+          saturated_candidate = saturated_work
+          do j = 1, nlevdecomp
+             saturated_candidate(j)%acetate_c = updated_acetate(j)
+          end do
+       else if (use_microbe_aqueous_transport) then
           do j = 1, nlevdecomp
              acetate_concentration(j) = unsaturated_work(j)%acetate_c
           end do
           call advanceMicrobeAqueousTracerTransport(acetate_concentration, &
                layer_thickness, liquid_fraction, acetate_diffusion_conductivity, &
-               water_flux, MicrobeMethaneParamsInst%aqueous_acetate_mobile_fraction, &
+               water_flux, acetate_mobile_fraction, &
                MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, &
                updated_acetate, solute_advective_flux, solute_diffusive_flux, &
                solute_tendency, unsaturated_acetate_export, &
@@ -1115,7 +1795,7 @@ contains
           end do
           call advanceMicrobeAqueousTracerTransport(acetate_concentration, &
                layer_thickness, liquid_fraction, acetate_diffusion_conductivity, &
-               water_flux, MicrobeMethaneParamsInst%aqueous_acetate_mobile_fraction, &
+               water_flux, acetate_mobile_fraction, &
                MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, &
                updated_acetate, solute_advective_flux, solute_diffusive_flux, &
                solute_tendency, saturated_acetate_export, &
@@ -1200,10 +1880,11 @@ contains
           write(iulog,*) 'revised methane unsaturated top state after gas transport: ', &
                unsaturated_work(1)%conc_ch4, unsaturated_work(1)%conc_o2, &
                unsaturated_work(1)%conc_co2, unsaturated_work(1)%conc_h2
-          write(message,'(a,i0,6(a,l1),7(a,es12.4))') &
+          write(message,'(a,i0,7(a,l1),7(a,es12.4))') &
                ' ERROR: revised methane column transaction failed validation for column ', c, &
                '; reaction=', all(reaction(:)%valid), &
                '; dom_relaxation=', dom_relaxation_valid, &
+               '; dom_profile=', dom_profile_restoration_valid, &
                '; acetate_unsat=', unsaturated_acetate_valid, &
                '; acetate_sat=', saturated_acetate_valid, &
                '; gas_unsat=', unsaturated_gas_valid, &
@@ -1220,11 +1901,40 @@ contains
 
        call commitColumnState(c, unsaturated_work, saturated_work)
        do j = 1, nlevdecomp
+          this%ch4_porewater_unsat_col(c,j) = ch4PorewaterConcentration( &
+               c, j, .false., unsaturated_work(j)%conc_ch4)
+          this%ch4_porewater_sat_col(c,j) = ch4PorewaterConcentration( &
+               c, j, .true., saturated_work(j)%conc_ch4)
+          this%ch4_porewater_col(c,j) = &
+               (1._r8 - fraction) * this%ch4_porewater_unsat_col(c,j) + &
+               fraction * this%ch4_porewater_sat_col(c,j)
           col_cs%decomp_cpools_vr(c,j,i_dom) = dom_c(j)
+          if (use_microbe_aqueous_transport .and. &
+               liquid_fraction(j) >= MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction) then
+             this%dom_porewater_c_col(c,j) = &
+                  dom_mobile_fraction(j) * &
+                  max(0._r8, dom_c(j)) / liquid_fraction(j)
+          else
+             this%dom_porewater_c_col(c,j) = 0._r8
+          end if
+          if (use_microbe_aqueous_transport .and. &
+               liquid_fraction(j) >= MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction) then
+             this%mineral_nh4_mobile_fraction_col(c,j) = mineral_nh4_mobile_fraction(j)
+             this%mineral_nh4_porewater_col(c,j) = &
+                  mineral_nh4_mobile_fraction(j) * max(0._r8, mineral_n(j)) / &
+                  liquid_fraction(j)
+             this%mineral_no3_porewater_col(c,j) = &
+                  max(0._r8, mineral_no3(j)) / liquid_fraction(j)
+          else
+             this%mineral_nh4_mobile_fraction_col(c,j) = 0._r8
+             this%mineral_nh4_porewater_col(c,j) = 0._r8
+             this%mineral_no3_porewater_col(c,j) = 0._r8
+          end if
           col_ns%decomp_npools_vr(c,j,i_dom) = dom_n(j)
           col_ps%decomp_ppools_vr(c,j,i_dom) = dom_p(j)
           col_ns%smin_nh4_vr(c,j) = mineral_n(j)
-          col_ns%sminn_vr(c,j) = mineral_n(j) + col_ns%smin_no3_vr(c,j)
+          col_ns%smin_no3_vr(c,j) = mineral_no3(j)
+          col_ns%sminn_vr(c,j) = mineral_n(j) + mineral_no3(j)
           col_ps%solutionp_vr(c,j) = mineral_p(j)
        end do
        this%sat_fraction_previous_col(c) = fraction
@@ -1252,18 +1962,26 @@ contains
        this%ch4_surface_ebullition_col(c) = this%ch4_surface_ebullition_unsat_col(c) + &
             this%ch4_surface_ebullition_sat_col(c)
        do j = 1, nlevdecomp
-          this%ch4_production_unsat_col(c) = this%ch4_production_unsat_col(c) + &
+          this%ch4_acetoclastic_production_unsat_col(c) = &
+               this%ch4_acetoclastic_production_unsat_col(c) + &
                catomw * layer_thickness(j) * (1._r8 - fraction) * &
-               (MicrobeMethaneParamsInst%acetoclastic_methanogenesis_ch4_yield * &
+               MicrobeMethaneParamsInst%acetoclastic_methanogenesis_ch4_yield * &
                (1._r8 - MicrobeMethaneParamsInst%acetate_methanogen_yield) * &
-               reaction(j)%unsaturated_rates%acetoclastic_methanogenesis_c + &
-               reaction(j)%unsaturated_rates%hydrogenotrophic_methanogenesis_c)
-          this%ch4_production_sat_col(c) = this%ch4_production_sat_col(c) + &
+               reaction(j)%unsaturated_rates%acetoclastic_methanogenesis_c
+          this%ch4_acetoclastic_production_sat_col(c) = &
+               this%ch4_acetoclastic_production_sat_col(c) + &
                catomw * layer_thickness(j) * fraction * &
-               (MicrobeMethaneParamsInst%acetoclastic_methanogenesis_ch4_yield * &
+               MicrobeMethaneParamsInst%acetoclastic_methanogenesis_ch4_yield * &
                (1._r8 - MicrobeMethaneParamsInst%acetate_methanogen_yield) * &
-               reaction(j)%saturated_rates%acetoclastic_methanogenesis_c + &
-               reaction(j)%saturated_rates%hydrogenotrophic_methanogenesis_c)
+               reaction(j)%saturated_rates%acetoclastic_methanogenesis_c
+          this%ch4_hydrogenotrophic_production_unsat_col(c) = &
+               this%ch4_hydrogenotrophic_production_unsat_col(c) + &
+               catomw * layer_thickness(j) * (1._r8 - fraction) * &
+               reaction(j)%unsaturated_rates%hydrogenotrophic_methanogenesis_c
+          this%ch4_hydrogenotrophic_production_sat_col(c) = &
+               this%ch4_hydrogenotrophic_production_sat_col(c) + &
+               catomw * layer_thickness(j) * fraction * &
+               reaction(j)%saturated_rates%hydrogenotrophic_methanogenesis_c
           this%ch4_aerobic_oxidation_unsat_col(c) = &
                this%ch4_aerobic_oxidation_unsat_col(c) + &
                catomw * layer_thickness(j) * (1._r8 - fraction) * &
@@ -1289,6 +2007,18 @@ contains
                catomw * layer_thickness(j) * fraction * &
                reaction(j)%saturated_rates%anaerobic_methane_oxidation_c
        end do
+       this%ch4_acetoclastic_production_col(c) = &
+            this%ch4_acetoclastic_production_unsat_col(c) + &
+            this%ch4_acetoclastic_production_sat_col(c)
+       this%ch4_hydrogenotrophic_production_col(c) = &
+            this%ch4_hydrogenotrophic_production_unsat_col(c) + &
+            this%ch4_hydrogenotrophic_production_sat_col(c)
+       this%ch4_production_unsat_col(c) = &
+            this%ch4_acetoclastic_production_unsat_col(c) + &
+            this%ch4_hydrogenotrophic_production_unsat_col(c)
+       this%ch4_production_sat_col(c) = &
+            this%ch4_acetoclastic_production_sat_col(c) + &
+            this%ch4_hydrogenotrophic_production_sat_col(c)
        this%ch4_production_col(c) = this%ch4_production_unsat_col(c) + &
             this%ch4_production_sat_col(c)
        this%ch4_aerobic_oxidation_col(c) = this%ch4_aerobic_oxidation_unsat_col(c) + &
@@ -1700,6 +2430,16 @@ contains
       end if
     end function layerThawedFraction
 
+    real(r8) function layerSaturatedThicknessFraction(column, layer) result(value)
+      integer, intent(in) :: column, layer
+      real(r8) :: layer_top, layer_bottom, water_table_depth
+      layer_top = col_pp%zi(column,layer-1)
+      layer_bottom = col_pp%zi(column,layer)
+      water_table_depth = max(0._r8, soilhydrology_vars%zwt_col(column))
+      value = clampUnitInterval((layer_bottom - max(layer_top, water_table_depth)) / &
+           max(layer_bottom - layer_top, tiny(1._r8)))
+    end function layerSaturatedThicknessFraction
+
     pure real(r8) function soilMoistureResponse(soil_water_potential, saturated_suction, &
          minimum_potential) result(value)
       real(r8), intent(in) :: soil_water_potential, saturated_suction, minimum_potential
@@ -1808,6 +2548,40 @@ contains
       capacity = max(capacity, tiny(1._r8))
       transport_diffusivity = max(0._r8, transport_diffusivity)
     end subroutine gasTransportProperties
+
+    real(r8) function ch4PorewaterConcentration(column, layer, saturated_partition, &
+         bulk_inventory) result(value)
+      ! Diagnose dissolved CH4 per liquid-water volume without changing the
+      ! prognostic inventory or the selected transport formulation. The gas-
+      ! equivalent concentration is bulk_inventory / capacity and dissolved
+      ! concentration is Henry_solubility times that value.
+      integer, intent(in) :: column, layer
+      logical, intent(in) :: saturated_partition
+      real(r8), intent(in) :: bulk_inventory
+      real(r8) :: porosity, water_filled_fraction, liquid_fraction
+      real(r8) :: air_fraction, thawed_fraction, henry_solubility, capacity
+
+      value = 0._r8
+      if (bulk_inventory <= 0._r8) return
+      porosity = max(soilstate_vars%watsat_col(column,layer), tiny(1._r8))
+      thawed_fraction = layerThawedFraction(column, layer)
+      if (saturated_partition) then
+         liquid_fraction = porosity * thawed_fraction
+         air_fraction = 0._r8
+      else
+         water_filled_fraction = min(porosity, max(0._r8, &
+              col_ws%h2osoi_vol(column,layer)))
+         liquid_fraction = water_filled_fraction * thawed_fraction
+         air_fraction = max(0._r8, porosity - water_filled_fraction)
+      end if
+      if (liquid_fraction < &
+           MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction) return
+      henry_solubility = henryDimensionlessSolubility( &
+           col_es%t_soisno(column,layer), microbe_gas_ch4)
+      capacity = air_fraction + liquid_fraction * henry_solubility
+      if (capacity <= tiny(1._r8)) return
+      value = henry_solubility * bulk_inventory / capacity
+    end function ch4PorewaterConcentration
 
     pure real(r8) function legacyFickianGasDiffusivity(gas_index, temperature) result(value)
       integer, intent(in) :: gas_index

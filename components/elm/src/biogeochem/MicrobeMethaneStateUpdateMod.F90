@@ -62,7 +62,10 @@ module MicrobeMethaneStateUpdateMod
   public :: advanceMicrobeMethaneGasTransport
   public :: advanceMicrobeMethaneAcetateTransport
   public :: advanceMicrobeMethaneDOMRelaxation
+  public :: advanceMicrobeMethaneDOMProfileRestoration
+  public :: advanceMicrobeMethaneTracerRelaxation
   public :: advanceMicrobeAqueousTracerTransport
+  public :: advanceMicrobeDOMCompleteBypass
   public :: microbeMethaneAdditionalCarbonDensity
   public :: microbeMethaneColumnAdditionalCarbon
   public :: microbeMethaneSurfaceCarbonFlux
@@ -70,6 +73,148 @@ module MicrobeMethaneStateUpdateMod
   public :: microbeMethaneCO2Correction
 
 contains
+
+  pure subroutine advanceMicrobeDOMCompleteBypass(dom_c, dom_n, dom_p, &
+       layer_thickness, liquid_fraction, mobile_fraction, minimum_liquid_fraction, &
+       water_table_depth, infiltration_flux, bypass_fraction, dt, &
+       updated_dom_c, updated_dom_n, updated_dom_p, carbon_tendency, &
+       carbon_flux, nitrogen_flux, phosphorus_flux, carbon_residual, &
+       nitrogen_residual, phosphorus_residual, valid)
+    ! Event-scale preferential transport. A fraction of positive infiltration
+    ! samples the mobile DOM inventory throughout the unsaturated layers and
+    ! transfers it directly to the first layer intersecting the water table.
+    ! Intermediate layers are bypassed. This routine redistributes existing DOM
+    ! only; it does not create water or C/N/P.
+    real(r8), intent(in) :: dom_c(:)
+    real(r8), intent(in) :: dom_n(size(dom_c)), dom_p(size(dom_c))
+    real(r8), intent(in) :: layer_thickness(size(dom_c))
+    real(r8), intent(in) :: liquid_fraction(size(dom_c))
+    real(r8), intent(in) :: mobile_fraction(size(dom_c))
+    real(r8), intent(in) :: minimum_liquid_fraction
+    real(r8), intent(in) :: water_table_depth, infiltration_flux
+    real(r8), intent(in) :: bypass_fraction, dt
+    real(r8), intent(out) :: updated_dom_c(size(dom_c))
+    real(r8), intent(out) :: updated_dom_n(size(dom_c))
+    real(r8), intent(out) :: updated_dom_p(size(dom_c))
+    real(r8), intent(out) :: carbon_tendency(size(dom_c))
+    real(r8), intent(out) :: carbon_flux, nitrogen_flux, phosphorus_flux
+    real(r8), intent(out) :: carbon_residual, nitrogen_residual, phosphorus_residual
+    logical, intent(out) :: valid
+    real(r8) :: mobile_carbon(size(dom_c)), removed_carbon(size(dom_c))
+    real(r8) :: removed_nitrogen(size(dom_c)), removed_phosphorus(size(dom_c))
+    real(r8) :: donor_water_depth, donor_mobile_carbon, source_concentration
+    real(r8) :: requested_carbon, removal_fraction
+    real(r8) :: initial_carbon, initial_nitrogen, initial_phosphorus
+    real(r8) :: final_carbon, final_nitrogen, final_phosphorus
+    real(r8) :: layer_bottom, sampled_thickness
+    integer :: j, number_of_layers, target_layer
+
+    number_of_layers = size(dom_c)
+    updated_dom_c = dom_c
+    updated_dom_n = dom_n
+    updated_dom_p = dom_p
+    carbon_tendency = 0._r8
+    carbon_flux = 0._r8
+    nitrogen_flux = 0._r8
+    phosphorus_flux = 0._r8
+    carbon_residual = 0._r8
+    nitrogen_residual = 0._r8
+    phosphorus_residual = 0._r8
+    valid = .false.
+    if (number_of_layers == 0 .or. dt <= 0._r8 .or. &
+         minimum_liquid_fraction <= 0._r8) return
+    if (bypass_fraction < 0._r8 .or. bypass_fraction > 1._r8 .or. &
+         any(layer_thickness <= 0._r8) .or. any(liquid_fraction < 0._r8) .or. &
+         any(mobile_fraction < 0._r8) .or. any(mobile_fraction > 1._r8) .or. &
+         any(dom_c < -state_tolerance) .or. any(dom_n < -state_tolerance) .or. &
+         any(dom_p < -state_tolerance)) return
+
+    ! No rain-driven transfer is a successful no-op. Likewise, a water table
+    ! at or above the first layer has no distinct deeper receiving layer.
+    if (infiltration_flux <= 0._r8 .or. bypass_fraction == 0._r8) then
+       valid = .true.
+       return
+    end if
+    target_layer = 0
+    layer_bottom = 0._r8
+    do j = 1, number_of_layers
+       layer_bottom = layer_bottom + layer_thickness(j)
+       if (layer_bottom >= max(0._r8, water_table_depth)) then
+          target_layer = j
+          exit
+       end if
+    end do
+    if (target_layer <= 1) then
+       valid = .true.
+       return
+    end if
+
+    mobile_carbon = 0._r8
+    removed_carbon = 0._r8
+    removed_nitrogen = 0._r8
+    removed_phosphorus = 0._r8
+    donor_water_depth = 0._r8
+    donor_mobile_carbon = 0._r8
+    do j = 1, target_layer - 1
+       if (liquid_fraction(j) >= minimum_liquid_fraction) then
+          sampled_thickness = layer_thickness(j)
+          mobile_carbon(j) = max(0._r8, dom_c(j)) * mobile_fraction(j) * &
+               sampled_thickness
+          donor_mobile_carbon = donor_mobile_carbon + mobile_carbon(j)
+          donor_water_depth = donor_water_depth + liquid_fraction(j) * &
+               sampled_thickness
+       end if
+    end do
+    if (donor_mobile_carbon <= 0._r8 .or. donor_water_depth <= 0._r8) then
+       valid = .true.
+       return
+    end if
+
+    source_concentration = donor_mobile_carbon / donor_water_depth
+    requested_carbon = bypass_fraction * infiltration_flux * dt * source_concentration
+    removal_fraction = min(1._r8, max(0._r8, requested_carbon) / donor_mobile_carbon)
+    do j = 1, target_layer - 1
+       if (mobile_carbon(j) > 0._r8) then
+          sampled_thickness = layer_thickness(j)
+          removed_carbon(j) = removal_fraction * mobile_carbon(j)
+          ! Remove the same fraction of each donor layer's mobile C, N, and P
+          ! so the event transfer preserves the local DOM stoichiometry.
+          removed_nitrogen(j) = removal_fraction * mobile_fraction(j) * &
+               max(0._r8, dom_n(j)) * sampled_thickness
+          removed_phosphorus(j) = removal_fraction * mobile_fraction(j) * &
+               max(0._r8, dom_p(j)) * sampled_thickness
+          updated_dom_c(j) = updated_dom_c(j) - removed_carbon(j) / layer_thickness(j)
+          updated_dom_n(j) = updated_dom_n(j) - removed_nitrogen(j) / layer_thickness(j)
+          updated_dom_p(j) = updated_dom_p(j) - removed_phosphorus(j) / layer_thickness(j)
+       end if
+    end do
+    carbon_flux = sum(removed_carbon) / dt
+    nitrogen_flux = sum(removed_nitrogen) / dt
+    phosphorus_flux = sum(removed_phosphorus) / dt
+    updated_dom_c(target_layer) = updated_dom_c(target_layer) + &
+         carbon_flux * dt / layer_thickness(target_layer)
+    updated_dom_n(target_layer) = updated_dom_n(target_layer) + &
+         nitrogen_flux * dt / layer_thickness(target_layer)
+    updated_dom_p(target_layer) = updated_dom_p(target_layer) + &
+         phosphorus_flux * dt / layer_thickness(target_layer)
+    carbon_tendency = (updated_dom_c - dom_c) / dt
+
+    initial_carbon = sum(dom_c * layer_thickness)
+    initial_nitrogen = sum(dom_n * layer_thickness)
+    initial_phosphorus = sum(dom_p * layer_thickness)
+    final_carbon = sum(updated_dom_c * layer_thickness)
+    final_nitrogen = sum(updated_dom_n * layer_thickness)
+    final_phosphorus = sum(updated_dom_p * layer_thickness)
+    carbon_residual = final_carbon - initial_carbon
+    nitrogen_residual = final_nitrogen - initial_nitrogen
+    phosphorus_residual = final_phosphorus - initial_phosphorus
+    valid = all(updated_dom_c >= -state_tolerance) .and. &
+         all(updated_dom_n >= -state_tolerance) .and. &
+         all(updated_dom_p >= -state_tolerance) .and. &
+         residualIsClosed(carbon_residual, initial_carbon, final_carbon) .and. &
+         residualIsClosed(nitrogen_residual, initial_nitrogen, final_nitrogen) .and. &
+         residualIsClosed(phosphorus_residual, initial_phosphorus, final_phosphorus)
+  end subroutine advanceMicrobeDOMCompleteBypass
 
   pure subroutine advanceMicrobeMethaneReactionLayer(dom_c, dom_n, dom_p, mineral_n, &
        mineral_p, saturated_fraction, unsaturated_state, saturated_state, &
@@ -289,7 +434,8 @@ contains
     real(r8), intent(in) :: liquid_fraction(size(concentration))
     real(r8), intent(in) :: diffusion_conductivity(size(concentration))
     real(r8), intent(in) :: water_flux(0:size(concentration))
-    real(r8), intent(in) :: mobile_fraction, minimum_liquid_fraction, dt
+    real(r8), intent(in) :: mobile_fraction(size(concentration))
+    real(r8), intent(in) :: minimum_liquid_fraction, dt
     real(r8), intent(out) :: updated_concentration(size(concentration))
     real(r8), intent(out) :: advective_flux(0:size(concentration))
     real(r8), intent(out) :: diffusive_flux(0:size(concentration))
@@ -316,13 +462,13 @@ contains
     if (number_of_layers == 0 .or. dt <= 0._r8) return
     if (any(layer_thickness <= 0._r8) .or. any(liquid_fraction < 0._r8) .or. &
          any(diffusion_conductivity < 0._r8) .or. any(concentration < -state_tolerance)) return
-    if (mobile_fraction <= 0._r8 .or. mobile_fraction > 1._r8 .or. &
+    if (any(mobile_fraction < 0._r8) .or. any(mobile_fraction > 1._r8) .or. &
          minimum_liquid_fraction <= 0._r8) return
 
     porewater_factor = 0._r8
     do j = 1, number_of_layers
        if (liquid_fraction(j) >= minimum_liquid_fraction) then
-          porewater_factor(j) = mobile_fraction / liquid_fraction(j)
+          porewater_factor(j) = mobile_fraction(j) / liquid_fraction(j)
        end if
     end do
 
@@ -466,6 +612,71 @@ contains
          residualIsClosed(nitrogen_residual, initial_nitrogen, final_nitrogen) .and. &
          residualIsClosed(phosphorus_residual, initial_phosphorus, final_phosphorus)
   end subroutine advanceMicrobeMethaneDOMRelaxation
+
+  pure subroutine advanceMicrobeMethaneDOMProfileRestoration(dom_c, dom_n, dom_p, &
+       target_dom_c, cn_dom, cp_dom, relaxation_timescale_days, dt, &
+       updated_dom_c, updated_dom_n, updated_dom_p, carbon_source_rate, valid)
+    real(r8), intent(in) :: dom_c(:), dom_n(size(dom_c)), dom_p(size(dom_c))
+    real(r8), intent(in) :: target_dom_c(size(dom_c))
+    real(r8), intent(in) :: cn_dom, cp_dom, relaxation_timescale_days, dt
+    real(r8), intent(out) :: updated_dom_c(size(dom_c))
+    real(r8), intent(out) :: updated_dom_n(size(dom_c))
+    real(r8), intent(out) :: updated_dom_p(size(dom_c))
+    real(r8), intent(out) :: carbon_source_rate(size(dom_c))
+    logical, intent(out) :: valid
+    real(r8) :: restoring_fraction
+
+    updated_dom_c = dom_c
+    updated_dom_n = dom_n
+    updated_dom_p = dom_p
+    carbon_source_rate = 0._r8
+    valid = .false.
+    if (size(dom_c) == 0 .or. dt <= 0._r8 .or. relaxation_timescale_days <= 0._r8) return
+    if (cn_dom <= 0._r8 .or. cp_dom <= 0._r8) return
+    if (any(dom_c < -state_tolerance) .or. any(dom_n < -state_tolerance) .or. &
+         any(dom_p < -state_tolerance) .or. any(target_dom_c < 0._r8)) return
+
+    ! Exponential restoration is stable for any timestep and approaches the
+    ! prescribed bulk-soil DOM target without overshoot. N and P are restored
+    ! to the standard DOM stoichiometry so the calibration source does not
+    ! inject carbon without its associated organic nutrients.
+    restoring_fraction = 1._r8 - exp(-dt / (86400._r8 * relaxation_timescale_days))
+    updated_dom_c = dom_c + restoring_fraction * (target_dom_c - dom_c)
+    updated_dom_n = dom_n + restoring_fraction * (target_dom_c / cn_dom - dom_n)
+    updated_dom_p = dom_p + restoring_fraction * (target_dom_c / cp_dom - dom_p)
+    carbon_source_rate = (updated_dom_c - dom_c) / dt
+    valid = all(updated_dom_c >= -state_tolerance) .and. &
+         all(updated_dom_n >= -state_tolerance) .and. &
+         all(updated_dom_p >= -state_tolerance)
+  end subroutine advanceMicrobeMethaneDOMProfileRestoration
+
+  pure subroutine advanceMicrobeMethaneTracerRelaxation(concentration, &
+       layer_thickness, layer_relaxation_rate, dt, updated_concentration, &
+       residual, valid)
+    real(r8), intent(in) :: concentration(:)
+    real(r8), intent(in) :: layer_thickness(size(concentration))
+    real(r8), intent(in) :: layer_relaxation_rate(size(concentration))
+    real(r8), intent(in) :: dt
+    real(r8), intent(out) :: updated_concentration(size(concentration))
+    real(r8), intent(out) :: residual
+    logical, intent(out) :: valid
+    real(r8) :: initial_inventory, final_inventory
+
+    updated_concentration = concentration
+    residual = 0._r8
+    valid = .false.
+    if (size(concentration) == 0 .or. dt <= 0._r8) return
+    if (any(layer_thickness <= 0._r8) .or. any(layer_relaxation_rate < 0._r8)) return
+    if (any(concentration < -state_tolerance)) return
+
+    call relaxDOMTracer(concentration, layer_thickness, layer_relaxation_rate, dt, &
+         updated_concentration)
+    initial_inventory = sum(concentration * layer_thickness)
+    final_inventory = sum(updated_concentration * layer_thickness)
+    residual = final_inventory - initial_inventory
+    valid = all(updated_concentration >= -state_tolerance) .and. &
+         residualIsClosed(residual, initial_inventory, final_inventory)
+  end subroutine advanceMicrobeMethaneTracerRelaxation
 
   pure subroutine relaxDOMTracer(concentration, layer_thickness, &
        layer_relaxation_rate, dt, updated_concentration)

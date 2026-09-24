@@ -10,11 +10,13 @@ module NitrifDenitrifMod
   use elm_varpar          , only : nlevgrnd,nlevdecomp
   use elm_varcon          , only : rpi, denh2o, dzsoi, zisoi, grav
   use elm_varcon          , only : d_con_g, d_con_w, spval, secspday
-  use elm_varctl          , only : use_lch4, iulog
+  use elm_varctl          , only : use_lch4, use_microbe_methane, &
+                                   use_legacy_ch4_with_microbe, iulog
   use abortutils          , only : endrun
   use decompMod           , only : bounds_type
   use SoilStatetype       , only : soilstate_type
   use ch4Mod              , only : ch4_type
+  use MicrobeMethaneParamsMod, only : MicrobeMethaneParamsInst
   use ColumnType          , only : col_pp
   use ColumnDataType      , only : col_es, col_ws, col_cf, col_ns, col_nf
   !
@@ -154,6 +156,7 @@ contains
     real(r8) :: anaerobic_frac_sat, r_psi_sat, r_min_sat ! scalar values in sat portion for averaging
     real(r8) :: organic_max              ! organic matter content (kg/m3) where
                                          ! soil is assumed to act like peat
+    real(r8) :: denitrification_rate_multiplier
     !character(len=32) :: subname='nitrif_denitrif' ! subroutine name
     !-----------------------------------------------------------------------
 
@@ -226,7 +229,17 @@ contains
 
       organic_max = ParamsShareInst%organic_max
 
-      pH(bounds%begc:bounds%endc) = 6.5  !!! set all soils with the same pH as placeholder here
+      denitrification_rate_multiplier = 1._r8
+      if (use_microbe_methane .and. .not. use_legacy_ch4_with_microbe) then
+         ! Revised methane and native nitrification must use the same
+         ! temporary site pH until ELM supplies a resolved soil-pH field.
+         pH(bounds%begc:bounds%endc) = MicrobeMethaneParamsInst%soil_ph_fallback
+         denitrification_rate_multiplier = &
+              MicrobeMethaneParamsInst%denitrification_rate_multiplier
+      else
+         ! Preserve the inherited behavior for every non-revised backend.
+         pH(bounds%begc:bounds%endc) = 6.5
+      end if
       co2diff_con(1) =   0.1325_r8
       co2diff_con(2) =   0.0009_r8
 
@@ -325,6 +338,9 @@ contains
             endif
 
             !---------------- denitrification
+            ! The inherited Del Grosso/Parton potential-rate equation has no
+            ! explicit pH response. Oxygen affects it through anaerobic_frac;
+            ! do not apply the methane guild pH response here.
             ! first some input variables an unit conversions
             soil_hr_vr(c,j) = phr_vr(c,j)
 
@@ -356,7 +372,8 @@ contains
             endif
 
             ! limit to anoxic fraction of soils
-            pot_f_denit_vr(c,j) = f_denit_base_vr(c,j) * anaerobic_frac(c,j)
+            pot_f_denit_vr(c,j) = f_denit_base_vr(c,j) * anaerobic_frac(c,j) * &
+                 denitrification_rate_multiplier
 
             ! now calculate the ratio of N2O to N2 from denitrifictaion, following Del Grosso et al., 2000
             ! diffusivity constant (figure 6b)

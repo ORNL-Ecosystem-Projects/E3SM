@@ -828,7 +828,8 @@ non-bog topounit. TRUE (default) retains the generalized CLM-Microbe-compatible
 behavior and exchanges CH4, O2, CO2, and H2 across every configured topounit
 edge. FALSE skips only edges for which either endpoint is non-bog, retaining
 gas exchange among connected bog topounits. This diagnostic does not change
-lateral hydrology or vertical gas and solute transport.
+lateral hydrology or vertical gas and solute transport. HUMHOL
+revised-microbial-methane cases default to FALSE.
 </entry>
 
 <entry id="use_clm_microbe_humhol_saturation" type="logical" category="bgc"
@@ -851,6 +852,15 @@ decomposition-cascade path. This option requires use_microbe_methane=.true.;
 it is intended for source-parity diagnosis, not calibrated production use.
 </entry>
 
+<entry id="use_microbe_observed_dom_calibration" type="logical" category="bgc"
+       group="elm_inparm" valid_values="" value=".false.">
+Calibration-only switch that restores bulk DOM C, N, and P toward a smooth
+observed porewater-DOC profile while retaining prognostic acetate, microbial
+biomass, methane reactions, and transport. The restoring source or sink is
+diagnosed explicitly. FALSE is the production default. This option requires
+use_microbe_methane=.true. and is not intended for production simulations.
+</entry>
+
 <entry id="use_microbe_aqueous_transport" type="logical" category="bgc"
        group="elm_inparm" valid_values="" value=".false.">
 Enable conservative physical transport of microbial-model DOM C, N, and P and
@@ -859,7 +869,28 @@ molecular diffusion, and hydrodynamic dispersion. It bypasses the generic SOM
 transport operator for DOM, does not move bacteria or fungi, and is mutually
 exclusive with use_clm_microbe_dom_relaxation. This option requires
 use_microbe_methane=.true. and use_vertsoilc=.true. Carbon-isotope DOM
-transport is not yet implemented, so use_c13 and use_c14 must be FALSE.
+transport is not yet implemented, so use_c13 and use_c14 must be FALSE. It
+defaults to TRUE for HUMHOL revised-microbial-methane cases.
+</entry>
+
+<entry id="use_microbe_dom_preferential_flow" type="logical" category="bgc"
+       group="elm_inparm" valid_values="" value=".false.">
+Enable rain-event preferential DOM transport as a sensitivity formulation.
+TRUE transfers a parameterized fraction of the mobile DOM inventory in the
+unsaturated layers directly to the first layer intersecting the water table,
+using positive infiltration to limit the transfer. Intermediate-layer mixing
+and reactions along this pathway are bypassed, while DOM C, N, and P are
+conserved. This option requires use_microbe_aqueous_transport=.true.
+</entry>
+
+<entry id="use_microbe_zwt_macrodispersion" type="logical" category="bgc"
+       group="elm_inparm" valid_values="" value=".false.">
+Use geometric overlap with the diagnosed water table to gate saturated DOM
+macrodispersion. The active layer fraction is the portion below ZWT; liquid
+volume and thawed fraction continue to limit conductivity. FALSE retains the
+relative-liquid-saturation threshold gate. This sensitivity option requires
+use_microbe_aqueous_transport=.true. It defaults to TRUE for HUMHOL
+revised-microbial-methane cases.
 </entry>
 
 <entry id="use_cn" type="logical" category="bgc"

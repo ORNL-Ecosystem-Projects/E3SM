@@ -107,7 +107,10 @@ module controlMod
                         use_microbe_nonbog_lateral_gas_transport, &
                         use_clm_microbe_humhol_saturation, &
                         use_clm_microbe_dom_relaxation, &
+                        use_microbe_observed_dom_calibration, &
                         use_microbe_aqueous_transport, &
+                        use_microbe_dom_preferential_flow, &
+                        use_microbe_zwt_macrodispersion, &
                         use_vertsoilc, use_extralakelayers, &
                         use_vichydro, use_century_decomp, use_cn, use_crop, &
                         use_snicar_frc, use_snicar_ad, use_firn_percolation_and_compaction, &
@@ -365,7 +368,10 @@ contains
          use_microbe_nonbog_lateral_gas_transport, &
          use_clm_microbe_humhol_saturation, &
          use_clm_microbe_dom_relaxation, &
+         use_microbe_observed_dom_calibration, &
          use_microbe_aqueous_transport, &
+         use_microbe_dom_preferential_flow, &
+         use_microbe_zwt_macrodispersion, &
          use_vertsoilc, use_extralakelayers, &
          use_vichydro, use_century_decomp, use_cn, use_crop, use_snicar_frc, &
          use_snicar_ad, use_firn_percolation_and_compaction, use_extrasnowlayers,&
@@ -810,9 +816,21 @@ contains
        call endrun(msg=' ERROR: use_clm_microbe_dom_relaxation=.true. requires '//&
             'use_microbe_methane=.true.'//errMsg(__FILE__, __LINE__))
     end if
+    if (use_microbe_observed_dom_calibration .and. .not. use_microbe_methane) then
+       call endrun(msg=' ERROR: use_microbe_observed_dom_calibration=.true. requires '//&
+            'use_microbe_methane=.true.'//errMsg(__FILE__, __LINE__))
+    end if
     if (use_microbe_aqueous_transport .and. .not. use_microbe_methane) then
        call endrun(msg=' ERROR: use_microbe_aqueous_transport=.true. requires '//&
             'use_microbe_methane=.true.'//errMsg(__FILE__, __LINE__))
+    end if
+    if (use_microbe_dom_preferential_flow .and. .not. use_microbe_aqueous_transport) then
+       call endrun(msg=' ERROR: use_microbe_dom_preferential_flow=.true. requires '//&
+            'use_microbe_aqueous_transport=.true.'//errMsg(__FILE__, __LINE__))
+    end if
+    if (use_microbe_zwt_macrodispersion .and. .not. use_microbe_aqueous_transport) then
+       call endrun(msg=' ERROR: use_microbe_zwt_macrodispersion=.true. requires '//&
+            'use_microbe_aqueous_transport=.true.'//errMsg(__FILE__, __LINE__))
     end if
     if (use_legacy_ch4_with_microbe .and. .not. use_microbe_methane) then
        call endrun(msg=' ERROR: use_legacy_ch4_with_microbe=.true. requires '//&
@@ -824,7 +842,11 @@ contains
     if (use_legacy_ch4_with_microbe .and. &
          (use_elm_microbe_methane_transport .or. &
           use_clm_microbe_humhol_saturation .or. &
-          use_clm_microbe_dom_relaxation .or. use_microbe_aqueous_transport)) then
+          use_clm_microbe_dom_relaxation .or. &
+          use_microbe_observed_dom_calibration .or. &
+          use_microbe_aqueous_transport .or. &
+          use_microbe_dom_preferential_flow .or. &
+          use_microbe_zwt_macrodispersion)) then
        call endrun(msg=' ERROR: use_legacy_ch4_with_microbe=.true. cannot be combined '//&
             'with revised-methane or revised-solute transport options.'//&
             errMsg(__FILE__, __LINE__))
@@ -930,7 +952,10 @@ contains
     call mpi_bcast (use_microbe_nonbog_lateral_gas_transport, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_clm_microbe_humhol_saturation, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_clm_microbe_dom_relaxation, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_microbe_observed_dom_calibration, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_microbe_aqueous_transport, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_microbe_dom_preferential_flow, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_microbe_zwt_macrodispersion, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_vertsoilc, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_extralakelayers, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_extrasnowlayers, 1, MPI_LOGICAL, 0, mpicom, ier)
@@ -1312,8 +1337,14 @@ contains
          use_clm_microbe_humhol_saturation
     write(iulog,*) '    use_clm_microbe_dom_relaxation = ', &
          use_clm_microbe_dom_relaxation
+    write(iulog,*) '    use_microbe_observed_dom_calibration = ', &
+         use_microbe_observed_dom_calibration
     write(iulog,*) '    use_microbe_aqueous_transport = ', &
          use_microbe_aqueous_transport
+    write(iulog,*) '    use_microbe_dom_preferential_flow = ', &
+         use_microbe_dom_preferential_flow
+    write(iulog,*) '    use_microbe_zwt_macrodispersion = ', &
+         use_microbe_zwt_macrodispersion
     write(iulog,*) '    use_vertsoilc = ', use_vertsoilc
     write(iulog,*) '    use_var_soil_thick = ', use_var_soil_thick
     write(iulog,*) '    use_lake_wat_storage = ', use_lake_wat_storage

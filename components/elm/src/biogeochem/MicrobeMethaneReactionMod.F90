@@ -141,7 +141,8 @@ contains
     rates%dom_to_acetate_c = mmolCPerDayToMolCPerSecond((2._r8 / 3._r8) * &
          parameters%acetate_prod_max * monod(dom_mmol_c, parameters%k_acetate) * &
          microbeMethaneQ10Response(parameters%dom_to_acetate_q10, environment%soil_temperature, &
-         parameters%reaction_t_ref) * rates%ph_response * acetate_feedback * dom_scalar)
+         parameters%reaction_t_ref) * rates%ph_response * acetate_feedback * &
+         dom_scalar)
 
     rates%acetogenesis_c = mmolCPerDayToMolCPerSecond(parameters%acetogenesis_max * &
          monod(h2_mmol, parameters%k_acetogenesis_h2) * &

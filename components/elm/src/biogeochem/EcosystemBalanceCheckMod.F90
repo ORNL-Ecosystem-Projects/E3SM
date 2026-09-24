@@ -10,7 +10,8 @@ module EcosystemBalanceCheckMod
   use shr_log_mod         , only : errMsg => shr_log_errMsg
   use decompMod           , only : bounds_type
   use abortutils          , only : endrun
-  use elm_varctl          , only : iulog, use_fates, use_fan
+  use elm_varctl          , only : iulog, use_fates, use_fan, &
+       use_microbe_observed_dom_calibration
   use elm_time_manager    , only : get_step_size,get_nstep
   use elm_varpar          , only : crop_prog
   use elm_varpar          , only : nlevdecomp
@@ -349,7 +350,11 @@ contains
          end if
 
          ! check for significant errors
-         if (abs(col_errcb(c)) > balance_check_tolerance) then
+         ! The observed-DOM calibration deliberately restores DOMC/N/P from
+         ! an external observed profile. Retain the diagnosed balance errors,
+         ! but do not abort this explicitly non-conservative test mode.
+         if (abs(col_errcb(c)) > balance_check_tolerance .and. &
+              .not. use_microbe_observed_dom_calibration) then
             err_found = .true.
             err_index = c
          end if
@@ -619,7 +624,8 @@ contains
             ! here is '-' adjustment. It says that the adding to PF decomp n pools was less.
          end if
 
-         if (abs(col_errnb(c)) > balance_check_tolerance) then
+         if (abs(col_errnb(c)) > balance_check_tolerance .and. &
+              .not. use_microbe_observed_dom_calibration) then
             err_found = .true.
             err_index = c
          end if
@@ -859,7 +865,8 @@ contains
          col_errpb(c) = (col_pinputs(c) - col_poutputs(c))*dt - &
               (col_endpb(c) - col_begpb(c))
 
-         if (abs(col_errpb(c)) > balance_check_tolerance) then
+         if (abs(col_errpb(c)) > balance_check_tolerance .and. &
+              .not. use_microbe_observed_dom_calibration) then
             err_found = .true.
             err_index = c
          end if
@@ -1162,7 +1169,8 @@ contains
 
          grc_errcb(g) = (grc_cinputs(g) - grc_coutputs(g))*dt - (end_totc(g) - beg_totc(g))
 
-         if (abs(grc_errcb(g)) > balance_check_tolerance .and. nstep > 1) then
+         if (abs(grc_errcb(g)) > balance_check_tolerance .and. nstep > 1 .and. &
+              .not. use_microbe_observed_dom_calibration) then
             write(iulog,*)'grid cbalance error = ', grc_errcb(g), g
             write(iulog,*)'Latdeg,Londeg       = ', grc_pp%latdeg(g), grc_pp%londeg(g)
             write(iulog,*)'input               = ', grc_cinputs(g)*dt
@@ -1320,7 +1328,8 @@ contains
          errcb_grc(g) = (grc_cinputs(g) - grc_coutputs(g))*dt - (endcb_grc(g) - begcb_grc(g))
 
          ! check for significant errors
-         if (abs(errcb_grc(g)) > balance_check_tolerance) then
+         if (abs(errcb_grc(g)) > balance_check_tolerance .and. &
+              .not. use_microbe_observed_dom_calibration) then
             err_found = .true.
             err_index = g
          end if
@@ -1405,7 +1414,8 @@ contains
          errnb_grc(g) = (grc_ninputs(g) - grc_noutputs(g))*dt - (endnb_grc(g) - begnb_grc(g))
 
          ! check for significant errors
-         if (abs(errnb_grc(g)) > balance_check_tolerance) then
+         if (abs(errnb_grc(g)) > balance_check_tolerance .and. &
+              .not. use_microbe_observed_dom_calibration) then
             err_found = .true.
             err_index = g
          end if
@@ -1496,7 +1506,8 @@ contains
          errpb_grc(g) = (grc_pinputs(g) - grc_poutputs(g))*dt - (endpb_grc(g) - begpb_grc(g))
 
          ! check for significant errors
-         if (abs(errpb_grc(g)) > balance_check_tolerance) then
+         if (abs(errpb_grc(g)) > balance_check_tolerance .and. &
+              .not. use_microbe_observed_dom_calibration) then
             err_found = .true.
             err_index = g
          end if

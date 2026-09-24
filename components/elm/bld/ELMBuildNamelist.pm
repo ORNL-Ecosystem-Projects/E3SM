@@ -2086,6 +2086,7 @@ sub process_namelist_inline_logic {
   ###############################
   # namelist group: ch4par_in   #
   ###############################
+  setup_logic_peatland_microbe_defaults($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
   setup_logic_microbe_methane($nl);
   setup_logic_methane($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
   setup_logic_c_isotope($nl_flags, $definition, $defaults, $nl);
@@ -3014,6 +3015,36 @@ sub setup_logic_hydrology_switches {
 
 #-------------------------------------------------------------------------------
 
+sub setup_logic_peatland_microbe_defaults {
+  my ($test_files, $nl_flags, $definition, $defaults, $nl) = @_;
+
+  # Apply the calibrated production defaults only to revised microbial-methane
+  # HUMHOL cases. Explicit user settings always take precedence, and ordinary
+  # peatland cases without the microbial module remain unchanged.
+  return unless value_is_true($nl->get_value('use_humhol'));
+  return unless value_is_true($nl->get_value('use_microbe_methane'));
+
+  my %peatland_microbe_defaults = (
+    'use_legacy_ch4_with_microbe'             => '.false.',
+    'use_microbe_aqueous_transport'           => '.true.',
+    'use_microbe_dom_preferential_flow'       => '.false.',
+    'use_microbe_zwt_macrodispersion'          => '.true.',
+    'use_clm_microbe_dom_relaxation'           => '.false.',
+    'use_microbe_observed_dom_calibration'     => '.false.',
+    'use_clm_microbe_humhol_saturation'        => '.false.',
+    'use_microbe_nonbog_lateral_gas_transport' => '.false.',
+  );
+
+  foreach my $var (keys %peatland_microbe_defaults) {
+    if ( ! defined($nl->get_value($var)) ) {
+      add_default($test_files, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl,
+                  $var, 'val'=>$peatland_microbe_defaults{$var});
+    }
+  }
+}
+
+#-------------------------------------------------------------------------------
+
 sub setup_logic_microbe_methane {
   #
   # Validate the configuration envelope for microbial decomposition and the
@@ -3036,9 +3067,21 @@ sub setup_logic_microbe_methane {
       !value_is_true($nl->get_value('use_microbe_methane'))) {
     fatal_error("use_clm_microbe_dom_relaxation=.true. requires use_microbe_methane=.true.\n");
   }
+  if (value_is_true($nl->get_value('use_microbe_observed_dom_calibration')) &&
+      !value_is_true($nl->get_value('use_microbe_methane'))) {
+    fatal_error("use_microbe_observed_dom_calibration=.true. requires use_microbe_methane=.true.\n");
+  }
   if (value_is_true($nl->get_value('use_microbe_aqueous_transport')) &&
       !value_is_true($nl->get_value('use_microbe_methane'))) {
     fatal_error("use_microbe_aqueous_transport=.true. requires use_microbe_methane=.true.\n");
+  }
+  if (value_is_true($nl->get_value('use_microbe_dom_preferential_flow')) &&
+      !value_is_true($nl->get_value('use_microbe_aqueous_transport'))) {
+    fatal_error("use_microbe_dom_preferential_flow=.true. requires use_microbe_aqueous_transport=.true.\n");
+  }
+  if (value_is_true($nl->get_value('use_microbe_zwt_macrodispersion')) &&
+      !value_is_true($nl->get_value('use_microbe_aqueous_transport'))) {
+    fatal_error("use_microbe_zwt_macrodispersion=.true. requires use_microbe_aqueous_transport=.true.\n");
   }
   if (value_is_true($nl->get_value('use_legacy_ch4_with_microbe')) &&
       !value_is_true($nl->get_value('use_microbe_methane'))) {
@@ -3051,7 +3094,10 @@ sub setup_logic_microbe_methane {
       (value_is_true($nl->get_value('use_elm_microbe_methane_transport')) ||
        value_is_true($nl->get_value('use_clm_microbe_humhol_saturation')) ||
        value_is_true($nl->get_value('use_clm_microbe_dom_relaxation')) ||
-       value_is_true($nl->get_value('use_microbe_aqueous_transport')))) {
+       value_is_true($nl->get_value('use_microbe_observed_dom_calibration')) ||
+       value_is_true($nl->get_value('use_microbe_aqueous_transport')) ||
+       value_is_true($nl->get_value('use_microbe_dom_preferential_flow')) ||
+       value_is_true($nl->get_value('use_microbe_zwt_macrodispersion')))) {
     fatal_error("use_legacy_ch4_with_microbe=.true. cannot be combined with revised-methane or revised-solute transport options.\n");
   }
 

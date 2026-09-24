@@ -25,7 +25,12 @@ def parameter_map(document: dict[str, Any]) -> dict[str, tuple[Any, ...]]:
     return {entry[0]: tuple(entry[1:]) for entry in document["parameters"]}
 
 
-def inject_parameters(input_path: Path, output_path: Path, manifest_path: Path) -> None:
+def inject_parameters(
+    input_path: Path,
+    output_path: Path,
+    manifest_path: Path,
+    preserve_existing: bool = False,
+) -> None:
     try:
         import netCDF4  # type: ignore
     except ImportError as error:
@@ -42,13 +47,17 @@ def inject_parameters(input_path: Path, output_path: Path, manifest_path: Path) 
         if "pft" not in dataset.dimensions:
             raise SystemExit("input parameter file has no pft dimension")
         dimensions = ("allpfts",) if "allpfts" in dataset.dimensions else ()
+        compatible_dimensions = {(), dimensions}
         for name, source_id, value, units, provenance in document["parameters"]:
             if name in dataset.variables:
                 variable = dataset.variables[name]
-                if variable.dimensions != dimensions:
+                if variable.dimensions not in compatible_dimensions or variable.size != 1:
                     raise SystemExit(
-                        f"{name} has dimensions {variable.dimensions}, expected {dimensions}"
+                        f"{name} has dimensions {variable.dimensions} and size {variable.size}, "
+                        f"expected a scalar or singleton {dimensions}"
                     )
+                if preserve_existing:
+                    continue
             else:
                 variable = dataset.createVariable(name, "f8", dimensions)
             variable[...] = float(value)
@@ -65,7 +74,11 @@ def inject_parameters(input_path: Path, output_path: Path, manifest_path: Path) 
         dataset.microbe_methane_source_parameter_file = document["source_parameter_file"]
 
 
-def validate_parameter_file(path: Path, manifest_path: Path) -> None:
+def validate_parameter_file(
+    path: Path,
+    manifest_path: Path,
+    allow_nonreference_values: bool = False,
+) -> None:
     try:
         import netCDF4  # type: ignore
     except ImportError as error:
@@ -96,7 +109,15 @@ def validate_parameter_file(path: Path, manifest_path: Path) -> None:
             if values.size != 1:
                 raise SystemExit(f"{name} must contain exactly one scalar value")
             actual = float(values.flat[0])
-            if not math.isclose(actual, float(expected), rel_tol=1.0e-13, abs_tol=0.0):
+            if not math.isfinite(actual):
+                raise SystemExit(f"{name} must contain a finite value")
+            if allow_nonreference_values:
+                continue
+            # Some legacy run parameter files already contain these values as
+            # single-precision scalars.  Assignment cannot retain more than
+            # float32 precision, so validate against the storage precision.
+            rel_tol = 1.0e-6 if variable.dtype.itemsize <= 4 else 1.0e-13
+            if not math.isclose(actual, float(expected), rel_tol=rel_tol, abs_tol=0.0):
                 raise SystemExit(f"{name} is {actual!r}, expected {expected!r}")
             expected_attributes = {
                 "units": units,
@@ -123,16 +144,35 @@ def main() -> None:
     inject.add_argument("--input", type=Path, required=True)
     inject.add_argument("--output", type=Path, required=True)
     inject.add_argument("--manifest", type=Path, default=default_manifest)
+    inject.add_argument(
+        "--preserve-existing",
+        action="store_true",
+        help="add missing manifest parameters without replacing calibrated existing values",
+    )
 
     validate = subparsers.add_parser("validate-parameter-file")
     validate.add_argument("--file", type=Path, required=True)
     validate.add_argument("--manifest", type=Path, default=default_manifest)
+    validate.add_argument(
+        "--allow-nonreference-values",
+        action="store_true",
+        help="validate presence and finiteness while allowing calibrated values",
+    )
 
     arguments = parser.parse_args()
     if arguments.command == "inject-parameters":
-        inject_parameters(arguments.input, arguments.output, arguments.manifest)
+        inject_parameters(
+            arguments.input,
+            arguments.output,
+            arguments.manifest,
+            preserve_existing=arguments.preserve_existing,
+        )
     else:
-        validate_parameter_file(arguments.file, arguments.manifest)
+        validate_parameter_file(
+            arguments.file,
+            arguments.manifest,
+            allow_nonreference_values=arguments.allow_nonreference_values,
+        )
 
 
 if __name__ == "__main__":
