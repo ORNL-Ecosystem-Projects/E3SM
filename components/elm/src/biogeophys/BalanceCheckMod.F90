@@ -71,11 +71,13 @@ contains
     ! !LOCAL VARIABLES:
     integer :: c, p, f, j, fc                  ! indices
     real(r8):: h2osoi_vol
+    real(r8):: moss_storage_col(bounds%begc:bounds%endc)
     !-----------------------------------------------------------------------
 
     associate(                                                         &
          zi                     =>    col_pp%zi                                  , & ! Input:  [real(r8) (:,:) ]  interface level below a "z" level (m)
          h2ocan_patch           =>    veg_ws%h2ocan               , & ! Input:  [real(r8) (:)   ]  canopy water (mm H2O) (pft-level)
+         h2o_moss_storage_patch =>    veg_ws%h2o_moss_storage     , & ! Input:  [real(r8) (:)   ]  drainable living-moss water (mm)
          h2osfc                 =>    col_ws%h2osfc                 , & ! Input:  [real(r8) (:)   ]  surface water (mm)
          h2osno                 =>    col_ws%h2osno                 , & ! Input:  [real(r8) (:)   ]  snow water (mm H2O)
          h2osoi_ice             =>    col_ws%h2osoi_ice             , & ! Input:  [real(r8) (:,:) ]  ice lens (kg/m2)
@@ -93,6 +95,9 @@ contains
       call p2c(bounds, num_nolakec, filter_nolakec, &
             h2ocan_patch(bounds%begp:bounds%endp), &
             h2ocan_col(bounds%begc:bounds%endc))
+      call p2c(bounds, num_nolakec, filter_nolakec, &
+            h2o_moss_storage_patch(bounds%begp:bounds%endp), &
+            moss_storage_col(bounds%begc:bounds%endc))
 
       if (use_var_soil_thick) then
 	       do f = 1, num_hydrologyc
@@ -133,6 +138,7 @@ contains
       do f = 1, num_nolakec
          c = filter_nolakec(f)
          begwb(c) = begwb(c) + total_plant_stored_h2o(c)
+         begwb(c) = begwb(c) + moss_storage_col(c)
       end do
 
       do f = 1, num_lakec
@@ -848,6 +854,7 @@ contains
     integer  :: c, p, f, j, fc,g                  ! indices
     real(r8) :: h2osoi_vol
     real(r8) :: h2ocan_col(bounds%begc:bounds%endc)
+    real(r8) :: moss_storage_col(bounds%begc:bounds%endc)
     real(r8) :: begwb_col (bounds%begc:bounds%endc)
     real(r8) :: h2osoi_liq_depth_intg(bounds%begc:bounds%endc)
     real(r8) :: h2osoi_ice_depth_intg(bounds%begc:bounds%endc)
@@ -856,6 +863,7 @@ contains
     associate(                                                                        &
          zi                        =>    col_pp%zi                                  , & ! Input:  [real(r8) (:,:) ]  interface level below a "z" level (m)
          h2ocan_patch              =>    veg_ws%h2ocan               , & ! Input:  [real(r8) (:)   ]  canopy water (mm H2O) (pft-level)
+         h2o_moss_storage_patch    =>    veg_ws%h2o_moss_storage     , & ! Input:  [real(r8) (:)   ]  drainable living-moss water (mm)
          h2osfc                    =>    col_ws%h2osfc                 , & ! Input:  [real(r8) (:)   ]  surface water (mm)
          h2osno                    =>    col_ws%h2osno                 , & ! Input:  [real(r8) (:)   ]  snow water (mm H2O)
          h2osoi_ice                =>    col_ws%h2osoi_ice             , & ! Input:  [real(r8) (:,:) ]  ice lens (kg/m2)
@@ -888,6 +896,9 @@ contains
       call p2c(bounds, num_nolakec, filter_nolakec, &
             h2ocan_patch(bounds%begp:bounds%endp), &
             h2ocan_col(bounds%begc:bounds%endc))
+      call p2c(bounds, num_nolakec, filter_nolakec, &
+            h2o_moss_storage_patch(bounds%begp:bounds%endp), &
+            moss_storage_col(bounds%begc:bounds%endc))
 
       wa_local_col(bounds%begc:bounds%endc) = wa(bounds%begc:bounds%endc)
 
@@ -902,6 +913,7 @@ contains
             begwb_col(c) = h2ocan_col(c) + h2osno(c) + h2osfc(c) + wa(c)
          end if
          begwb_col(c) = begwb_col(c) + total_plant_stored_h2o(c)
+         begwb_col(c) = begwb_col(c) + moss_storage_col(c)
       end do
 
       do j = 1, nlevgrnd

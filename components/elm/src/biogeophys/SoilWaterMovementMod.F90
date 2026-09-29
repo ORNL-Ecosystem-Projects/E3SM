@@ -1507,7 +1507,9 @@ contains
     use elm_varpar       , only : nlevsoi, max_patch_per_col
     use SoilStateType    , only : soilstate_type
     use VegetationType   , only : veg_pp
+    use VegetationPropertiesType, only : veg_vp
     use ColumnType       , only : col_pp
+    use elm_varctl       , only : use_prognostic_moss_water
     !
     ! !ARGUMENTS:
     type(bounds_type)    , intent(in)    :: bounds                          ! bounds
@@ -1559,10 +1561,14 @@ contains
             do j = 1,nlevbed
                if (pi <= col_pp%npfts(c)) then
                   p = col_pp%pfti(c) + pi - 1
-                  if (veg_pp%active(p)) then
+                  if (veg_pp%active(p) .and. .not. &
+                       (use_prognostic_moss_water .and. &
+                        nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1)) then
                      rootr_col(c,j) = rootr_col(c,j) + rootr_patch(p,j) * &
                           qflx_tran_veg_patch(p) * veg_pp%wtcol(p)
                      qflx_rootsoi_frac_patch(p,j) = rootr_patch(p,j) * qflx_tran_veg_patch(p) * veg_pp%wtcol(p)
+                  else if (veg_pp%active(p)) then
+                     qflx_rootsoi_frac_patch(p,j) = 0._r8
                   end if
                end if
             end do
@@ -1571,7 +1577,9 @@ contains
             c = filterc(fc)
             if (pi <= col_pp%npfts(c)) then
                p = col_pp%pfti(c) + pi - 1
-               if (veg_pp%active(p)) then
+               if (veg_pp%active(p) .and. .not. &
+                    (use_prognostic_moss_water .and. &
+                     nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1)) then
                   temp(c) = temp(c) + qflx_tran_veg_patch(p) * veg_pp%wtcol(p)
                end if
             end if
@@ -1585,7 +1593,11 @@ contains
             if (temp(c) /= 0._r8) then
                rootr_col(c,j) = rootr_col(c,j)/temp(c)
             end if
-            qflx_rootsoi_col(c,j) = rootr_col(c,j)*qflx_tran_veg_col(c)
+            if (use_prognostic_moss_water) then
+               qflx_rootsoi_col(c,j) = rootr_col(c,j) * temp(c)
+            else
+               qflx_rootsoi_col(c,j) = rootr_col(c,j) * qflx_tran_veg_col(c)
+            end if
 
          end do
       end do
@@ -1596,12 +1608,16 @@ contains
                c = filterc(fc)
                if (pi <= col_pp%npfts(c)) then
                   p = col_pp%pfti(c) + pi - 1
-                  if (veg_pp%active(p)) then
+                  if (veg_pp%active(p) .and. .not. &
+                       (use_prognostic_moss_water .and. &
+                        nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1)) then
                     if(rootr_col(c,j)==0._r8)then
                       qflx_rootsoi_frac_patch(p,j) = 0._r8
                     else
                       qflx_rootsoi_frac_patch(p,j) = qflx_rootsoi_frac_patch(p,j)/(temp(c)*rootr_col(c,j))
                     endif
+                  else if (veg_pp%active(p)) then
+                    qflx_rootsoi_frac_patch(p,j) = 0._r8
                   end if
                end if
             end do
@@ -1625,8 +1641,9 @@ contains
         use SoilStateType    , only : soilstate_type
         use CanopyStateType  , only : canopystate_type
         use VegetationType   , only : veg_pp
+        use VegetationPropertiesType, only : veg_vp
         use ColumnType       , only : col_pp
-        use elm_varctl       , only : iulog
+        use elm_varctl       , only : iulog, use_prognostic_moss_water
         use PhotosynthesisMod, only : plc, params_inst
         use column_varcon    , only : icol_road_perv
         use shr_infnan_mod   , only : isnan => shr_infnan_isnan
@@ -1684,7 +1701,9 @@ contains
                 do pi = 1,max_patch_per_col
                    if (pi <= col_pp%npfts(c)) then
                       p = col_pp%pfti(c) + pi - 1
-                      if (veg_pp%active(p).and.frac_veg_nosno(p)>0) then
+                      if (veg_pp%active(p).and.frac_veg_nosno(p)>0 .and. .not. &
+                           (use_prognostic_moss_water .and. &
+                            nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1)) then
                          if (veg_pp%wtcol(p) > 0._r8) then
                             temp(c) = temp(c) + k_soil_root(p,j) &
                                   * (smp(c,j) - vegwp(p,4) - grav2)* veg_pp%wtcol(p)

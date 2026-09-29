@@ -14,6 +14,7 @@ module CanopyFluxesMod
   use shr_log_mod           , only : errMsg => shr_log_errMsg
   use abortutils            , only : endrun
   use elm_varctl            , only : iulog, use_cn, use_lch4, use_c13, use_c14, use_fates, use_humhol
+  use elm_varctl            , only : use_prognostic_moss_water
   use elm_varctl            , only : use_hydrstress, use_finetop_rad
   use elm_varpar            , only : nlevgrnd, nlevsno
   use elm_varcon            , only : namep
@@ -41,7 +42,7 @@ module CanopyFluxesMod
   use ColumnType            , only : col_pp
   use ColumnDataType        , only : col_es, col_ef, col_ws
   use VegetationType        , only : veg_pp
-  use VegetationDataType    , only : veg_es, veg_ef, veg_ws, veg_wf
+  use VegetationDataType    , only : veg_es, veg_ef, veg_ws, veg_wf, veg_cs
 
   !!! using elm_instMod messes with the compilation order
   use elm_instMod           , only : alm_fates, soil_water_retention_curve
@@ -99,6 +100,10 @@ contains
     use elm_varcon         , only : denh2o, tfrz, csoilc, tlsai_crit, alpha_aero
     use elm_varcon         , only : isecspday, degpsec
     use pftvarcon          , only : irrigated, slatop, vwc_moss_offset
+    use SharedParamsMod    , only : moss_water_saturated_suction, &
+         moss_water_clapp_hornberger_b, &
+         moss_water_content_min, moss_water_content_max, &
+         moss_carbon_fraction_dry_mass
     use elm_varcon         , only : c14ratio
     use elm_time_manager   , only : get_curr_date
     use shr_const_mod      , only : SHR_CONST_PI
@@ -318,6 +323,9 @@ contains
     real(r8) :: prev_tau(bounds%begp:bounds%endp) ! Previous iteration tau
     real(r8) :: prev_tau_diff(bounds%begp:bounds%endp) ! Previous difference in iteration tau
     real(r8) :: liquid_vol_3, liquid_vol_4, vwc_moss
+    real(r8) :: moss_storage_min, moss_saturation
+    real(r8) :: moss_biomass_kg, moss_water_ratio
+    real(r8) :: moss_water_legacy, moss_evap_before_limit
     integer  :: yr, mon, day, sec
     real(r8) :: slope_rad, deg2rad
     character(len=64) :: event !! timing event
@@ -424,6 +432,8 @@ contains
          rhaf                 => veg_ws%rh_af               , & ! Output: [real(r8) (:)   ]  fractional humidity of canopy air [dimensionless]
          h2o_moss_inter       => veg_ws%h2o_moss_inter      , & ! Output: [real(r8) (:)   ]  internal moss water content
          h2o_moss_wc          => veg_ws%h2o_moss_wc         , & ! Output: [real(r8) (:)   ]  total moss water content
+         h2o_moss_storage     => veg_ws%h2o_moss_storage    , & ! Output: [real(r8) (:)   ]  prognostic moss water store
+         moss_water_potential => veg_ws%moss_water_potential, & ! Output: [real(r8) (:)   ]  moss matric potential
 
          !pgwgt                => veg_pp%wtgcell              , & ! Input:  [integer  (:)   ]  pft's weight in gridcell
          n_irrig_steps_left   => veg_wf%n_irrig_steps_left   , & ! Output: [integer  (:)   ]  number of time steps for which we still need to irrigate today
@@ -900,9 +910,34 @@ contains
                liquid_vol_4 = h2osoi_liq(c,4) / (denh2o * col_pp%dz(c,4))
                vwc_moss = max(0._r8, min(0.25_r8, &
                     0.5_r8 * (liquid_vol_3 + liquid_vol_4) - vwc_moss_offset))
-               h2o_moss_inter(p) = -18032._r8 * vwc_moss**4 + &
+               moss_water_legacy = -18032._r8 * vwc_moss**4 + &
                     7248.1_r8 * vwc_moss**3 - 591.74_r8 * vwc_moss**2 + &
                     6.9031_r8 * vwc_moss + 0.4945_r8
+               if (use_prognostic_moss_water) then
+                  ! Express the conserved water store relative to live moss
+                  ! dry mass, matching the units expected by the historical
+                  ! Sphagnum water-response equation.
+                  moss_storage_min = 0._r8
+                  moss_biomass_kg = max(0._r8, veg_cs%totvegc(p)) * &
+                       1.e-3_r8 / moss_carbon_fraction_dry_mass
+                  if (moss_biomass_kg > 1.e-12_r8) then
+                     moss_water_ratio = max(moss_storage_min, &
+                          h2o_moss_storage(p)) / moss_biomass_kg
+                  else
+                     moss_water_ratio = 0._r8
+                  end if
+                  moss_saturation = (moss_water_ratio - moss_water_content_min) / &
+                       (moss_water_content_max - moss_water_content_min)
+                  moss_saturation = max(1.e-6_r8, min(1._r8, moss_saturation))
+                  h2o_moss_inter(p) = min(moss_water_content_max, &
+                       max(0._r8, moss_water_ratio))
+                  moss_water_potential(p) = -moss_water_saturated_suction * &
+                       moss_saturation**(-moss_water_clapp_hornberger_b)
+               else
+                  h2o_moss_inter(p) = moss_water_legacy
+                  h2o_moss_storage(p) = 0._r8
+                  moss_water_potential(p) = 0._r8
+               end if
                if (elai(p) > 0._r8) then
                   h2o_moss_wc(p) = h2o_moss_inter(p) + h2ocan(p) / &
                        (elai(p) / slatop(veg_pp%itype(p)) * 2._r8 / 1000._r8)
@@ -1157,6 +1192,19 @@ contains
               end if
               ecidif = max(0._r8, qflx_evap_veg(p)-qflx_tran_veg(p)-h2ocan(p)/dtime)
               qflx_evap_veg(p) = min(qflx_evap_veg(p),qflx_tran_veg(p)+h2ocan(p)/dtime)
+            end if
+
+            if (use_prognostic_moss_water .and. use_humhol .and. &
+                 nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+               ! Moss latent loss draws from the conserved living-moss store,
+               ! not directly from the soil root sink.
+               moss_storage_min = 0._r8
+               moss_evap_before_limit = qflx_evap_veg(p)
+               qflx_tran_veg(p) = min(qflx_tran_veg(p), &
+                    max(0._r8, h2o_moss_storage(p) - moss_storage_min) / dtime)
+               qflx_evap_veg(p) = min(qflx_evap_veg(p), &
+                    qflx_tran_veg(p) + h2ocan(p) / dtime)
+               ecidif = ecidif + max(0._r8, moss_evap_before_limit - qflx_evap_veg(p))
             end if
 
             ! The energy loss due to above two limits is added to

@@ -19,6 +19,7 @@ module HydrologyDrainageMod
   use ColumnType        , only : col_pp
   use ColumnDataType    , only : col_ws, col_wf
   use VegetationType    , only : veg_pp
+  use VegetationDataType, only : veg_ws
 
   use elm_instMod   , only : ep_betr
 
@@ -60,6 +61,7 @@ contains
     use elm_varpar       , only : nlevgrnd, nlevurb, nlevsoi
     use SoilHydrologyMod , only : ELMVICMap, Drainage
     use elm_varctl       , only : use_vsfm, use_IM2_hillslope_hydrology, use_humhol
+    use subgridAveMod    , only : p2c
     !
     ! !ARGUMENTS:
     type(bounds_type)        , intent(in)    :: bounds
@@ -83,6 +85,7 @@ contains
     real(r8) :: temp_to_downhill, temp_mass
     real(r8) :: downhill_routing_scale
     real(r8), parameter :: min_full_downhill_receiver_frac = 0.10_r8
+    real(r8) :: moss_storage_col(bounds%begc:bounds%endc)
     integer  :: g,t,l,c,j,fc,tpu_ind, downhill_t              ! indices
     !-----------------------------------------------------------------------
 
@@ -189,6 +192,10 @@ contains
          end if
       end do
 
+      call p2c(bounds, num_nolakec, filter_nolakec, &
+           veg_ws%h2o_moss_storage(bounds%begp:bounds%endp), &
+           moss_storage_col(bounds%begc:bounds%endc))
+
       do j = 1, nlevgrnd
          do fc = 1, num_nolakec
             c = filter_nolakec(fc)
@@ -212,6 +219,7 @@ contains
       do fc = 1, num_nolakec
          c = filter_nolakec(fc)
          endwb(c) = endwb(c) + total_plant_stored_h2o(c)
+         endwb(c) = endwb(c) + moss_storage_col(c)
       end do
 
       ! Prior to summing up wetland/ice hydrology, calculate land ice contributions/sinks

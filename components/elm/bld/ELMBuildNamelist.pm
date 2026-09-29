@@ -2335,9 +2335,19 @@ sub setup_logic_peatland_roots {
     add_default($test_files, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl,
                 'use_moss_capillary_nutrients', 'val'=>$value);
   }
+  if ( ! defined($nl->get_value('use_prognostic_moss_water')) ) {
+    my $use_humhol = $nl->get_value('use_humhol') || '.false.';
+    my $value = ($use_humhol =~ /true/i) ? '.true.' : '.false.';
+    add_default($test_files, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl,
+                'use_prognostic_moss_water', 'val'=>$value);
+  }
   if (value_is_true($nl->get_value('use_moss_capillary_nutrients')) &&
       !value_is_true($nl->get_value('use_peatland_roots'))) {
     fatal_error("use_moss_capillary_nutrients=.true. requires use_peatland_roots=.true.\n");
+  }
+  if (value_is_true($nl->get_value('use_prognostic_moss_water')) &&
+      !value_is_true($nl->get_value('use_humhol'))) {
+    fatal_error("use_prognostic_moss_water=.true. requires use_humhol=.true.\n");
   }
 }
 

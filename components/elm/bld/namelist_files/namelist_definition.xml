@@ -977,6 +977,18 @@ requires use_peatland_roots=.true. It defaults to TRUE when use_humhol is
 enabled; set it explicitly to FALSE to retain ordinary root-only access.
 </entry>
 
+<entry id="use_prognostic_moss_water" type="logical" category="physics"
+       group="elm_inparm" valid_values="" value=".false.">
+Enable a conservative, restartable water store for nonvascular peatland PFTs.
+The store evaporates through the existing moss canopy flux and exchanges water
+with the upper peat according to a Clapp-Hornberger-style matric-potential
+gradient. The moss conductivity exponent is independently parameterized to
+represent persistent film and hyaline-cell connectivity. This option requires
+use_humhol and defaults to TRUE when use_humhol is enabled. Set it explicitly
+to FALSE to retain the historical diagnostic mapping from layers 3--4 liquid
+volumetric water content to moss water content.
+</entry>
+
 <entry id="use_peatland_vertical_transport" type="logical" category="physics"
        group="elm_inparm" valid_values="" value=".false.">
 If TRUE, peat-bearing topounits use peat-specific vertical transport

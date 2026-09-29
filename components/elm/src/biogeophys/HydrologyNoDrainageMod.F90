@@ -8,6 +8,7 @@ Module HydrologyNoDrainageMod
   use shr_log_mod       , only : errMsg => shr_log_errMsg
   use decompMod         , only : bounds_type
   use elm_varctl        , only : iulog, use_vichydro, use_extrasnowlayers, use_firn_percolation_and_compaction
+  use elm_varctl        , only : use_prognostic_moss_water
   use elm_varcon        , only : denh2o, denice, rpi, spval
   use atm2lndType       , only : atm2lnd_type
   use ocn2lndType       , only : ocn2lnd_type
@@ -21,6 +22,8 @@ Module HydrologyNoDrainageMod
   use ColumnType        , only : col_pp
   use ColumnDataType    , only : col_es, col_ws, col_wf
   use VegetationType    , only : veg_pp
+  use VegetationPropertiesType, only : veg_vp
+  use VegetationDataType, only : veg_ws, veg_wf, veg_cs
   use TopounitDataType  , only : top_as, top_af ! Atmospheric state and flux variables
   use elm_instMod       , only : alm_fates , ep_betr
 
@@ -210,6 +213,11 @@ contains
       !------------------------------------------------------------------------------------
       end if
       !------------------------------------------------------------------------------------
+
+      if (use_prognostic_moss_water) then
+         call MossWaterExchange(bounds, num_hydrologyc, filter_hydrologyc, &
+              soilstate_vars, dtime)
+      end if
 
       !!TODO:  need to fix the waterstate_vars dependence here.
 #ifndef _OPENACC
@@ -627,5 +635,149 @@ contains
     end subroutine eval_tsl_moist_tend
  
   end subroutine HydrologyNoDrainage
+
+  !-----------------------------------------------------------------------
+  subroutine MossWaterExchange(bounds, num_hydrologyc, filter_hydrologyc, &
+       soilstate_vars, dtime)
+    ! Conservative operator-split exchange between the living-moss water
+    ! store and the upper peat. Positive flux is from soil to moss.
+    use elm_varctl       , only : use_prognostic_moss_water
+    use SharedParamsMod  , only : moss_water_layer_thickness, &
+         moss_water_saturated_suction, moss_water_clapp_hornberger_b, &
+         moss_water_hydraulic_conductivity_sat, &
+         moss_water_conductivity_exponent, moss_water_content_min, &
+         moss_water_content_max, moss_water_drainage_threshold, &
+         moss_carbon_fraction_dry_mass
+    type(bounds_type)    , intent(in)    :: bounds
+    integer              , intent(in)    :: num_hydrologyc
+    integer              , intent(in)    :: filter_hydrologyc(:)
+    type(soilstate_type) , intent(inout) :: soilstate_vars
+    real(r8)             , intent(in)    :: dtime
+    integer :: c, p, pi, fc
+    real(r8) :: store_min, store_max, se, psi_moss, kmoss, ksoil
+    real(r8) :: moss_biomass_kg, moss_water_ratio
+    real(r8) :: resistance, head_soil, head_moss, qdesired
+    real(r8) :: qcol(bounds%begc:bounds%endc)
+    real(r8) :: qscale(bounds%begc:bounds%endc)
+    real(r8) :: donor_water, receiver_space
+
+    if (.not. use_prognostic_moss_water) return
+
+    store_min = 0._r8
+    qcol(:) = 0._r8
+    qscale(:) = 1._r8
+    veg_wf%qflx_moss_soil(bounds%begp:bounds%endp) = 0._r8
+
+    ! Atmospheric loss computed by CanopyFluxes is withdrawn from the moss
+    ! store here. The same flux remains in qflx_evap_tot for water balance.
+    do p = bounds%begp, bounds%endp
+       if (veg_pp%active(p) .and. &
+            nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+          veg_ws%h2o_moss_storage(p) = max(store_min, &
+               veg_ws%h2o_moss_storage(p) - &
+               max(0._r8, veg_wf%qflx_tran_veg(p)) * dtime)
+       end if
+    end do
+
+    ! Form the potential-gradient flux for every moss patch, then aggregate
+    ! to the column so the soil donor/receiver limit is applied once.
+    do fc = 1, num_hydrologyc
+       c = filter_hydrologyc(fc)
+       do pi = 1, col_pp%npfts(c)
+          p = col_pp%pfti(c) + pi - 1
+          if (veg_pp%active(p) .and. &
+               nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+             moss_biomass_kg = max(0._r8, veg_cs%totvegc(p)) * &
+                  1.e-3_r8 / moss_carbon_fraction_dry_mass
+             store_max = moss_biomass_kg * moss_water_drainage_threshold
+             if (moss_biomass_kg > 1.e-12_r8) then
+                moss_water_ratio = veg_ws%h2o_moss_storage(p) / moss_biomass_kg
+             else
+                moss_water_ratio = 0._r8
+             end if
+             se = (moss_water_ratio - moss_water_content_min) / &
+                  (moss_water_content_max - moss_water_content_min)
+             se = max(1.e-6_r8, min(1._r8, se))
+             psi_moss = -moss_water_saturated_suction * &
+                  se**(-moss_water_clapp_hornberger_b)
+             kmoss = moss_water_hydraulic_conductivity_sat * &
+                  se**moss_water_conductivity_exponent
+             ksoil = max(0._r8, soilstate_vars%hk_l_col(c,1))
+
+             if (kmoss > 0._r8 .and. ksoil > 0._r8 .and. &
+                  ksoil < 1.e20_r8) then
+                resistance = 0.5_r8 * moss_water_layer_thickness * 1000._r8 / kmoss + &
+                     max(1._r8, col_pp%z(c,1) * 1000._r8) / ksoil
+                head_soil = soilstate_vars%smp_l_col(c,1) - &
+                     col_pp%z(c,1) * 1000._r8
+                head_moss = psi_moss + 0.5_r8 * &
+                     moss_water_layer_thickness * 1000._r8
+                qdesired = (head_soil - head_moss) / resistance
+             else
+                qdesired = 0._r8
+             end if
+
+             if (veg_ws%h2o_moss_storage(p) > store_max) then
+                ! Living Sphagnum holds internal water against a downward
+                ! matric-potential gradient. Only water above the structural
+                ! holding capacity drains back into the upper peat.
+                qdesired = -(veg_ws%h2o_moss_storage(p) - store_max) / dtime
+             else
+                ! Below capacity, permit capillary recharge from soil but no
+                ! reverse exchange from the moss structural water store.
+                qdesired = max(0._r8, qdesired)
+                qdesired = min(qdesired, &
+                     (store_max - veg_ws%h2o_moss_storage(p)) / dtime)
+             end if
+             veg_wf%qflx_moss_soil(p) = qdesired
+             qcol(c) = qcol(c) + qdesired * veg_pp%wtcol(p)
+          end if
+       end do
+    end do
+
+    do fc = 1, num_hydrologyc
+       c = filter_hydrologyc(fc)
+       if (qcol(c) > 0._r8) then
+          donor_water = max(0._r8, col_ws%h2osoi_liq(c,1) - 0.01_r8)
+          qscale(c) = min(1._r8, donor_water / (qcol(c) * dtime))
+       else if (qcol(c) < 0._r8) then
+          receiver_space = max(0._r8, &
+               soilstate_vars%watsat_col(c,1) * col_pp%dz(c,1) * denh2o - &
+               col_ws%h2osoi_ice(c,1) - col_ws%h2osoi_liq(c,1))
+          qscale(c) = min(1._r8, receiver_space / (-qcol(c) * dtime))
+       end if
+       col_ws%h2osoi_liq(c,1) = col_ws%h2osoi_liq(c,1) - &
+            qcol(c) * qscale(c) * dtime
+    end do
+
+    do fc = 1, num_hydrologyc
+       c = filter_hydrologyc(fc)
+       do pi = 1, col_pp%npfts(c)
+          p = col_pp%pfti(c) + pi - 1
+          if (veg_pp%active(p) .and. &
+               nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+             veg_wf%qflx_moss_soil(p) = veg_wf%qflx_moss_soil(p) * qscale(c)
+             ! Do not truncate an over-capacity store when the receiving soil
+             ! is temporarily full: retain that water and retry its return on
+             ! the next step, preserving the column water budget.
+             veg_ws%h2o_moss_storage(p) = max(store_min, &
+                  veg_ws%h2o_moss_storage(p) + &
+                  veg_wf%qflx_moss_soil(p) * dtime)
+             moss_biomass_kg = max(0._r8, veg_cs%totvegc(p)) * &
+                  1.e-3_r8 / moss_carbon_fraction_dry_mass
+             if (moss_biomass_kg > 1.e-12_r8) then
+                moss_water_ratio = veg_ws%h2o_moss_storage(p) / moss_biomass_kg
+             else
+                moss_water_ratio = 0._r8
+             end if
+             se = (moss_water_ratio - moss_water_content_min) / &
+                  (moss_water_content_max - moss_water_content_min)
+             se = max(1.e-6_r8, min(1._r8, se))
+             veg_ws%moss_water_potential(p) = -moss_water_saturated_suction * &
+                  se**(-moss_water_clapp_hornberger_b)
+          end if
+       end do
+    end do
+  end subroutine MossWaterExchange
 
 end Module HydrologyNoDrainageMod

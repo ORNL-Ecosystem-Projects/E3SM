@@ -41,7 +41,7 @@ module elm_initializeMod
   use ColumnType             , only : col_pp
   use ColumnDataType         , only : col_es
   use VegetationType         , only : veg_pp
-  use VegetationDataType     , only : veg_es
+  use VegetationDataType     , only : veg_es, InitializePrognosticMossWater
 
   use elm_instMod
   use WaterBudgetMod         , only : WaterBudget_Reset
@@ -979,6 +979,12 @@ contains
     if(use_betr)then
       call ep_betr%set_active(bounds_proc, col_pp)
     endif
+
+    ! Carbon states are now final for cold starts, finidat, and interpolated
+    ! initial conditions. Initialize only a missing prognostic moss-water
+    ! state so its mass is consistent with the live moss biomass.
+    call InitializePrognosticMossWater(bounds_proc)
+
     ! ------------------------------------------------------------------------
     ! Initialize nitrogen deposition
     ! ------------------------------------------------------------------------

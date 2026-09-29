@@ -123,6 +123,7 @@ attributes from the config_cache.xml file (with keys converted to upper-case).
 <!-- Use standard roots unless peatland physics is enabled -->
 <use_peatland_roots>.false.</use_peatland_roots>
 <use_moss_capillary_nutrients>.false.</use_moss_capillary_nutrients>
+<use_prognostic_moss_water>.false.</use_prognostic_moss_water>
 <use_peatland_vertical_transport>.false.</use_peatland_vertical_transport>
 <use_peatland_compaction_profile>.false.</use_peatland_compaction_profile>
 
