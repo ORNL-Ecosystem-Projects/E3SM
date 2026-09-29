@@ -48,6 +48,10 @@ module MicrobeMethaneMod
      ! Diagnostic shared-O2 limiter before ELM's 0.2 decomposition floor.
      real(r8), pointer :: o2_stress_unsat_col(:,:) => null()
      real(r8), pointer :: o2_stress_sat_col(:,:) => null()
+     real(r8), pointer :: o2_stress_above_wt_col(:,:) => null()
+     real(r8), pointer :: o2_stress_below_wt_col(:,:) => null()
+     ! Geometric layer fraction below ZWT within the non-inundated area.
+     real(r8), pointer :: unsat_wt_saturated_fraction_col(:,:) => null()
 
      ! Future conservative partition remapping uses this prior-step fraction.
      real(r8), pointer :: sat_fraction_previous_col(:) => null()
@@ -209,6 +213,12 @@ contains
     allocate(this%conc_h2_sat_col(begc:endc,1:nlevdecomp_full)); this%conc_h2_sat_col = nan
     allocate(this%o2_stress_unsat_col(begc:endc,1:nlevdecomp_full)); this%o2_stress_unsat_col = nan
     allocate(this%o2_stress_sat_col(begc:endc,1:nlevdecomp_full)); this%o2_stress_sat_col = nan
+    allocate(this%o2_stress_above_wt_col(begc:endc,1:nlevdecomp_full)); &
+         this%o2_stress_above_wt_col = nan
+    allocate(this%o2_stress_below_wt_col(begc:endc,1:nlevdecomp_full)); &
+         this%o2_stress_below_wt_col = nan
+    allocate(this%unsat_wt_saturated_fraction_col(begc:endc,1:nlevdecomp_full)); &
+         this%unsat_wt_saturated_fraction_col = nan
     allocate(this%sat_fraction_previous_col(begc:endc)); this%sat_fraction_previous_col = nan
     allocate(this%additional_carbon_col(begc:endc)); this%additional_carbon_col = nan
     allocate(this%surface_carbon_flux_col(begc:endc)); this%surface_carbon_flux_col = nan
@@ -389,6 +399,9 @@ contains
     this%conc_h2_sat_col = 0._r8
     this%o2_stress_unsat_col = 0._r8
     this%o2_stress_sat_col = 0._r8
+    this%o2_stress_above_wt_col = 0._r8
+    this%o2_stress_below_wt_col = 0._r8
+    this%unsat_wt_saturated_fraction_col = 0._r8
     this%sat_fraction_previous_col = 0._r8
     this%additional_carbon_col = 0._r8
     this%surface_carbon_flux_col = 0._r8
@@ -492,6 +505,9 @@ contains
           this%conc_h2_sat_col(c,1:nlevdecomp) = 0._r8
           this%o2_stress_unsat_col(c,1:nlevdecomp) = 0._r8
           this%o2_stress_sat_col(c,1:nlevdecomp) = 0._r8
+          this%o2_stress_above_wt_col(c,1:nlevdecomp) = 0._r8
+          this%o2_stress_below_wt_col(c,1:nlevdecomp) = 0._r8
+          this%unsat_wt_saturated_fraction_col(c,1:nlevdecomp) = 0._r8
           this%additional_carbon_col(c) = 0._r8
           this%surface_carbon_flux_col(c) = 0._r8
           this%lateral_carbon_flux_col(c) = 0._r8
@@ -566,12 +582,24 @@ contains
          'bulk-soil hydrogen inventory density in saturated subarea', this%conc_h2_sat_col)
     call hist_addfld_decomp(fname='MM_O2_STRESS_UNSAT', units='1', type2d='levdcmp', &
          avgflag='A', &
-         long_name='raw shared oxygen stress in unsaturated subarea before decomposition floor', &
+         long_name='water-table-weighted oxygen stress in non-inundated subarea before decomposition floor', &
          ptr_col=this%o2_stress_unsat_col, default='inactive')
     call hist_addfld_decomp(fname='MM_O2_STRESS_SAT', units='1', type2d='levdcmp', &
          avgflag='A', &
          long_name='raw shared oxygen stress in saturated subarea before decomposition floor', &
          ptr_col=this%o2_stress_sat_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_O2_STRESS_ABOVE_WT', units='1', type2d='levdcmp', &
+         avgflag='A', &
+         long_name='endpoint oxygen stress using above-water-table reaction environment', &
+         ptr_col=this%o2_stress_above_wt_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_O2_STRESS_BELOW_WT', units='1', type2d='levdcmp', &
+         avgflag='A', &
+         long_name='endpoint oxygen stress using below-water-table reaction environment', &
+         ptr_col=this%o2_stress_below_wt_col, default='inactive')
+    call hist_addfld_decomp(fname='MM_UNSAT_WT_SAT_FRAC', units='1', type2d='levdcmp', &
+         avgflag='A', &
+         long_name='fraction of layer below ZWT within revised-methane non-inundated area', &
+         ptr_col=this%unsat_wt_saturated_fraction_col, default='inactive')
     call hist_addfld1d(fname='MM_ADDITIONAL_C', units='gC/m^2', avgflag='A', &
          long_name='revised methane carbon storage excluding authoritative DOM', &
          ptr_col=this%additional_carbon_col, default='inactive')
@@ -1024,6 +1052,8 @@ contains
     real(r8) :: partial_pressure(microbe_gas_count)
     real(r8) :: liquid_saturation, thawed_fraction, moisture_scalar
     real(r8) :: saturation_scalar, fraction, old_fraction, depth_scale
+    real(r8) :: plant_transport_activity
+    real(r8) :: unsaturated_area_saturated_fraction
     real(r8) :: bulk_surface_flux(microbe_gas_count)
     real(r8) :: saturated_surface_diffusive_flux(microbe_gas_count)
     real(r8) :: saturated_surface_aerenchyma_flux(microbe_gas_count)
@@ -1175,6 +1205,20 @@ contains
     do fc = 1, num_soilc
        c = filter_soilc(fc)
        g = col_pp%gridcell(c)
+       ! Preserve the original CLM-Microbe seasonal/productivity limitation
+       ! on plant-mediated gas transport.  Instantaneous root respiration is
+       ! used as a proxy for active root/plant conductance and is normalized
+       ! by the column annual NPP accumulator.  Without this factor, every
+       ! thawed root in the column acts as a full-strength atmospheric O2
+       ! conduit, including during dormant periods.
+       plant_transport_activity = 0._r8
+       if (ieee_is_finite(col_cf%rr(c)) .and. &
+            ieee_is_finite(col_cf%annsum_npp(c)) .and. &
+            col_cf%annsum_npp(c) > 0._r8) then
+          plant_transport_activity = min(1._r8, &
+               max(1.e-9_r8, col_cf%rr(c)) * 1.e6_r8 / &
+               max(col_cf%annsum_npp(c), 0.01_r8))
+       end if
        fraction = clampUnitInterval(max(soilhydrology_vars%fsat_col(c), &
             col_ws%frac_h2osfc(c)))
        if (use_clm_microbe_humhol_saturation) fraction = 0.99_r8
@@ -1296,6 +1340,9 @@ contains
           mineral_p(j) = col_ps%solutionp_vr(c,j)
 
           liquid_saturation = layerLiquidSaturation(c, j)
+          unsaturated_area_saturated_fraction = layerSaturatedThicknessFraction(c, j)
+          this%unsat_wt_saturated_fraction_col(c,j) = &
+               unsaturated_area_saturated_fraction
           thawed_fraction = layerThawedFraction(c, j)
           liquid_fraction(j) = max(0._r8, col_ws%h2osoi_liq(c,j)) / &
                (denh2o * max(layer_thickness(j), tiny(1._r8)))
@@ -1430,7 +1477,8 @@ contains
                unsaturated_environment%elm_aerobic_o2_demand
 
           call advanceMicrobeMethaneReactionLayer(dom_c(j), dom_n(j), dom_p(j), &
-               mineral_n(j), mineral_p(j), fraction, unsaturated_work(j), &
+               mineral_n(j), mineral_p(j), fraction, &
+               unsaturated_area_saturated_fraction, unsaturated_work(j), &
                saturated_work(j), unsaturated_environment, saturated_environment, &
                MicrobeMethaneParamsInst, MicrobeDecompParamsInst%cn_dom, &
                MicrobeDecompParamsInst%cp_dom, dt, reaction(j))
@@ -1453,6 +1501,10 @@ contains
                (reaction(j)%dom_c - dom_c(j)) / dt
           this%o2_stress_unsat_col(c,j) = reaction(j)%unsaturated_rates%oxygen_stress
           this%o2_stress_sat_col(c,j) = reaction(j)%saturated_rates%oxygen_stress
+          this%o2_stress_above_wt_col(c,j) = &
+               reaction(j)%oxygen_stress_above_water_table
+          this%o2_stress_below_wt_col(c,j) = &
+               reaction(j)%oxygen_stress_below_water_table
           dom_c(j) = reaction(j)%dom_c
           dom_n(j) = reaction(j)%dom_n
           dom_p(j) = reaction(j)%dom_p
@@ -1489,7 +1541,7 @@ contains
           ! plant exchange kernel.
           depth_scale = max(layer_depth(j), 0.5_r8 * layer_thickness(j), tiny(1._r8))
           aerenchyma_exchange_rate(j,:) = MicrobeMethaneParamsInst%plant_transport_coefficient * &
-               validRootFraction(root_fraction_col(c,j)) / depth_scale
+               validRootFraction(root_fraction_col(c,j)) * plant_transport_activity / depth_scale
           aerenchyma_exchange_rate(j,microbe_gas_ch4) = &
                aerenchyma_exchange_rate(j,microbe_gas_ch4) * &
                exp(-layer_depth(j) / MicrobeMethaneParamsInst%ch4_h2_root_efold_depth)
@@ -1509,7 +1561,8 @@ contains
           end if
           ch4_ebullition_threshold(j) = &
                1.e-3_r8 * MicrobeMethaneParamsInst%ch4_transport_threshold
-          unsaturated_ebullition_activation(j) = thawed_fraction * liquid_saturation * &
+          unsaturated_ebullition_activation(j) = thawed_fraction * &
+               unsaturated_area_saturated_fraction * &
                exp(-layer_depth(j) / MicrobeMethaneParamsInst%ebullition_efold_depth)
           saturated_ebullition_activation(j) = thawed_fraction * &
                exp(-layer_depth(j) / MicrobeMethaneParamsInst%ebullition_efold_depth)
@@ -2274,15 +2327,24 @@ contains
       type(microbe_methane_reaction_state_type), intent(in) :: unsaturated(nlevdecomp)
       type(microbe_methane_reaction_state_type), intent(in) :: saturated(nlevdecomp)
       type(microbe_methane_reaction_transaction_type), intent(in) :: reactions(nlevdecomp)
-      real(r8) :: potential_demand, stress_unsaturated, stress_saturated
+      real(r8) :: potential_demand, stress_above_water_table, stress_unsaturated
+      real(r8) :: stress_saturated, water_table_fraction
       integer :: layer
 
       ch4_vars%finundated_col(column) = saturated_fraction
       do layer = 1, nlevdecomp
          potential_demand = elmAerobicOxygenDemand(column, layer, &
               root_respiration_col_vr(column,layer))
-         stress_unsaturated = reactions(layer)%unsaturated_rates%oxygen_stress
+         water_table_fraction = layerSaturatedThicknessFraction(column, layer)
+         stress_above_water_table = reactions(layer)%unsaturated_rates%oxygen_stress
          stress_saturated = reactions(layer)%saturated_rates%oxygen_stress
+         ! finundated describes horizontal surface inundation, whereas ZWT
+         ! partitions the remaining area vertically.  CH4Mod retained both
+         ! dimensions through jwt.  Preserve that distinction here so the
+         ! compatibility O_SCALAR seen by decomposition and nitrification is
+         ! not treated as fully aerated below the connected water table.
+         stress_unsaturated = (1._r8 - water_table_fraction) * &
+              stress_above_water_table + water_table_fraction * stress_saturated
 
          ! The conservative reaction/transport transactions permit roundoff
          ! down to -state_tolerance. NitrifDenitrifMod subsequently raises
@@ -2290,8 +2352,9 @@ contains
          ! even a tiny negative value is undefined. Publish the physical
          ! nonnegative concentration without altering the transaction state
          ! or its mass-balance accounting.
-         ch4_vars%conc_o2_unsat_col(column,layer) = &
-              max(0._r8, unsaturated(layer)%conc_o2)
+         ch4_vars%conc_o2_unsat_col(column,layer) = max(0._r8, &
+              (1._r8 - water_table_fraction) * unsaturated(layer)%conc_o2 + &
+              water_table_fraction * saturated(layer)%conc_o2)
          ch4_vars%conc_o2_sat_col(column,layer) = &
               max(0._r8, saturated(layer)%conc_o2)
          ch4_vars%o2stress_unsat_col(column,layer) = stress_unsaturated
@@ -2300,6 +2363,7 @@ contains
               potential_demand * stress_unsaturated
          ch4_vars%o2_decomp_depth_sat_col(column,layer) = &
               potential_demand * stress_saturated
+         this%o2_stress_unsat_col(column,layer) = stress_unsaturated
       end do
     end subroutine syncLegacyOxygenBridge
 
@@ -2491,8 +2555,9 @@ contains
       real(r8) :: porosity, water_filled_fraction, liquid_fraction
       real(r8) :: air_fraction, relative_air_fraction, thawed_fraction
       real(r8) :: henry_solubility, organic_fraction, soil_structure_factor
-      real(r8) :: aqueous_diffusivity
-      logical :: aqueous_layer
+      real(r8) :: aqueous_diffusivity, water_table_fraction
+      real(r8) :: dry_capacity, dry_diffusivity
+      real(r8) :: wet_capacity, wet_diffusivity, wet_fraction
 
       if (.not. use_elm_microbe_methane_transport) then
          ! Reproduce the active CLM-Microbe Fickian coefficient and its
@@ -2513,10 +2578,16 @@ contains
       air_fraction = max(0._r8, porosity - water_filled_fraction)
       henry_solubility = henryDimensionlessSolubility( &
            col_es%t_soisno(column,layer), gas_index)
-      aqueous_layer = saturated_partition .or. water_filled_fraction >= &
-           CH4ParamsInst%f_sat * porosity
+      water_table_fraction = layerSaturatedThicknessFraction(column, layer)
 
-      if (.not. aqueous_layer .and. air_fraction > 0._r8) then
+      ! First form the two physical endpoint properties. The dry endpoint
+      ! retains the diagnosed air- and water-filled pore volumes; the wet
+      ! endpoint fills the thawed pore volume with water. A layer intersected
+      ! by ZWT carries these pathways in parallel, so both storage capacity
+      ! and vertical conductance are area weighted by the submerged thickness
+      ! fraction. Do not switch the entire layer to aqueous transport merely
+      ! because its bottom edge touches the water table.
+      if (air_fraction > 0._r8) then
          relative_air_fraction = clampUnitInterval(air_fraction / porosity)
          if (ParamsShareInst%organic_max > 0._r8) then
             organic_fraction = clampUnitInterval( &
@@ -2529,21 +2600,35 @@ contains
               (1._r8 - organic_fraction) * air_fraction**2 * &
               relative_air_fraction**(3._r8 / &
               max(soilstate_vars%bsw_col(column,layer), tiny(1._r8)))
-         capacity = air_fraction + liquid_fraction * henry_solubility
-         transport_diffusivity = referenceGasDiffusivity(gas_index, &
+         dry_capacity = air_fraction + liquid_fraction * henry_solubility
+         dry_diffusivity = referenceGasDiffusivity(gas_index, &
               col_es%t_soisno(column,layer)) * soil_structure_factor * &
               CH4ParamsInst%scale_factor_gasdiff
       else
-         ! The saturated subarea and layers below the unsaturated-subarea
-         ! water table carry gas in liquid-filled pore space.
-         liquid_fraction = porosity * thawed_fraction
-         capacity = liquid_fraction * henry_solubility
+         dry_capacity = liquid_fraction * henry_solubility
          aqueous_diffusivity = microbeMethaneEffectiveAqueousDiffusivity( &
               referenceAqueousDiffusivity(gas_index), col_es%t_soisno(column,layer), &
               porosity**CH4ParamsInst%satpow * thawed_fraction, &
               MicrobeMethaneParamsInst) * CH4ParamsInst%scale_factor_liqdiff
-         transport_diffusivity = aqueous_diffusivity * henry_solubility
+         dry_diffusivity = aqueous_diffusivity * henry_solubility
       end if
+
+      liquid_fraction = porosity * thawed_fraction
+      wet_capacity = liquid_fraction * henry_solubility
+      aqueous_diffusivity = microbeMethaneEffectiveAqueousDiffusivity( &
+           referenceAqueousDiffusivity(gas_index), col_es%t_soisno(column,layer), &
+           porosity**CH4ParamsInst%satpow * thawed_fraction, &
+           MicrobeMethaneParamsInst) * CH4ParamsInst%scale_factor_liqdiff
+      wet_diffusivity = aqueous_diffusivity * henry_solubility
+
+      if (saturated_partition) then
+         wet_fraction = 1._r8
+      else
+         wet_fraction = clampUnitInterval(water_table_fraction)
+      end if
+      capacity = (1._r8 - wet_fraction) * dry_capacity + wet_fraction * wet_capacity
+      transport_diffusivity = (1._r8 - wet_fraction) * dry_diffusivity + &
+           wet_fraction * wet_diffusivity
 
       capacity = max(capacity, tiny(1._r8))
       transport_diffusivity = max(0._r8, transport_diffusivity)
@@ -2560,6 +2645,7 @@ contains
       real(r8), intent(in) :: bulk_inventory
       real(r8) :: porosity, water_filled_fraction, liquid_fraction
       real(r8) :: air_fraction, thawed_fraction, henry_solubility, capacity
+      real(r8) :: water_table_fraction
 
       value = 0._r8
       if (bulk_inventory <= 0._r8) return
@@ -2569,10 +2655,13 @@ contains
          liquid_fraction = porosity * thawed_fraction
          air_fraction = 0._r8
       else
+         water_table_fraction = layerSaturatedThicknessFraction(column, layer)
          water_filled_fraction = min(porosity, max(0._r8, &
               col_ws%h2osoi_vol(column,layer)))
-         liquid_fraction = water_filled_fraction * thawed_fraction
-         air_fraction = max(0._r8, porosity - water_filled_fraction)
+         liquid_fraction = ((1._r8 - water_table_fraction) * water_filled_fraction + &
+              water_table_fraction * porosity) * thawed_fraction
+         air_fraction = (1._r8 - water_table_fraction) * &
+              max(0._r8, porosity - water_filled_fraction)
       end if
       if (liquid_fraction < &
            MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction) return

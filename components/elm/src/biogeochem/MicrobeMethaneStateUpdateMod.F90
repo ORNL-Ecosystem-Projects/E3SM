@@ -51,6 +51,11 @@ module MicrobeMethaneStateUpdateMod
      real(r8) :: dom_p = 0._r8
      real(r8) :: mineral_n = 0._r8
      real(r8) :: mineral_p = 0._r8
+     ! Preserve the two endpoint stresses used to form the vertically
+     ! water-table-weighted non-inundated rate. These are diagnostics only;
+     ! unsaturated_rates remains the authoritative blended transaction.
+     real(r8) :: oxygen_stress_above_water_table = 1._r8
+     real(r8) :: oxygen_stress_below_water_table = 1._r8
      ! Per-step residuals in g C|N|P m-3. Reactions are a closed transaction.
      real(r8) :: carbon_residual = 0._r8
      real(r8) :: nitrogen_residual = 0._r8
@@ -217,12 +222,14 @@ contains
   end subroutine advanceMicrobeDOMCompleteBypass
 
   pure subroutine advanceMicrobeMethaneReactionLayer(dom_c, dom_n, dom_p, mineral_n, &
-       mineral_p, saturated_fraction, unsaturated_state, saturated_state, &
+       mineral_p, saturated_fraction, unsaturated_area_saturated_fraction, &
+       unsaturated_state, saturated_state, &
        unsaturated_environment, saturated_environment, parameters, cn_dom, cp_dom, &
        dt, transaction)
     real(r8), intent(in) :: dom_c, dom_n, dom_p
     real(r8), intent(in) :: mineral_n, mineral_p
     real(r8), intent(in) :: saturated_fraction
+    real(r8), intent(in) :: unsaturated_area_saturated_fraction
     type(microbe_methane_reaction_state_type), intent(in) :: unsaturated_state
     type(microbe_methane_reaction_state_type), intent(in) :: saturated_state
     type(microbe_methane_reaction_environment_type), intent(in) :: unsaturated_environment
@@ -231,7 +238,9 @@ contains
     real(r8), intent(in) :: cn_dom, cp_dom, dt
     type(microbe_methane_reaction_transaction_type), intent(out) :: transaction
     type(microbe_methane_reaction_state_type) :: unsaturated_work, saturated_work
-    real(r8) :: fraction, available_dom_c, dom_c_tendency
+    type(microbe_methane_reaction_rates_type) :: submerged_unsaturated_rates
+    type(microbe_methane_reaction_tendencies_type) :: submerged_unsaturated_tendencies
+    real(r8) :: fraction, vertical_fraction, available_dom_c, dom_c_tendency
     real(r8) :: initial_carbon, final_carbon
     real(r8) :: initial_nitrogen, final_nitrogen
     real(r8) :: initial_phosphorus, final_phosphorus
@@ -239,6 +248,7 @@ contains
     transaction = microbe_methane_reaction_transaction_type()
     if (dt <= 0._r8 .or. cn_dom <= 0._r8 .or. cp_dom <= 0._r8) return
     fraction = clampUnitInterval(saturated_fraction)
+    vertical_fraction = clampUnitInterval(unsaturated_area_saturated_fraction)
 
     ! DOM is one bulk ELM pool. Restrict the carbon presented to both
     ! partition kernels to the amount carrying the selected DOM N and P.
@@ -258,6 +268,20 @@ contains
     call computeMicrobeMethaneReactionTendencies(unsaturated_work, &
          unsaturated_environment, parameters, dt, transaction%unsaturated_rates, &
          transaction%unsaturated_tendencies)
+    transaction%oxygen_stress_above_water_table = &
+         transaction%unsaturated_rates%oxygen_stress
+    ! The horizontal non-inundated area is not vertically unsaturated. Apply
+    ! saturated reaction conditions to the portion of this layer below the
+    ! diagnosed water table while retaining its separate prognostic state.
+    ! This reproduces CH4Mod's distinction between finundated and jwt without
+    ! conflating the two subgrid dimensions.
+    call computeMicrobeMethaneReactionTendencies(unsaturated_work, &
+         saturated_environment, parameters, dt, submerged_unsaturated_rates, &
+         submerged_unsaturated_tendencies)
+    transaction%oxygen_stress_below_water_table = &
+         submerged_unsaturated_rates%oxygen_stress
+    call blendReactionRates(vertical_fraction, transaction%unsaturated_rates, &
+         submerged_unsaturated_rates)
     call computeMicrobeMethaneReactionTendencies(saturated_work, &
          saturated_environment, parameters, dt, transaction%saturated_rates, &
          transaction%saturated_tendencies)
@@ -319,6 +343,64 @@ contains
          residualIsClosed(transaction%nitrogen_residual, initial_nitrogen, final_nitrogen) .and. &
          residualIsClosed(transaction%phosphorus_residual, initial_phosphorus, final_phosphorus)
   end subroutine advanceMicrobeMethaneReactionLayer
+
+  pure subroutine blendReactionRates(fraction, above_water_table, below_water_table)
+    real(r8), intent(in) :: fraction
+    type(microbe_methane_reaction_rates_type), intent(inout) :: above_water_table
+    type(microbe_methane_reaction_rates_type), intent(in) :: below_water_table
+    real(r8) :: wet
+
+    wet = clampUnitInterval(fraction)
+    above_water_table%dom_to_acetate_c = blend(above_water_table%dom_to_acetate_c, &
+         below_water_table%dom_to_acetate_c)
+    above_water_table%acetogenesis_c = blend(above_water_table%acetogenesis_c, &
+         below_water_table%acetogenesis_c)
+    above_water_table%acetoclastic_methanogenesis_c = &
+         blend(above_water_table%acetoclastic_methanogenesis_c, &
+         below_water_table%acetoclastic_methanogenesis_c)
+    above_water_table%hydrogenotrophic_methanogenesis_c = &
+         blend(above_water_table%hydrogenotrophic_methanogenesis_c, &
+         below_water_table%hydrogenotrophic_methanogenesis_c)
+    above_water_table%aerobic_acetate_oxidation_c = &
+         blend(above_water_table%aerobic_acetate_oxidation_c, &
+         below_water_table%aerobic_acetate_oxidation_c)
+    above_water_table%aerobic_methane_oxidation_c = &
+         blend(above_water_table%aerobic_methane_oxidation_c, &
+         below_water_table%aerobic_methane_oxidation_c)
+    above_water_table%aerobic_methane_oxidation_pre_o2_c = &
+         blend(above_water_table%aerobic_methane_oxidation_pre_o2_c, &
+         below_water_table%aerobic_methane_oxidation_pre_o2_c)
+    above_water_table%anaerobic_methane_oxidation_c = &
+         blend(above_water_table%anaerobic_methane_oxidation_c, &
+         below_water_table%anaerobic_methane_oxidation_c)
+    above_water_table%acetate_methanogen_mortality_c = &
+         blend(above_water_table%acetate_methanogen_mortality_c, &
+         below_water_table%acetate_methanogen_mortality_c)
+    above_water_table%h2_methanogen_mortality_c = &
+         blend(above_water_table%h2_methanogen_mortality_c, &
+         below_water_table%h2_methanogen_mortality_c)
+    above_water_table%aerobic_methanotroph_mortality_c = &
+         blend(above_water_table%aerobic_methanotroph_mortality_c, &
+         below_water_table%aerobic_methanotroph_mortality_c)
+    above_water_table%anaerobic_methanotroph_mortality_c = &
+         blend(above_water_table%anaerobic_methanotroph_mortality_c, &
+         below_water_table%anaerobic_methanotroph_mortality_c)
+    above_water_table%elm_aerobic_o2_consumption = &
+         blend(above_water_table%elm_aerobic_o2_consumption, &
+         below_water_table%elm_aerobic_o2_consumption)
+    above_water_table%oxygen_stress = blend(above_water_table%oxygen_stress, &
+         below_water_table%oxygen_stress)
+    above_water_table%effective_soil_ph = blend(above_water_table%effective_soil_ph, &
+         below_water_table%effective_soil_ph)
+    above_water_table%ph_response = blend(above_water_table%ph_response, &
+         below_water_table%ph_response)
+
+  contains
+    pure real(r8) function blend(dry_value, wet_value) result(value)
+      real(r8), intent(in) :: dry_value, wet_value
+      value = (1._r8 - wet) * dry_value + wet * wet_value
+    end function blend
+  end subroutine blendReactionRates
 
   pure subroutine advanceMicrobeMethaneGasTransport(state, layer_thickness, &
        effective_diffusivity, transport_capacity, surface_equilibrium_concentration, &
