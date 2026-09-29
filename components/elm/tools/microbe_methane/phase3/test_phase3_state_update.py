@@ -207,6 +207,14 @@ class Phase3StateUpdateTest(unittest.TestCase):
         self.assertIn("DOM is excluded", self.source)
         self.assertIn("positive upward", self.source)
 
+    def test_reaction_transaction_keeps_horizontal_and_vertical_saturation_distinct(self) -> None:
+        self.assertIn("unsaturated_area_saturated_fraction", self.source)
+        self.assertIn("vertical_fraction = clampUnitInterval", self.source)
+        self.assertIn("call blendReactionRates(vertical_fraction", self.source)
+        self.assertIn("subroutine blendReactionRates", self.source)
+        self.assertIn("oxygen_stress_above_water_table", self.source)
+        self.assertIn("oxygen_stress_below_water_table", self.source)
+
 
 if __name__ == "__main__":
     unittest.main()

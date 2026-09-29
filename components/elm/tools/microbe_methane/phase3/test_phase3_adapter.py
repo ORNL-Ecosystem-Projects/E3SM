@@ -19,6 +19,7 @@ LND2ATM = ELM_DIR / "src" / "main" / "lnd2atmMod.F90"
 SOIL_TRANSPORT = ELM_DIR / "src" / "biogeochem" / "SoilLittVertTranspMod.F90"
 VARCTL = ELM_DIR / "src" / "main" / "elm_varctl.F90"
 NAMELIST_DEFINITION = ELM_DIR / "bld" / "namelist_files" / "namelist_definition.xml"
+BUILD_NAMELIST = ELM_DIR / "bld" / "ELMBuildNamelist.pm"
 CASCADE = ELM_DIR / "src" / "biogeochem" / "DecompCascadeCNMod.F90"
 
 
@@ -35,6 +36,7 @@ class Phase3AdapterTest(unittest.TestCase):
         cls.soil_transport = SOIL_TRANSPORT.read_text(encoding="utf-8")
         cls.varctl = VARCTL.read_text(encoding="utf-8")
         cls.namelist_definition = NAMELIST_DEFINITION.read_text(encoding="utf-8")
+        cls.build_namelist = BUILD_NAMELIST.read_text(encoding="utf-8")
         cls.cascade = CASCADE.read_text(encoding="utf-8")
 
     def test_adapter_composes_all_transaction_kernels(self) -> None:
@@ -49,6 +51,40 @@ class Phase3AdapterTest(unittest.TestCase):
         validation = self.adapter.index("if (.not. column_valid)")
         commit = self.adapter.index("call commitColumnState")
         self.assertLess(validation, commit)
+
+    def test_noninundated_area_uses_layer_resolved_water_table(self) -> None:
+        """Horizontal inundation must not replace vertical ZWT information."""
+        self.assertIn(
+            "unsaturated_area_saturated_fraction = layerSaturatedThicknessFraction(c, j)",
+            self.adapter,
+        )
+        self.assertIn(
+            "unsaturated_area_saturated_fraction, unsaturated_work(j)",
+            self.adapter,
+        )
+        self.assertNotIn(
+            "aqueous_layer = saturated_partition .or. water_table_fraction > 0._r8",
+            self.adapter,
+        )
+        self.assertIn(
+            "capacity = (1._r8 - wet_fraction) * dry_capacity + wet_fraction * wet_capacity",
+            self.adapter,
+        )
+        self.assertIn(
+            "transport_diffusivity = (1._r8 - wet_fraction) * dry_diffusivity",
+            self.adapter,
+        )
+        self.assertIn(
+            "stress_unsaturated = (1._r8 - water_table_fraction)",
+            self.adapter,
+        )
+        self.assertIn(
+            "water_table_fraction * saturated(layer)%conc_o2",
+            self.adapter,
+        )
+        self.assertIn("MM_UNSAT_WT_SAT_FRAC", self.adapter)
+        self.assertIn("MM_O2_STRESS_ABOVE_WT", self.adapter)
+        self.assertIn("MM_O2_STRESS_BELOW_WT", self.adapter)
 
     def test_clm_saturated_biomass_reset_is_not_ported(self) -> None:
         self.assertNotIn("1.e-5_r8 * catomw", self.adapter)
@@ -90,6 +126,16 @@ class Phase3AdapterTest(unittest.TestCase):
         self.assertIn("call p2c(bounds, nlevdecomp", self.adapter)
         self.assertIn("value_in <= 1._r8", self.adapter)
 
+    def test_plant_transport_restores_clm_microbe_productivity_limitation(self) -> None:
+        """Root presence alone must not imply full-strength gas transport."""
+        self.assertIn("plant_transport_activity = 0._r8", self.adapter)
+        self.assertIn("max(1.e-9_r8, col_cf%rr(c)) * 1.e6_r8", self.adapter)
+        self.assertIn("max(col_cf%annsum_npp(c), 0.01_r8)", self.adapter)
+        self.assertIn(
+            "validRootFraction(root_fraction_col(c,j)) * plant_transport_activity / depth_scale",
+            self.adapter,
+        )
+
     def test_physical_aqueous_transport_has_one_authoritative_path(self) -> None:
         self.assertIn("1.e-3_r8 * col_wf%qflx_adv", self.adapter)
         self.assertIn("water_flux(0) = max(0._r8, water_flux(0))", self.adapter)
@@ -111,6 +157,13 @@ class Phase3AdapterTest(unittest.TestCase):
             ".not. top_pp%is_bog(t) .or. .not. top_pp%is_bog(target_t)",
             self.adapter,
         )
+
+    def test_peatland_microbe_defaults_to_multiphase_vertical_gas_transport(self) -> None:
+        self.assertIn(
+            "'use_elm_microbe_methane_transport'       => '.true.'",
+            self.build_namelist,
+        )
+        self.assertIn("set\nFALSE explicitly only for CLM-Microbe transport-parity", self.namelist_definition)
 
     def test_aqueous_exports_are_in_balance_and_budget_interfaces(self) -> None:
         for field in (
@@ -300,7 +353,7 @@ class Phase3AdapterTest(unittest.TestCase):
             self.legacy_ch4,
         )
         self.assertIn(
-            "max(0._r8, unsaturated(layer)%conc_o2)",
+            "(1._r8 - water_table_fraction) * unsaturated(layer)%conc_o2",
             self.adapter,
         )
         self.assertIn(

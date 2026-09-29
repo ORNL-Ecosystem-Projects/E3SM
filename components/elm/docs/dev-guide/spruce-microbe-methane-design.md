@@ -11,7 +11,9 @@ validation remain pending. Docker/CIME build, five-day enabled/disabled smoke
 tests, and a paired 50-year US-MOz run pass numerically with carbon balance at
 roundoff. The long run exposes large DOM and soil-C shifts and unconstrained
 anaerobic-methanotroph growth, which remain scientific calibration blockers.
-Date: 2026-09-18
+An experimental, default-off bog-pair lateral aqueous transport option is now
+implemented and awaits coupled SPRUCE sensitivity testing.
+Date: 2026-09-24
 
 ## 1. Executive summary
 
@@ -30,8 +32,9 @@ transport suboptions:
 ```fortran
 use_microbe_methane = .false.
 use_legacy_ch4_with_microbe = .false.
-use_elm_microbe_methane_transport = .false.
-use_microbe_nonbog_lateral_gas_transport = .true.
+use_elm_microbe_methane_transport = .true.   ! HUMHOL revised-methane default
+use_microbe_nonbog_lateral_gas_transport = .false.
+use_microbe_lateral_aqueous_transport = .false.
 ```
 
 `use_lch4` remains the existing umbrella switch for methane. The default-off
@@ -47,10 +50,12 @@ floating-point operations. When both switches are true, the new switch selects:
 2. a revised methane backend with acetate, explicit methanogenic and
    methanotrophic guilds, CH4/O2/CO2/H2 inventories, and gas transport.
 
-Within revised methane, the default false transport suboption uses the
-CLM-Microbe aqueous Fickian mapping. Setting it true selects the alternative ELM
-multiphase mapping; it has no valid standalone meaning when revised methane is
-disabled.
+Within revised-methane HUMHOL cases, the default transport suboption uses the
+ELM multiphase mapping: gas diffusion in air-filled pore space, aqueous
+diffusion in saturated soil, and fractional dry/wet storage and conductance in
+water-table-intersecting layers. Setting it false selects the CLM-Microbe
+aqueous Fickian mapping for parity tests; it has no standalone meaning when
+revised methane is disabled.
 
 The existing `CH4Mod` remains intact and remains the default methane backend.
 The two methane backends must never run on the same soil column and timestep.
@@ -408,8 +413,9 @@ Add to `elm_inparm`:
 ```fortran
 logical :: use_microbe_methane = .false.
 logical :: use_legacy_ch4_with_microbe = .false.
-logical :: use_elm_microbe_methane_transport = .false.
-logical :: use_microbe_nonbog_lateral_gas_transport = .true.
+logical :: use_elm_microbe_methane_transport = .false. ! base initializer; HUMHOL default is applied by build-namelist
+logical :: use_microbe_nonbog_lateral_gas_transport = .true. ! base initializer; HUMHOL default is false
+logical :: use_microbe_lateral_aqueous_transport = .false.
 ```
 
 `use_legacy_ch4_with_microbe=.true.` selects the retained Phase 2 bridge:
@@ -420,10 +426,10 @@ read in this mode. The option is intended for scientific attribution and
 backward-compatible experiments; it defaults false, so the main enabled
 configuration continues to use revised methane.
 
-When revised methane is enabled, the transport option defaults false and uses
-the CLM-Microbe aqueous Fickian mapping. Setting it true selects the ELM
-multiphase air-filled-pore/aqueous mapping. It is invalid to enable the transport
-option while `use_microbe_methane` is false.
+For revised-methane HUMHOL cases, the transport option defaults true and uses
+the ELM multiphase air-filled-pore/aqueous mapping. Setting it false selects the
+CLM-Microbe aqueous Fickian parity mapping. It is invalid to enable the
+transport option while `use_microbe_methane` is false.
 
 The default-on `use_microbe_nonbog_lateral_gas_transport` switch preserves the
 ported CLM-Microbe behavior on ELM's generalized topounit graph. Setting it
@@ -432,6 +438,12 @@ retaining bog-to-bog gas exchange. The switch affects CH4, O2, CO2, and H2 gas
 exchange only; it does not change lateral hydrology, vertical gas transport, or
 aqueous DOM C/N/P and acetate transport. The default therefore preserves the
 existing enabled-path result.
+
+The default-off `use_microbe_lateral_aqueous_transport` switch adds strictly
+advective dissolved-solute exchange among paired bog topounits. It requires
+`use_humhol=.true.` and `use_microbe_aqueous_transport=.true.`. Keeping it
+independent preserves the existing enabled-path result and permits a controlled
+lateral-on versus lateral-off experiment without changing vertical transport.
 
 The module's scientific parameters will be variables in ELM's standard
 parameter NetCDF selected by the existing `paramfile` machinery. There is no
@@ -939,7 +951,7 @@ D_eff = D_molecular S_liq^tortuosity f_temperature f_thaw
 
 Equivalently, the code combines `theta_liq*D_molecular` and
 `dispersivity*|q|` into the conductivity multiplying the porewater gradient.
-The default-zero DOM macrodispersion term normally ramps on only above the
+The default-zero saturated aqueous macrodispersion term normally ramps on only above the
 named 0.99 reaction-saturation threshold and reaches full strength at complete
 saturation. The default-off `use_microbe_zwt_macrodispersion` sensitivity
 instead scales it by the fraction of each layer below the diagnosed connected
@@ -951,8 +963,9 @@ hypothesis for unresolved saturated peat mixing, not a reinterpretation of
 molecular diffusion or the CLM relaxation rate.
 The same matrix is applied independently to DOM C, N, and P, preserving a
 spatially uniform stoichiometric ratio while allowing an existing nonuniform
-ratio to advect and diffuse conservatively. It now also transports standard
-ELM mineral NH4 and NO3. NO3 is fully dissolved. NH4 remains one authoritative
+ratio to advect and diffuse conservatively. The saturated macrodispersion
+conductivity is also applied to acetate and to standard ELM mineral NH4 and
+NO3. NO3 is fully dissolved. NH4 remains one authoritative
 total pool and uses instantaneous linear equilibrium sorption,
 `f_dissolved = theta_liq / (theta_liq + rho_bulk Kd)`; only this dissolved
 fraction is advected and diffused, so transport never treats the complete NH4
@@ -975,6 +988,45 @@ interface fluxes, total aqueous C/N/P export, bottom DOM C/N/P export, and
 per-timestep elemental residuals. Aqueous exports are included in column and
 grid carbon balance, column N/P balance, and the monthly carbon budget.
 
+#### 9.3.2 Lateral aqueous transport among bog topounits
+
+The default-off `use_microbe_lateral_aqueous_transport` option applies
+conservative lateral solute advection on configured edges whose two endpoints
+are bog topounits. It requires `use_humhol` and
+`use_microbe_aqueous_transport`, but remains independently switchable so a
+paired attribution test does not also change vertical transport. The initial
+implementation deliberately supports a paired hummock--hollow graph only.
+Fen/upland edges and lateral concentration-gradient diffusion are deferred until
+the bog-pair response is scientifically evaluated.
+
+The operator uses the timestep-integrated, layer-resolved water transfer already
+realized by peatland hydrology in `QFLX_LAT_AQU_LAYER`; it does not diagnose a
+second water flux. Upwind donor porewater concentration determines the solute
+mass. Transfer is capped by the donor inventory, distributed among receiving
+layers in proportion to their realized water gain, and scaled with actual
+topounit area so every C, N, and P transfer is equal and opposite at gridcell
+scale. Water taken from or delivered to the surface-water or deep-aquifer stores
+does not transport solute yet because those stores have no prognostic chemistry.
+
+The transported species are:
+
+- DOM C, N, and organic P, using the same saturation-dependent mobile fraction
+  as vertical DOM transport;
+- saturated-partition acetate C, using the acetate mobile fraction;
+- NH4-N, with only its existing equilibrium dissolved fraction mobile;
+- fully mobile NO3-N; and
+- nonnegative inorganic `solutionp_vr`, separately from DOM-P.
+
+No new tunable transport coefficient is introduced. The first experiment is
+therefore a clean test of whether hydrologically realized hummock--hollow water
+exchange redistributes substrate and nutrients enough to relieve hollow
+limitation. `MM_LATERAL_C_FLUX`, `MM_LATERAL_N_FLUX`, and
+`MM_LATERAL_P_FLUX` enter the existing elemental balance checks. The component
+history fields `MM_LATERAL_DOM_C_FLUX`, `MM_LATERAL_ACETATE_C_FLUX`,
+`MM_LATERAL_DOM_N_FLUX`, `MM_LATERAL_NH4_FLUX`, `MM_LATERAL_NO3_FLUX`,
+`MM_LATERAL_DOM_P_FLUX`, and `MM_LATERAL_SOLUTION_P_FLUX` retain pathway
+attribution; `MM_DOM_LATERAL_TEND` gives the layer-resolved DOM-C response.
+
 The reconstructed `use_peatland_roots=.true.` control retains a separate plant
 uptake constraint. In peatland RD cases, vascular mineral-N demand follows the
 prescribed fine-root profile and is clipped at the connected water table:
@@ -996,14 +1048,14 @@ therefore retains its N conservation and NH4/NO3 competition. This is part of
 the general peatland-root capability, defaults on with HUMHOL, and is not owned
 by the methane module. It does not alter P uptake.
 
-#### 9.3.2 Default Fickian and optional ELM gas-transport mappings
+#### 9.3.3 Default ELM multiphase and CLM-Fickian parity mappings
 
-The revised backend defaults to a CLM-Microbe Fickian mapping and retains the
-previous ELM multiphase mapping behind
-`use_elm_microbe_methane_transport=.true.`. The following distinctions must be
-retained in reviews and comparisons:
+The revised HUMHOL backend defaults to the ELM multiphase mapping. The
+CLM-Microbe Fickian mapping remains available with
+`use_elm_microbe_methane_transport=.false.` for parity experiments. The
+following distinctions must be retained in reviews and comparisons:
 
-| Concern | Original CLM-Microbe | Default port | Optional ELM mapping |
+| Concern | Original CLM-Microbe | CLM-Fickian parity mapping | Default ELM multiphase mapping |
 | --- | --- | --- | --- |
 | Prognostic gas state | Concentration semantics depend on the active equation and phase | Direct molar concentration-gradient basis with conservative area bookkeeping | Bulk-soil inventory mapped to one gas-equivalent mobile basis |
 | Unsaturated diffusion | Aqueous `Fick_D_w*m_Fick_ad` in active layers | Same active coefficient and `T/298` response in both area partitions | ELM `CH4Mod` gas diffusivity scaled by air-filled porosity and soil structure |
@@ -1013,7 +1065,7 @@ retained in reviews and comparisons:
 | Lateral gas exchange with `use_humhol` | Hard-coded columns 1/2, 0.75/0.25 areas, matching layer indices, and `1e-4` coefficient | Arbitrary ELM `regional_target_ti` graph, actual weights/distances, shared horizontal-footprint scaling, absolute-elevation overlap, simultaneous donor limiting, and the source's factor-of-ten smaller lateral coefficient | Not applied; retains the earlier ELM-mapping behavior pending a separately validated multiphase lateral formulation |
 | Reactions | Source microbial equations | Same ported equations | Same ported equations |
 
-The default Fickian path also provides
+The CLM-Fickian parity path also provides
 `use_microbe_nonbog_lateral_gas_transport`. Its default value, true, uses every
 configured edge and preserves the original generalized implementation. False
 restricts exchange to edges for which both endpoint topounits are classified as
@@ -1022,7 +1074,7 @@ SPRUCE configuration, where a bare non-bog fen/boardwalk column can otherwise
 receive methane carbon from a productive hollow even though lateral dissolved
 substrate transport has not yet been implemented.
 
-The optional mapping is an intentional reuse of current ELM methane physics,
+The default multiphase mapping is an intentional reuse of current ELM methane physics,
 not a literal copy of all `CH4Mod` state or solver code. Above/below-water-table
 phase selection and its existing standard-parameter controls are applied inside
 the revised backend only when the option is true. Legacy `CH4Mod` remains
@@ -1299,6 +1351,7 @@ ELM PFT dimension.
 | `dom_som_diffusion_multiplier` | Scalar, new name | Multiplier on SOM-solver diffusivity for DOM; literal 10 in `CNSoilLittVertTranspMod.F90` |
 | `microbe_som2_q10`, `microbe_som3_q10`, `microbe_som4_q10` | Scalar, new names | Pool-specific temperature responses; CLM-SPRUCE literals 1.5, 2.0, and 2.5 |
 | `microbe_dom_q10` | Scalar, new name | DOM temperature response; CLM-SPRUCE literal 1.25 |
+| `dom_solubilization_anoxic_fraction` | Scalar, new name | Fraction of potential litter/SOM-to-DOM solubilization retained at zero oxygen; zero preserves the original ELM response |
 
 These four Q10 parameters use ELM's existing 25 degrees C reference and 10 K
 temperature interval conventions; those shared mathematical constants are not
@@ -1314,6 +1367,15 @@ promoted into the standard ELM parameter file rather than copied as literals:
 | `s1dom_f`, `s2dom_f`, `s3dom_f`, `s4dom_f` | 0.18, 0.14, 0.10, 0.06 | SOM1-SOM4 solubilization to DOM |
 | `l1s1_f`, `l2s2_f`, `l3s3_f` | 0.19, 0.21, 0.23 | Direct litter stabilization to corresponding SOM pools |
 | `s1s2_f`, `s2s3_f`, `s3s4_f` | 0.14, 0.23, 0.27 | Direct SOM stabilization to the next pool |
+
+The seven solubilization transfers may optionally use a redox response that is
+less restrictive than aerobic respiration. The initial implementation retains
+the existing temperature, moisture, and depth scalars and replaces only the
+oxygen term with the greater of the standard decomposition response and
+`a + (1-a) * raw_o2_activity`, where `a` is
+`dom_solubilization_anoxic_fraction`. Carbon, nitrogen, and phosphorus remain
+conservative cascade transfers. This is an ELM science extension rather than a
+CLM-Microbe parity parameter and therefore defaults to zero pending validation.
 
 `bs4_f`, `fs4_f`, and `doms4_f` are not independent inputs. They are residuals
 computed respectively from the bacterial, fungal, and DOM path fractions. The
@@ -1702,6 +1764,14 @@ message unless the user supplies an explicit offline conversion product. A
 converter may seed the new pools and document the mass redistribution, but the
 model must not do that silently.
 
+Radiocarbon has a stricter contract. A run with `use_c14=.true.` must begin
+from a true cold start. Every continuation or branch must then use a restart
+written by a C14-enabled run; the model does not synthesize missing standard
+ELM or revised-methane C14 states from bulk carbon. Missing C14 restart fields
+cause an immediate, named-field error that directs the user back to a cold
+start. This avoids silently assigning a modern atmospheric signature to old
+soil carbon or methane reservoirs.
+
 ### 11.3 History output
 
 Default revised-mode output should be sufficient to close budgets without
@@ -1720,6 +1790,16 @@ Full saturated/unsaturated layer diagnostics are enabled by
 `hist_wrtmicrobediag`. Field names should be new and explicit; do not reuse a
 legacy `CH4Mod` history name for a quantity with different semantics.
 
+OLMT site cases use column-form history (`hist_type1d_pertape='COLS'`). ELM
+must therefore aggregate PFT fields such as `AGNPP` to columns before updating
+the history accumulator, and distribute parent landunit, topounit, or gridcell
+fields to their child columns. Directly iterating over PFT bounds with a
+column-sized history buffer silently overwrites memory in optimized builds and
+can appear later as an unrelated NetCDF write error. The history path now
+performs explicit one- and two-dimensional PFT-to-column aggregation and aborts
+on unsupported or incompatible input/output bounds rather than corrupting the
+buffer.
+
 ## 12. Isotopes and atmospheric coupling
 
 ### 12.1 C13 and C14
@@ -1730,17 +1810,54 @@ consistency. The new design computes bulk rates once, then transfers isotopes
 along the accepted bulk fluxes with process-specific fractionation factors and
 zero-mass guards.
 
-Implementation order:
+The C14 audit distinguishes inherited ELM support from revised-methane work:
 
-1. bulk C with a runtime error if `use_c13` or `use_c14` is requested;
-2. C13 transfers and emitted-CH4 diagnostics, validated against the latest
-   CLM-SPRUCE reference; and
-3. C14 only after confirming that the placeholder portions of the old code are
-   scientifically required and defining restart/history expectations.
+| Pathway | Current foundation | Required revised-methane work |
+| --- | --- | --- |
+| litter/SOM/DOM/bacteria/fungi reactions | Generic `decomp_cpools_vr` isotope ratios already drive every configured cascade transition | Add regression tests whenever the cascade graph changes |
+| standard vertical soil-carbon transport | C14 is already included in `SoilLittVertTranspMod` | None for the standard operator |
+| radioactive decay and atmospheric bomb history | Existing ELM C14 state and forcing are retained | Verify the physical versus conventional half-life choice and accelerated-spinup treatment |
+| DOM aqueous and preferential transport | Bulk C/N/P operators are conservative | Apply the identical accepted operator to C14 DOM and diagnose C14 export |
+| revised methane reactions | Bulk rates are conservative | Route C14 through DOM, acetate, guild biomass, CH4, and CO2 using the accepted bulk rates; never rerun kinetics |
+| acetate and gas transport | Bulk transport is conservative | Transport C14 acetate linearly; derive C14 gas transport from the accepted bulk diffusion, plant, ebullition, and lateral fluxes |
+| restarts and history | Standard C14 decomposition pools already restart and output | Add revised-methane C14 states, emitted-flux diagnostics, and restart compatibility checks |
 
-C13 is required before claiming full parity with the latest CLM-SPRUCE methane
-work. C14 is not on the initial production critical path unless a target case
-requires it.
+The first reaction-tracer kernel now implements the central rule above. It
+routes a passive carbon tracer through the accepted bulk rates in four ordered
+stages: DOM fermentation, CO2-consuming reactions, acetate-consuming
+reactions, and CH4 oxidation, followed by guild mortality. Simultaneous
+consumers use one mixed donor isotope ratio, and mortality uses the initial
+guild ratio because the bulk limiter does not allow same-step growth to die.
+The kernel conserves the tracer across the shared DOM pool and both horizontal
+saturation partitions. No process fractionation is applied in this first C14
+implementation; adding it later changes isotope allocation, not bulk rates.
+
+The aqueous/gas transport, lateral exchange, restart, decay, atmospheric-CO2
+boundary, and emitted-flux history paths are now wired, so
+`use_microbe_methane=.true.` can be combined with `use_c14=.true.`. The
+default-off observed-DOM calibration remains explicitly incompatible because
+the imposed deep-DOM target has no defined radiocarbon signature. Atmospheric
+CH4 currently uses a modern-carbon fallback (`c14ratio`) because ELM has no
+atmospheric-CH4 radiocarbon stream; atmospheric CO2 uses ELM's time-varying
+bomb-history ratio. C13 remains rejected because its process fractionation
+requirements are materially different from radiocarbon source-age tracing.
+
+Cold-start initialization covers the complete allocated C14 vegetation,
+decomposition, and revised-methane state, including peat topographic patches
+that can enter an active filter after initialization. The standard isotope
+fire update also maps every uncombusted fire-mortality-to-litter flux before
+`CarbonStateUpdate3`; leaving those parallel isotope fluxes unset would apply
+ELM's fill value to vegetation C14 stocks.
+
+A clean Docker/CIME release-mode contract test completed one day from a true
+`use_c14=.true.` cold start, wrote 14 revised-methane C14 prognostic restart
+variables, continued for a second day from that restart, and wrote the next
+restart normally. The scientific restart and both history streams contained
+no literal NaN or infinity values. A deliberately non-C14 restart failed at
+the first required revised state, `C14_MM_ACETATE_C_UNSAT`, confirming that
+the model does not synthesize missing isotope state. The same path completed
+under bounds checking. A separate continuous-versus-split bit-for-bit exact
+restart comparison remains required before declaring ERS coverage complete.
 
 ### 12.2 Offline and online methane
 
@@ -1985,11 +2102,11 @@ closed before a production parameter set or full validation claim:
 4. Required C13 and C14 scope for the first production release.
 5. Whether online atmosphere coupling is a release requirement or a later
    qualification target.
-6. Desired water-flux-driven lateral transport of DOM C/N/P and acetate, and
-   whether the optional ELM multiphase gas mapping should also receive a
-   lateral operator. Default Fickian gas inventories now use a generalized,
-   conservative multi-topounit graph operator; the old advection/remapping code
-   is still not suitable for direct porting.
+6. Whether lateral aqueous transport should be extended beyond paired bog
+   topounits to fen/upland edges, surface-water chemistry, deep-aquifer
+   chemistry, or an explicit lateral dispersion term. The initial bog-only
+   operator is strictly driven by realized hydrologic water transfer and must
+   be evaluated before broadening the graph.
 7. The archived US-SPR case, forcing, initial/restart data, and diagnostic list
    that define the CLM-SPRUCE reference.
 
@@ -2357,3 +2474,199 @@ ELM uses native `max(FSAT, frac_h2osfc)`; the matched-SOM year-50 values are
 science change, but it must be isolated with a parity-only namelist option and
 a one-layer reaction comparison before the remaining production difference
 can be assigned to the reaction kernel, substrate coupling, or units.
+
+## 20. SPRUCE deep-soil warming treatment
+
+The standard TAMB and T0.00 cases retain the ordinary prognostic ELM thermal
+solution. Warmed T2.25--T9.00 cases also retain that solution and their
+plot-specific atmospheric forcing, but add an explicit internal heater source.
+The target is the contemporaneous T0.00 soil temperature at 2 m plus the
+prescribed treatment increment. This follows the experiment's use of 2 m as
+the feedback-control reference depth; it does not imply that all experimental
+heater elements were located at exactly 2 m. The interior deep-heater elements
+occupied approximately the lower third of the 0--3 m profile, so the initial
+ELM implementation distributes modeled heater power over 2--3 m.
+For the historical treatment simulations, modeled heater power is held at
+exactly zero before 2015-08-15, the configured treatment activation date.
+
+The T0.00 treatment writes hourly `TSOI_HEATING_CONTROL` on a dedicated column
+history tape. An OLMT post-run hook forms the hummock/hollow weighted mean,
+intentionally excludes the auxiliary fen, and writes the compact
+`T_SOIL_REFERENCE` stream. Warmed jobs retain the common pretreatment restart
+but wait for T0.00 to complete before reading that stream. This distinction
+prevents the scheduling dependency from changing ecosystem initial state.
+
+At each timestep, the controller requests
+
+```
+Q_request = C_heated (T_reference + Delta_T - T_control) / tau
+Q_heater  = min(Q_max, max(0, Q_request)).
+```
+
+`C_heated` is the heat capacity of the portions of layers intersecting 2--3 m.
+The total heater power is distributed among those layers in proportion to
+their intersected heat capacities. Thus `tau` is a proportional-controller
+gain: with `tau=1 day`, a 1 K error requests enough energy to warm the active
+interval by 1 K in one day in the absence of conductive losses and the power
+cap. It is not the experiment duration or a direct temperature-relaxation
+timescale. The default `Q_max=60 W m-2` approximates the installed capacity of
+67 100-W heaters over a 113-m2 enclosure. The heater is one-sided and cannot
+actively cool an overshoot.
+
+The heater source is added to the implicit thermal equation and to the soil
+energy-balance input, so warming, conduction, phase change, and surface-energy
+feedback remain prognostic and conservative. The diagnostic fields are
+`EFLX_SOIL_HEATING`, `EFLX_SOIL_HEATING_VR`, `TSOI_HEATING_CONTROL`,
+`TSOI_HEATING_REFERENCE`, and `TSOI_HEATING_TARGET`. The feature is disabled by
+default and therefore leaves non-treatment simulations B4B.
+
+The first validation should compare realized 2-m offsets and seasonal lag
+against the SPRUCE temperature record, heater power against installed capacity,
+and the full-column energy residual. The one-day controller timescale is an
+initial engineering choice and should be adjusted only from these control-
+performance diagnostics, not calibrated to methane or carbon responses.
+
+Experimental design references: Hanson et al. (2017),
+https://bg.copernicus.org/articles/14/861/2017/, and the SPRUCE whole-ecosystem
+warming system description in the 2014 AGU experiment abstract,
+https://studio.m-anage.com/agu/fm14/preliminaryview.cgi/Paper18600.html.
+
+## 21. Prescribed or hydrologically diagnosed peat-density target
+
+The conservative peat storage-and-throughflow calculation defines its target
+solid-carbon density relative to the base of the acrotelm rather than from a
+fixed exponential function of local soil depth. The acrotelm can be prescribed
+for a well-observed site or diagnosed prognostically from long-term water-table
+behavior. This follows the physical definition of the acrotelm as peat that is
+periodically aerated by growing-season water-table drawdown.
+
+An optional surface-data field, `TopounitAcrotelmDepth`, supplies the prescribed
+depth in meters below each topounit's local surface. A positive value controls
+the density and burial target. Zero, including the default used when the field
+is absent, selects the prognostic method described below. The prognostic
+water-table statistic continues to be calculated in prescribed columns and is
+archived as `PEAT_ZWT_GS_P90`, allowing evaluation of whether the regional
+algorithm would reproduce the site constraint. `PEAT_ACROTELM_DEPTH` archives
+the boundary actually used by the density and burial calculations.
+
+For SPRUCE, the McFarlane pretreatment profile places the common acrotelm base
+0.30 m below the hollow surface. The three surface elevations are 0.05 m below
+the hollow for the boardwalk/fen unit, the hollow datum itself, and 0.15 m above
+the hollow for the hummock. The corresponding local prescribed depths are
+therefore 0.25, 0.30, and 0.45 m. The values are generated from the common
+boundary elevation rather than copied between topounits. Regional surface
+datasets leave this field at zero and retain the prognostic capability.
+
+An instantaneous annual maximum is too sensitive to isolated hydrologic or
+numerical excursions. ELM therefore first forms a running mean of ZWT during a
+configured growing-season window, excluding timesteps when the upper peat is
+at least half ice-filled. A water table below the resolved peat column is also
+excluded because it cannot locate an internal acrotelm boundary; this prevents
+an out-of-column water table from defining the peat-density profile. The
+five-year warm-up described below further limits sensitivity to the initially
+dry hydrologic state of a cold start. The deepest value reached by this running
+mean is retained
+for the year. At the next year boundary, that sustained annual drawdown enters
+a five-year rolling history. ELM calculates the linearly interpolated 90th
+percentile of the available annual values and uses that upper quantile, rather
+than the single deepest year, to drive the acrotelm target:
+
+```
+z_low90 = percentile90(last five annual max_growing_season(ZWT_running))
+z_acro(new) = z_acro(old) + [1 - exp(-1/tau_year)]
+              * [z_low90 - z_acro(old)].
+```
+
+During the first four valid years, the percentile diagnostic is calculated
+from all annual values available so far, but the cold-start acrotelm boundary
+remains unchanged. Structural adjustment begins only after a complete
+five-year window exists. This avoids imprinting the density profile with the
+temporarily deep water table that can accompany hydrologic initialization.
+The five-year window and 90th percentile are fixed parts of the initial
+formulation. The existing interannual adjustment timescale remains a separate
+structural-memory control and prevents the peat density target from moving
+abruptly as years enter or leave the window.
+
+This state advances in physical time and is never multiplied by an AD-spinup
+pool factor. The running mean, annual sustained minimum-water elevation
+(maximum ZWT depth), five annual low-water values and their valid count,
+accumulated sampling time, and smoothed acrotelm depth are restartable. The
+current five-year percentile is archived as `PEAT_ZWT_GS_P90`. Winter ZWT
+behavior cannot alter the density target.
+
+Above `z_acro`, the target is `peat_compaction_surface_density`. Over the next
+`peat_compaction_transition_width` meters it changes linearly, using the exact
+fractional overlap of each model layer with that transition. Below the
+transition it is `peat_compaction_deep_density`. Changing the target does not
+rescale any carbon pool: it changes only how much subsequent local solid-C
+production is retained versus transmitted downward, so the transport remains
+carbon conservative.
+
+The initial SPRUCE values are based on the McFarlane et al. pretreatment peat
+cores expressed relative to the hollow surface. Hollow peat above 0.30 m has a
+mean solid-C density near 22 kg C m-3; peat below 0.30 m averages about
+94 kg C m-3, while peat deeper than approximately 1 m is commonly near
+80 kg C m-3. The initial two-zone compromise is therefore 20 and
+90 kg C m-3. The principal validation experiment should test lower-zone
+targets of 80, 90, and 100 kg C m-3 against peat density, age, stock, and
+burial-flux profiles.
+
+| Parameter | Initial value | Meaning |
+|---|---:|---|
+| `peat_compaction_surface_density` | 20 kg C m-3 | Acrotelm target solid-C density |
+| `peat_compaction_deep_density` | 90 kg C m-3 | Catotelm target solid-C density |
+| `peat_compaction_initial_acrotelm_depth` | 0.25 m | Cold-start boundary for prognostic columns before hydrologic equilibration |
+| `peat_compaction_transition_width` | 0.10 m | Downward density-transition thickness |
+| `peat_compaction_zwt_running_mean_days` | 30 days | Filter defining sustained seasonal drawdown |
+| `peat_compaction_zwt_smoothing_years` | 10 years | Interannual boundary adjustment timescale |
+| `peat_compaction_growing_season_start_doy` | 121 | First included day |
+| `peat_compaction_growing_season_end_doy` | 305 | Last included day |
+| `peat_compaction_timescale_years` | 1 year | Storage adjustment/release timescale |
+
+### Density-dependent peat hydraulics
+
+Peatland columns now support two explicitly selectable hydraulic-property
+formulations. `use_jules_peat_hydraulics=.false.` retains the historical
+CLM-SPRUCE depth-based fibric-to-sapric curve. When
+`use_jules_peat_hydraulics=.true.`, the dry organic-matter bulk density is
+derived from physical-equivalent nondissolved peat C,
+
+```
+rho_org = 1.e-3 * PEAT_C_DENSITY / peat_hydraulic_carbon_fraction,
+```
+
+where `PEAT_C_DENSITY` is in g C m-3 and `rho_org` is in kg dry matter m-3.
+DOM and other dissolved pools do not contribute to the solid skeleton. During
+initialization the surface-file organic density supplies `rho_org`; after the
+carbon pools are active, the modeled physical-equivalent density refreshes the
+hydraulic properties. Accelerated-spinup pool factors are removed in the same
+way as for the peat-density and burial diagnostics.
+
+The JULES-Peat relationships of Chadburn et al. (2022) are then applied:
+
+```
+sucsat [m]  = exp( 0.0230 * rho_org - 5.08)
+bsw         =       0.0304 * rho_org + 1.53
+hksat [m/s] = exp(-0.0532 * rho_org - 6.63)
+watsat      = 1 - rho_org / peat_hydraulic_particle_density.
+```
+
+ELM converts suction to mm and conductivity to mm s-1. The density passed to
+the fitted relationships is bounded by
+`peat_hydraulic_bulk_density_min` and
+`peat_hydraulic_bulk_density_max`, the empirical range used by the initial
+parameterization. The option applies only within modeled peat depth and
+requires the dynamic compaction profile. It defaults on for new HUMHOL cases;
+setting it explicitly false provides the legacy comparison.
+
+| Parameter | Initial value | Meaning |
+|---|---:|---|
+| `peat_hydraulic_carbon_fraction` | 0.56 | Carbon fraction of dry peat organic matter |
+| `peat_hydraulic_particle_density` | 1260 kg m-3 | Organic solid particle density used to diagnose porosity |
+| `peat_hydraulic_bulk_density_min` | 35 kg m-3 | Lower empirical bound for the fitted relationships |
+| `peat_hydraulic_bulk_density_max` | 210 kg m-3 | Upper empirical bound for the fitted relationships |
+
+Chadburn et al. (2022), https://doi.org/10.5194/gmd-15-1633-2022.
+
+McFarlane et al. (2018), https://doi.org/10.1017/RDC.2018.37; Belyea and
+Baird (2006), https://doi.org/10.1890/0012-9615(2006)076[0299:BTLTPB]2.0.CO;2.

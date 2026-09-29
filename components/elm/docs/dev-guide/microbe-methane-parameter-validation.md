@@ -273,6 +273,7 @@ are the next-best evidence.
 | `bacteria_initial_c`, `fungi_initial_c`, `dom_initial_c` | 1e-5, 1e-5, 0 | g C m-3 soil | Cold-start source literals; restarts take precedence |
 | `dom_som_diffusion_multiplier` | 10 | 1 | Active source literal; DOM currently uses the SOM vertical operator |
 | `microbe_som2_q10`, `microbe_som3_q10`, `microbe_som4_q10`, `microbe_dom_q10` | 1.5, 2.0, 2.5, 1.25 | 1 | Active source literals |
+| `dom_solubilization_anoxic_fraction` | 0.0 reference; 0.5 initial sensitivity | 1 | New ELM sensitivity: fraction of potential litter/SOM-to-DOM solubilization retained at zero oxygen; temperature, moisture, and depth scalars still apply |
 | `l1dom_f`, `l2dom_f`, `l3dom_f` | 0.10, 0.08, 0.06 | 1 | Litter solubilization literals |
 | `s1dom_f`, `s2dom_f`, `s3dom_f`, `s4dom_f` | 0.18, 0.14, 0.10, 0.06 | 1 | SOM solubilization literals |
 | `l1s1_f`, `l2s2_f`, `l3s3_f` | 0.19, 0.21, 0.23 | 1 | Direct litter stabilization literals |
@@ -281,6 +282,34 @@ are the next-best evidence.
 The SOM4 fractions for bacterial residue, fungal residue, and DOM stabilization
 are closure residuals, not independent parameters. The ELM reader rejects
 negative residuals.
+
+`dom_solubilization_anoxic_fraction` separates litter/SOM solubilization from
+the stronger aerobic-respiration response. For a raw oxygen activity (O), the
+candidate solubilization response is
+
+\[
+f_{\mathrm{sol},O_2}=\max\left[f_{\mathrm{decomp},O_2},
+a+(1-a)O\right],
+\]
+
+where (a) is `dom_solubilization_anoxic_fraction` and
+(f_{\mathrm{decomp},O_2}) is ELM's standard, floored decomposition oxygen
+scalar. The maximum makes (a=0) reproduce the previous transition fluxes
+exactly. It changes only the seven litter/SOM-to-DOM transfers; their
+temperature, moisture, and depth scalars remain active, and other cascade
+transfers retain the standard oxygen response.
+
+The first mature-restart SPRUCE test used a 0.8 m decomposition-depth
+e-folding length and compared (a=0) with (a=0.5) for nine years. The zero
+case was bit-for-bit identical to the preceding 0.8 m run for every common
+numeric history field checked in year 63. Relative to that control, (a=0.5)
+increased bog-mean Litter1 DOM production by 22%, other-litter DOM production
+by 165%, SOM-derived DOM production by 151%, DOM fermentation by 94%, methane
+production by 105%, and surface methane flux by 112%. Methane oxidation rose
+only 4.6% and NPP declined 2.1%. The late growing-season DOC profile improved
+substantially against the 2013 SPRUCE profile, while acetate changed little and
+methane porewater concentrations remained somewhat high. These values are a
+structural sensitivity result, not a calibrated default.
 
 ### New phosphorus parameters
 
@@ -454,7 +483,7 @@ increase, rather than reduce, the inferred anaerobic fraction at SPRUCE.
 | `microbe_methane_dom_diffusivity` | `dom_diffus` | 1.8e-7 m2 s-1 | Runtime; legacy operator is not dimensionally identical to ELM finite-volume transport |
 | `microbe_methane_dom_relaxation_rate` | executed `dom_diffus` neighbor relaxation | 1.8e-7 s-1 | Parity-test mapping of the value's actual role in the CLM equation; read only when the test switch is enabled |
 | `microbe_methane_aqueous_dom_molecular_diffusivity` | none | 1.0e-10 m2 s-1 | Initial hypothesis for physical aqueous transport; research/calibration required |
-| `microbe_methane_aqueous_dom_saturated_macrodispersion` | none | 0 m2 s-1 | Default zero preserves the current aqueous operator; positive values test unresolved thawed saturated-zone mixing and require profile validation |
+| `microbe_methane_aqueous_dom_saturated_macrodispersion` | none | 0 m2 s-1 | Default zero preserves the current aqueous operator; positive values apply unresolved thawed saturated-zone mixing to DOM, acetate, NH4, and NO3 and require joint profile validation |
 | `microbe_methane_aqueous_acetate_molecular_diffusivity` | none | 1.0e-9 m2 s-1 | Initial hypothesis for physical aqueous transport; research/calibration required |
 | `microbe_methane_aqueous_nh4_molecular_diffusivity` | none | 1.98e-9 m2 s-1 | Initial 25 C aqueous value; temperature, peat tortuosity, and profile validation required |
 | `microbe_methane_aqueous_no3_molecular_diffusivity` | none | 1.90e-9 m2 s-1 | Initial 25 C aqueous value; temperature, peat tortuosity, and profile validation required |
@@ -526,8 +555,10 @@ resets a selected near-surface layer to atmospheric Henry equilibrium each
 timestep instead of representing a finite atmosphere/snow/pond/topsoil
 resistance.
 
-The revised backend now defaults to the CLM-Microbe aqueous Fickian mapping.
-Acetate uses `dom_diffus*(T/298)^1.87`; CH4, O2, CO2, and H2 use the active
+The revised HUMHOL backend now defaults to the ELM multiphase mapping. The
+CLM-Microbe aqueous Fickian mapping remains an explicit parity option. In that
+false parity setting, acetate uses `dom_diffus*(T/298)^1.87`; CH4, O2, CO2, and
+H2 use the active
 source's `Fick_D_w*m_Fick_ad*(T/298)^1.87` coefficients and direct stored-
 concentration gradients in both area partitions. The source's `1e-3` factor on
 the vertical `Fick_D_w` equation is retained as executed. Conservative
@@ -535,7 +566,7 @@ backward-Euler transport replaces its sequential layer mutation, and a finite
 top-half-layer Fickian boundary replaces its timestep reset to atmospheric
 Henry equilibrium.
 
-When `use_humhol=.true.`, the default mapping also generalizes the source's
+When `use_humhol=.true.`, the CLM-Fickian parity mapping also generalizes the source's
 two-column lateral gas diffusion to ELM's full topounit graph. It uses
 `regional_target_ti` and `lateral_dist`, actual topounit/column area weights,
 and overlap between absolute-elevation layer intervals. All edges are evaluated
@@ -547,10 +578,12 @@ zero area; omitting it conserves gridcell inventory but creates an unphysical
 local concentration spike in the vanishing partition. This avoids hard-coded
 hummock/hollow indices and the
 source's fixed 75/25 area split while preserving its factor-of-ten smaller
-lateral Fickian coefficient. `MM_LATERAL_C_FLUX` records the net CH4-plus-CO2
-carbon transfer into each column; its area-weighted gridcell sum must be zero.
+lateral Fickian coefficient. `MM_LATERAL_C_FLUX` records the combined net gas
+and aqueous carbon transfer into each column; the pathway-specific gas, DOM,
+and acetate diagnostics retain attribution. Its area-weighted gridcell sum must
+be zero.
 
-Setting `use_elm_microbe_methane_transport=.true.` selects the alternative ELM
+The default `use_elm_microbe_methane_transport=.true.` selects the ELM
 multiphase mapping:
 
 - gas-phase diffusion through air-filled pores using ELM `CH4Mod` soil-
@@ -569,10 +602,14 @@ the executed CLM adjacent-layer timescale to DOM C/N/P after reactions. It uses
 a conservative backward-Euler matrix and closed boundaries rather than the
 source's sequential, non-conservative update. The gas-transport choice itself
 still changes acetate and gas transport, not DOM transport or reactions.
-The generalized lateral operator currently moves gases only. The source's
-water-flux-driven lateral DOM/nutrient/acetate advection and its special
-SPRUCE vertical remapping require a separate conservative C/N/P design. The
-optional ELM multiphase gas mapping likewise retains its prior no-lateral
+The adapter now has a separate, default-off
+`use_microbe_lateral_aqueous_transport` operator for paired bog topounits. It
+follows realized `QFLX_LAT_AQU_LAYER` water transfer and
+advects DOM C/N/P, saturated acetate, dissolved NH4, NO3, and inorganic solution
+P conservatively between hummock and hollow. It adds no lateral diffusivity or
+calibration parameter. Fen/upland edges, surface-water chemistry, and
+deep-aquifer chemistry remain excluded from this first attribution test. The
+default ELM multiphase gas mapping retains its prior no-lateral-gas
 behavior until an appropriate multiphase conductance is validated.
 It does not add a high-affinity
 methanotroph pathway, suppress existing unsaturated production, or retune the
@@ -1147,9 +1184,11 @@ primary clean-chain result.
 The three-topounit SPRUCE surface assigns 50% of the gridcell to a bare
 fen/boardwalk topounit, 17% to hollow, and 33% to hummock. Because the generated
 surface has no explicit `TopounitRegionalTarget`, ELM's fallback graph connects
-hollow to fen and hummock to hollow. Lateral groundwater and revised-methane
-gas exchange therefore include the bare fen, whereas DOM C/N/P and acetate have
-vertical transport only and litter, SOM, bacteria, and fungi are immobile.
+hollow to fen and hummock to hollow. In the historical runs summarized below,
+lateral groundwater and revised-methane gas exchange therefore included the
+bare fen, whereas DOM C/N/P and acetate had vertical transport only and litter,
+SOM, bacteria, and fungi were immobile. The later bog-only aqueous implementation
+does not retroactively apply to these results and deliberately excludes the fen.
 
 A one-year continuation from the clean MM36 final-spinup restart quantified the
 existing edge behavior. In the edge-on control (`20260920MM39`), the fen gained
@@ -1173,12 +1212,11 @@ diagnostic output for the compared numeric fields, validating the default-on
 compatibility path.
 
 The non-bog gas edge is therefore a real but modest one-year gridcell effect,
-not the dominant explanation for the ELM-versus-CLM methane discrepancy. The
-larger structural uncertainty is that lateral water moves among these
-topounits, including into the bare fen, but dissolved DOM C/N/P and acetate do
-not yet accompany it. A conservative, donor-limited lateral dissolved-solute
-operator should be the next transport experiment before interpreting longer
-SPRUCE methane simulations.
+not the dominant explanation for the ELM-versus-CLM methane discrepancy. These
+runs motivated the later conservative, donor-limited bog-only aqueous operator.
+Its first evaluation should compare otherwise identical runs with aqueous
+exchange enabled and disabled, while retaining the fen exclusion, before
+interpreting longer SPRUCE methane simulations.
 
 ### Paired 100-year AD plus 10-year final-spinup backend comparison
 
@@ -1442,8 +1480,8 @@ stock was `65.92 g C m-2`. The largest absolute DOM transport residual was
 year 11 and only `1.09e-8 g C m-2 yr-1` CH4 production, confirming that its
 collapsed methane cycle was a coupling error rather than a kinetic response.
 The corrected run had a closed lower boundary in the native hydrology solve,
-so diagnosed bottom DOM export was zero; lateral/runoff solute export remains
-a separate future development.
+so diagnosed bottom DOM export was zero; that run predated lateral aqueous
+solute exchange. Runoff chemistry remains a separate future development.
 
 ### Saturation-dependent DOM mobility sensitivity
 
@@ -1494,10 +1532,10 @@ source tree. A longer continuation is needed before selecting a mobility
 exponent; this one-year test establishes direction and mechanism, not an
 equilibrated profile or calibration.
 
-### Saturated-zone DOM macrodispersion sensitivity
+### Saturated-zone aqueous macrodispersion sensitivity
 
 The physical operator retains molecular diffusion and water-flux-driven
-mechanical dispersion but now permits an additional default-zero DOM
+mechanical dispersion but now permits an additional default-zero aqueous
 macrodispersion coefficient,
 `microbe_methane_aqueous_dom_saturated_macrodispersion`. This term represents
 unresolved mixing by connected macropores, preferential flow, and water-table
@@ -1510,8 +1548,9 @@ where `f_sat` ramps linearly from zero at
 to one at complete liquid saturation. Harmonic face conductance requires both
 adjoining layers to have a positive contribution, so the added pathway cannot
 cross an unsaturated or frozen intervening layer. DOM C, N, and organic P use
-the same matrix. Acetate is intentionally unchanged pending evidence that its
-effective mobility requires the same unresolved process.
+the same matrix. Acetate, dissolved NH4, and NO3 receive the same saturated
+mixing conductivity because the term represents a shared unresolved water
+path rather than a DOM-specific reaction.
 
 The coefficient is added in an explicit positive-value branch. A value of
 zero therefore executes the pre-existing conductivity expression without a

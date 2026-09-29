@@ -19,10 +19,14 @@ from transport_oracle import (
     methane_ebullition,
     nh4_dissolved_fraction,
     observed_dom_profile_restoration,
+    peat_burial_flux_profile,
+    peat_hydrologic_target_density,
     repartition,
     saturated_dom_macrodispersion_conductivity,
+    topounit_lateral_advection,
     topounit_lateral_diffusion,
     transport_residual,
+    update_peat_low_water_state,
     vertical_diffusion,
     zwt_saturated_layer_fraction,
 )
@@ -41,6 +45,7 @@ NAMELIST_DEFINITION = ELM_DIR / "bld" / "namelist_files" / "namelist_definition.
 BUILD_NAMELIST = ELM_DIR / "bld" / "ELMBuildNamelist.pm"
 ALLOCATION = ELM_DIR / "src" / "biogeochem" / "AllocationMod.F90"
 DESIGN = ELM_DIR / "docs" / "dev-guide" / "spruce-microbe-methane-design.md"
+SOIL_VERT_TRANSPORT = ELM_DIR / "src" / "biogeochem" / "SoilLittVertTranspMod.F90"
 
 
 class Phase3TransportTest(unittest.TestCase):
@@ -59,6 +64,185 @@ class Phase3TransportTest(unittest.TestCase):
         cls.namelist_definition = NAMELIST_DEFINITION.read_text(encoding="utf-8")
         cls.build_namelist = BUILD_NAMELIST.read_text(encoding="utf-8")
         cls.allocation_source = ALLOCATION.read_text(encoding="utf-8")
+        cls.soil_vert_transport_source = SOIL_VERT_TRANSPORT.read_text(encoding="utf-8")
+
+    def test_target_density_peat_layers_transmit_local_carbon_continuously(self) -> None:
+        dt = 1800.0
+        local_source = 2.0e-7
+        fluxes = peat_burial_flux_profile(
+            physical_density=[50.0, 75.0, 100.0],
+            target_density=[50.0, 75.0, 100.0],
+            layer_thickness=[0.1, 0.2, 0.4],
+            solid_source_increment=[
+                local_source * dt / 0.1,
+                local_source * dt / 0.2,
+                0.0,
+            ],
+            compaction_timescale=365.0 * 86400.0,
+            dt=dt,
+        )
+        self.assertAlmostEqual(fluxes[0], local_source)
+        self.assertAlmostEqual(fluxes[1], local_source)
+
+    def test_peat_burial_does_not_skip_the_receiving_layer(self) -> None:
+        dt = 1800.0
+        source = 2.0e-7
+        fluxes = peat_burial_flux_profile(
+            physical_density=[50.0, 75.0, 100.0],
+            target_density=[50.0, 75.0, 100.0],
+            layer_thickness=[0.1, 0.2, 0.4],
+            solid_source_increment=[source * dt / 0.1, 0.0, 0.0],
+            compaction_timescale=365.0 * 86400.0,
+            dt=dt,
+        )
+        self.assertAlmostEqual(fluxes[0], source)
+        self.assertEqual(fluxes[1], 0.0)
+
+    def test_peat_burial_retains_below_target_and_releases_above_target(self) -> None:
+        year = 365.0 * 86400.0
+        dt = 1800.0
+        supply = 1.0e-7
+        retained = peat_burial_flux_profile(
+            physical_density=[40.0, 75.0],
+            target_density=[50.0, 75.0],
+            layer_thickness=[0.1, 0.2],
+            solid_source_increment=[supply * dt / 0.1, 0.0],
+            compaction_timescale=year,
+            dt=dt,
+        )[0]
+        self.assertAlmostEqual(retained, max(0.0, supply - 1.0 / year))
+
+        released = peat_burial_flux_profile(
+            physical_density=[60.0, 75.0],
+            target_density=[50.0, 75.0],
+            layer_thickness=[0.1, 0.2],
+            solid_source_increment=[supply * dt / 0.1, 0.0],
+            compaction_timescale=year,
+            dt=dt,
+        )[0]
+        self.assertAlmostEqual(released, supply + 1.0 / year)
+
+    def test_peat_burial_uses_one_conserved_solid_budget(self) -> None:
+        source = self.soil_vert_transport_source
+        self.assertIn("peat_solid_source_flux - peat_storage_demand", source)
+        self.assertNotIn("peat_incoming_flux", source)
+        self.assertIn("if (.not. is_dissolved(s)) then", source)
+        self.assertIn("decomp_csources(c,l,s) * dzsoi_decomp(l)", source)
+        self.assertNotIn(
+            "max(decomp_cpools_vr(c,j,s) + decomp_csources(c,j,s), 0._r8)",
+            source,
+        )
+
+    def test_hydrologic_peat_target_respects_acrotelm_and_catotelm(self) -> None:
+        target = peat_hydrologic_target_density(
+            layer_center=[0.05, 0.15, 0.30, 0.45],
+            layer_thickness=[0.10, 0.10, 0.10, 0.10],
+            acrotelm_depth=0.25,
+            transition_width=0.10,
+            acrotelm_density=20.0,
+            catotelm_density=90.0,
+        )
+        self.assertAlmostEqual(target[0], 20.0)
+        self.assertAlmostEqual(target[1], 20.0)
+        self.assertAlmostEqual(target[2], 55.0)
+        self.assertAlmostEqual(target[3], 90.0)
+
+    def test_low_water_statistic_ignores_winter_and_smooths_annual_extreme(self) -> None:
+        state = (0.0, 0.0, 0.25, 0.0)
+        state = update_peat_low_water_state(
+            *state,
+            zwt=1.5,
+            dt=86400.0,
+            running_mean_days=30.0,
+            smoothing_years=10.0,
+            in_growing_season=False,
+            thawed=False,
+            new_year=False,
+            initial_acrotelm_depth=0.25,
+            maximum_depth=3.0,
+        )
+        self.assertEqual(state, (0.0, 0.0, 0.25, 0.0))
+
+        state = update_peat_low_water_state(
+            *state,
+            zwt=4.0,
+            dt=86400.0,
+            running_mean_days=30.0,
+            smoothing_years=10.0,
+            in_growing_season=True,
+            thawed=True,
+            new_year=False,
+            initial_acrotelm_depth=0.25,
+            maximum_depth=3.0,
+        )
+        self.assertEqual(state, (0.0, 0.0, 0.25, 0.0))
+
+        state = update_peat_low_water_state(
+            *state,
+            zwt=0.20,
+            dt=86400.0,
+            running_mean_days=30.0,
+            smoothing_years=10.0,
+            in_growing_season=True,
+            thawed=True,
+            new_year=False,
+            initial_acrotelm_depth=0.25,
+            maximum_depth=3.0,
+        )
+        self.assertAlmostEqual(state[0], 0.20)
+        self.assertAlmostEqual(state[1], 0.20)
+        self.assertAlmostEqual(state[3], 86400.0)
+
+        state = update_peat_low_water_state(
+            *state,
+            zwt=0.50,
+            dt=86400.0,
+            running_mean_days=30.0,
+            smoothing_years=10.0,
+            in_growing_season=True,
+            thawed=True,
+            new_year=False,
+            initial_acrotelm_depth=0.25,
+            maximum_depth=3.0,
+        )
+        self.assertGreater(state[0], 0.20)
+        self.assertLess(state[0], 0.50)
+        self.assertLess(state[1], 0.50)
+
+        previous_deepest = state[1]
+        state = update_peat_low_water_state(
+            *state,
+            zwt=0.0,
+            dt=86400.0,
+            running_mean_days=30.0,
+            smoothing_years=10.0,
+            in_growing_season=False,
+            thawed=False,
+            new_year=True,
+            initial_acrotelm_depth=0.25,
+            maximum_depth=3.0,
+        )
+        self.assertAlmostEqual(state[0], 0.0)
+        self.assertAlmostEqual(state[1], 0.0)
+        self.assertAlmostEqual(state[3], 0.0)
+        self.assertGreater(state[2], min(0.25, previous_deepest))
+        self.assertLess(state[2], max(0.25, previous_deepest))
+
+    def test_fortran_peat_target_uses_sustained_growing_season_zwt(self) -> None:
+        source = self.soil_vert_transport_source
+        for contract in (
+            "peat_zwt_running_mean",
+            "peat_zwt_gs_deepest",
+            "peat_zwt_stat_year",
+            "peat_acrotelm_depth",
+            "peat_zwt_running_alpha",
+            "peat_zwt_annual_alpha",
+            "peat_compaction_growing_season_start_doy",
+            "icefrac(c,1) < 0.5_r8",
+            "peat_compaction_transition_width",
+        ):
+            self.assertIn(contract, source)
+        self.assertNotIn("peat_compaction_efolding_depth)))", source)
 
     def test_repartition_conserves_bulk_at_limits_and_intermediate_fractions(self) -> None:
         for old_fraction, new_fraction in (
@@ -280,6 +464,11 @@ class Phase3TransportTest(unittest.TestCase):
         self.assertIn(
             "aqueous_dom_saturated_macrodispersion > 0._r8", self.state_source
         )
+        acetate_conductivity = self.state_source.split(
+            "acetate_diffusion_conductivity(j) = thawed_fraction", 1
+        )[1].split("nh4_diffusion_conductivity(j)", 1)[0]
+        self.assertIn("aqueous_dom_saturated_macrodispersion", acetate_conductivity)
+        self.assertIn("saturated_macrodispersion_scalar", acetate_conductivity)
 
     def test_zwt_macrodispersion_maps_vertical_saturated_overlap(self) -> None:
         self.assertEqual(zwt_saturated_layer_fraction(0.1, 0.2, 0.25), 0.0)
@@ -307,8 +496,12 @@ class Phase3TransportTest(unittest.TestCase):
         self.assertIn("advanceMicrobeAqueousTracerTransport", self.state_update_source)
         self.assertIn("use_microbe_aqueous_transport and", self.control_source)
         self.assertIn("are mutually exclusive", self.build_namelist)
-        self.assertIn("DOM carbon isotopes", self.control_source)
-        self.assertIn("DOM carbon isotopes", self.build_namelist)
+        self.assertIn(
+            "use_microbe_aqueous_transport does not yet transport",
+            self.control_source,
+        )
+        self.assertIn("C13 DOM; use_c13 must be false", self.control_source)
+        self.assertIn("does not yet transport C13 DOM", self.build_namelist)
 
     def test_peatland_vascular_uptake_uses_root_profile_without_n_hotspot_weighting(self) -> None:
         self.assertNotIn("use_microbe_unsaturated_root_n_access", self.varctl_source)
@@ -549,6 +742,68 @@ class Phase3TransportTest(unittest.TestCase):
         self.assertAlmostEqual(residual, 0.0, places=14)
         self.assertTrue(all(value >= 0.0 for profile in updated for value in profile))
         self.assertTrue(any(value > 0.0 for profile in updated[1:] for value in profile))
+
+    def test_lateral_aqueous_advection_is_area_weighted_and_conservative(self) -> None:
+        updated, flux, residual = topounit_lateral_advection(
+            concentration=[[10.0, 0.0], [0.0, 0.0]],
+            layer_thickness=[[1.0, 1.0], [1.0, 1.0]],
+            liquid_fraction=[[0.5, 0.5], [0.5, 0.5]],
+            mobile_fraction=[[1.0, 1.0], [1.0, 1.0]],
+            storage_fraction=[[1.0, 1.0], [1.0, 1.0]],
+            water_exchange=[[-0.01, 0.0], [0.0, 0.003 / 0.7]],
+            area_weight=[0.3, 0.7],
+            edges=[(0, 1)],
+            minimum_liquid_fraction=1.0e-12,
+            dt=1.0,
+        )
+        self.assertAlmostEqual(updated[0][0], 9.8)
+        self.assertAlmostEqual(updated[1][1], 0.06 / 0.7)
+        self.assertAlmostEqual(0.3 * flux[0] + 0.7 * flux[1], 0.0)
+        self.assertAlmostEqual(residual, 0.0, places=14)
+
+    def test_lateral_aqueous_advection_respects_mobile_fraction_and_donor_limit(self) -> None:
+        updated, _flux, residual = topounit_lateral_advection(
+            concentration=[[0.01], [0.0]],
+            layer_thickness=[[0.1], [0.1]],
+            liquid_fraction=[[0.5], [0.5]],
+            mobile_fraction=[[0.1], [0.1]],
+            storage_fraction=[[1.0], [1.0]],
+            water_exchange=[[-1.0], [1.0]],
+            area_weight=[0.5, 0.5],
+            edges=[(0, 1)],
+            minimum_liquid_fraction=1.0e-12,
+            dt=1.0,
+        )
+        self.assertAlmostEqual(updated[0][0], 0.0)
+        self.assertAlmostEqual(updated[1][0], 0.01)
+        self.assertAlmostEqual(residual, 0.0, places=14)
+
+    def test_adapter_limits_lateral_aqueous_exchange_to_bog_pairs(self) -> None:
+        for contract in (
+            "advanceMicrobeLateralAqueousTracer",
+            "use_microbe_lateral_aqueous_transport",
+            "top_pp%is_bog",
+            "qflx_lat_aqu_layer",
+            "MM_LATERAL_DOM_C_FLUX",
+            "MM_LATERAL_ACETATE_C_FLUX",
+            "MM_LATERAL_NH4_FLUX",
+            "MM_LATERAL_NO3_FLUX",
+            "MM_LATERAL_DOM_P_FLUX",
+            "MM_LATERAL_SOLUTION_P_FLUX",
+        ):
+            self.assertIn(contract, self.state_source)
+        self.assertIn(
+            "pure subroutine advanceMicrobeLateralAqueousTracer",
+            self.state_update_source,
+        )
+        self.assertIn(
+            "logical, public :: use_microbe_lateral_aqueous_transport = .false.",
+            self.varctl_source,
+        )
+        self.assertIn(
+            'entry id="use_microbe_lateral_aqueous_transport" type="logical"',
+            self.namelist_definition,
+        )
 
     def test_lateral_diffusion_respects_absolute_vertical_overlap(self) -> None:
         updated, residual = topounit_lateral_diffusion(

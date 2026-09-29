@@ -66,17 +66,26 @@ use_surface_structure_shading = .true.
 [surface_data]
 TopounitStructureShadeFrac = 0, 0, 1.0, 1, 0, 0.0, 2, 0, 0.0
 TopounitStructureLightTrans = 0, 0, 0.5, 1, 0, 1.0, 2, 0, 1.0
+TopounitStructureSnowRetention = 0, 0, 0.2, 1, 0, 1.0, 2, 0, 1.0
 ```
 
 This example gives topounit 0 a 50% effective reduction in ground shortwave
-absorption and leaves topounits 1 and 2 unchanged. The companion SPRUCE OLMT
-configuration uses this layout for its boardwalk/fen, hollow, and hummock
-topounits, respectively.
+absorption, retains 20% of its incident snowfall, and leaves topounits 1 and 2
+unchanged. The companion SPRUCE OLMT configuration uses this layout for its
+boardwalk/frustum, hollow, and hummock topounits, respectively.
+
+`TopounitStructureSnowRetention` is independent of the radiation switch and
+is applied directly to each topounit's snowfall forcing. It defaults to one,
+so existing surface datasets are BFB. Rainfall is deliberately unchanged:
+SPRUCE frustum rain drains inside the enclosure, while cleared or shed snow
+can leave the enclosed land area. Snow removed this way is therefore an
+external structure loss rather than surface runoff.
 
 This mechanism is more general than a hard-coded SPRUCE boardwalk fraction and
 can support controlled experiments with other structures, including solar
 panels. It is only a ground-shading approximation, however. It does not yet
 alter canopy radiation, partition intercepted energy among reflection,
 structure heating, and electrical export, calculate a structure temperature,
-or redistribute precipitation. Those processes require a separate structure
-energy and water balance and should not be inferred from this option.
+or dynamically partition precipitation. The snow-retention factor is a
+site-informed boundary condition, not a prognostic structure mass or energy
+balance.

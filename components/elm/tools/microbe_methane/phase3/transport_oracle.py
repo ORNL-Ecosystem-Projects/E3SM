@@ -529,6 +529,109 @@ def topounit_lateral_diffusion(
     return updated, residual
 
 
+def topounit_lateral_advection(
+    concentration: Sequence[Sequence[float]],
+    layer_thickness: Sequence[Sequence[float]],
+    liquid_fraction: Sequence[Sequence[float]],
+    mobile_fraction: Sequence[Sequence[float]],
+    storage_fraction: Sequence[Sequence[float]],
+    water_exchange: Sequence[Sequence[float]],
+    area_weight: Sequence[float],
+    edges: Sequence[tuple[int, int]],
+    minimum_liquid_fraction: float,
+    dt: float,
+) -> tuple[list[list[float]], list[float], float]:
+    """Conservative upwind advection driven by realized lateral water exchange."""
+    node_count = len(concentration)
+    layer_count = len(concentration[0]) if node_count else 0
+    updated = [list(profile) for profile in concentration]
+    column_flux = [0.0] * node_count
+    if node_count == 0 or layer_count == 0 or dt <= 0.0:
+        return updated, column_flux, 0.0
+
+    for first, second in edges:
+        first_water = sum(water_exchange[first])
+        second_water = sum(water_exchange[second])
+        if first_water < 0.0 < second_water:
+            donor, receiver = first, second
+        elif second_water < 0.0 < first_water:
+            donor, receiver = second, first
+        else:
+            continue
+
+        donor_water = area_weight[donor] * sum(
+            max(-water, 0.0) for water in water_exchange[donor]
+        )
+        receiver_water = area_weight[receiver] * sum(
+            max(water, 0.0) for water in water_exchange[receiver]
+        )
+        paired_water = min(donor_water, receiver_water)
+        if paired_water <= 0.0:
+            continue
+        donor_scale = paired_water / donor_water
+        receiver_weights = [
+            area_weight[receiver] * max(water, 0.0)
+            if storage_fraction[receiver][layer] > 0.0
+            and liquid_fraction[receiver][layer] >= minimum_liquid_fraction
+            else 0.0
+            for layer, water in enumerate(water_exchange[receiver])
+        ]
+        receiver_weight_sum = sum(receiver_weights)
+        if receiver_weight_sum <= 0.0:
+            continue
+
+        transferred = 0.0
+        for layer in range(layer_count):
+            if (
+                water_exchange[donor][layer] >= 0.0
+                or liquid_fraction[donor][layer] < minimum_liquid_fraction
+                or storage_fraction[donor][layer] <= 0.0
+            ):
+                continue
+            porewater_concentration = (
+                mobile_fraction[donor][layer]
+                * max(0.0, updated[donor][layer])
+                / liquid_fraction[donor][layer]
+            )
+            requested = (
+                area_weight[donor]
+                * donor_scale
+                * -water_exchange[donor][layer]
+                * porewater_concentration
+            )
+            available = (
+                area_weight[donor]
+                * storage_fraction[donor][layer]
+                * max(0.0, updated[donor][layer])
+                * layer_thickness[donor][layer]
+            )
+            layer_mass = min(requested, available)
+            updated[donor][layer] -= layer_mass / (
+                area_weight[donor]
+                * storage_fraction[donor][layer]
+                * layer_thickness[donor][layer]
+            )
+            transferred += layer_mass
+
+        for layer, receiver_weight in enumerate(receiver_weights):
+            if receiver_weight <= 0.0:
+                continue
+            layer_mass = transferred * receiver_weight / receiver_weight_sum
+            updated[receiver][layer] += layer_mass / (
+                area_weight[receiver]
+                * storage_fraction[receiver][layer]
+                * layer_thickness[receiver][layer]
+            )
+        column_flux[donor] -= transferred / (area_weight[donor] * dt)
+        column_flux[receiver] += transferred / (area_weight[receiver] * dt)
+
+    residual = sum(
+        area_weight[node] * column_flux[node] * dt
+        for node in range(node_count)
+    )
+    return updated, column_flux, residual
+
+
 def aerenchyma_transport(
     concentration: Sequence[float],
     atmospheric_equivalent_concentration: Sequence[float],
@@ -787,6 +890,136 @@ def zwt_saturated_layer_fraction(
         (layer_bottom - max(layer_top, water_table))
         / (layer_bottom - layer_top)
     )
+
+
+def peat_burial_flux_profile(
+    physical_density: Sequence[float],
+    target_density: Sequence[float],
+    layer_thickness: Sequence[float],
+    solid_source_increment: Sequence[float],
+    compaction_timescale: float,
+    dt: float,
+) -> list[float]:
+    """Top-down conservative peat storage and burial-throughflow oracle.
+
+    ``solid_source_increment`` has the ELM source-array units: concentration
+    added over one timestep. Returned fluxes are downward and have mass per
+    area per time units. The final layer is a closed storage layer, so there is
+    one returned outgoing flux for every layer except the last.
+    """
+    if not (
+        len(physical_density)
+        == len(target_density)
+        == len(layer_thickness)
+        == len(solid_source_increment)
+    ):
+        raise ValueError("peat burial profile inputs must have equal lengths")
+    if compaction_timescale <= 0.0 or dt <= 0.0:
+        raise ValueError("peat burial timescales must be positive")
+
+    outgoing_fluxes: list[float] = []
+    for layer in range(max(0, len(physical_density) - 1)):
+        thickness = max(0.0, layer_thickness[layer])
+        density = max(0.0, physical_density[layer])
+        local_source_flux = solid_source_increment[layer] * thickness / dt
+        storage_demand = (
+            (target_density[layer] - density)
+            * thickness
+            / compaction_timescale
+        )
+        outgoing_flux = max(
+            0.0, local_source_flux - storage_demand
+        )
+        available_flux = max(
+            0.0,
+            local_source_flux + density * thickness / dt,
+        )
+        outgoing_flux = min(outgoing_flux, available_flux)
+        outgoing_fluxes.append(outgoing_flux)
+    return outgoing_fluxes
+
+
+def peat_hydrologic_target_density(
+    layer_center: Sequence[float],
+    layer_thickness: Sequence[float],
+    acrotelm_depth: float,
+    transition_width: float,
+    acrotelm_density: float,
+    catotelm_density: float,
+) -> list[float]:
+    """Layer-mean two-zone peat-density target with a linear transition."""
+    if len(layer_center) != len(layer_thickness):
+        raise ValueError("peat target profile inputs must have equal lengths")
+    if transition_width <= 0.0:
+        raise ValueError("peat transition width must be positive")
+
+    transition_top = max(0.0, acrotelm_depth)
+    transition_bottom = transition_top + transition_width
+
+    def integrated_fraction(depth: float) -> float:
+        if depth <= transition_top:
+            return 0.0
+        if depth < transition_bottom:
+            return (depth - transition_top) ** 2 / (2.0 * transition_width)
+        return depth - transition_top - 0.5 * transition_width
+
+    result: list[float] = []
+    for center, thickness in zip(layer_center, layer_thickness):
+        thickness = max(0.0, thickness)
+        if thickness == 0.0:
+            result.append(acrotelm_density)
+            continue
+        layer_top = max(0.0, center - 0.5 * thickness)
+        layer_bottom = layer_top + thickness
+        catotelm_fraction = _clamp(
+            (integrated_fraction(layer_bottom) - integrated_fraction(layer_top))
+            / thickness
+        )
+        result.append(
+            acrotelm_density
+            + (catotelm_density - acrotelm_density) * catotelm_fraction
+        )
+    return result
+
+
+def update_peat_low_water_state(
+    running_mean: float,
+    annual_deepest: float,
+    acrotelm_depth: float,
+    elapsed: float,
+    zwt: float,
+    dt: float,
+    running_mean_days: float,
+    smoothing_years: float,
+    in_growing_season: bool,
+    thawed: bool,
+    new_year: bool,
+    initial_acrotelm_depth: float,
+    maximum_depth: float,
+) -> tuple[float, float, float, float]:
+    """Reference update for the restartable sustained low-water statistic."""
+    if dt <= 0.0 or running_mean_days <= 0.0 or smoothing_years <= 0.0:
+        raise ValueError("peat water-table timescales must be positive")
+    if acrotelm_depth <= 0.0 or acrotelm_depth > maximum_depth:
+        acrotelm_depth = min(initial_acrotelm_depth, maximum_depth)
+    if new_year:
+        if elapsed > 0.0:
+            annual_alpha = 1.0 - math.exp(-1.0 / smoothing_years)
+            acrotelm_depth += annual_alpha * (annual_deepest - acrotelm_depth)
+        running_mean = 0.0
+        annual_deepest = 0.0
+        elapsed = 0.0
+    if in_growing_season and thawed and zwt <= maximum_depth:
+        sample = max(zwt, 0.0)
+        if elapsed <= 0.0:
+            running_mean = sample
+            annual_deepest = sample
+        else:
+            running_alpha = 1.0 - math.exp(-dt / (running_mean_days * 86400.0))
+            running_mean += running_alpha * (sample - running_mean)
+            annual_deepest = max(annual_deepest, running_mean)
+        elapsed += dt
+    return running_mean, annual_deepest, acrotelm_depth, elapsed
 
 
 def legacy_fickian_gas_diffusivity(

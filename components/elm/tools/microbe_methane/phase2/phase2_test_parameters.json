@@ -17,6 +17,10 @@
         "s1s2_f", "s2s3_f", "s3s4_f"
       ]
     },
+    "new_redox_sensitivity_assumption": {
+      "description": "New structural sensitivity separating litter/SOM solubilization from the stronger aerobic respiration response.",
+      "parameters": ["dom_solubilization_anoxic_fraction"]
+    },
     "clm_spruce_unverified_text_value": {
       "description": "Value is named in the checked-in microbepar_in, but the positional reader and PFT NetCDF do not establish that a historical executable used it.",
       "parameters": [
@@ -81,6 +85,7 @@
     "microbe_som3_q10": {"value": 2.0, "units": "1", "long_name": "SOM3 Q10 when the microbial decomposition cascade is enabled"},
     "microbe_som4_q10": {"value": 2.5, "units": "1", "long_name": "SOM4 Q10 when the microbial decomposition cascade is enabled"},
     "microbe_dom_q10": {"value": 1.25, "units": "1", "long_name": "DOM Q10 when the microbial decomposition cascade is enabled"},
+    "dom_solubilization_anoxic_fraction": {"value": 0.0, "units": "1", "long_name": "fraction of litter and SOM solubilization activity retained at zero oxygen availability"},
     "l1dom_f": {"value": 0.10, "units": "1", "long_name": "LITR1 solubilization fraction to DOM"},
     "l2dom_f": {"value": 0.08, "units": "1", "long_name": "LITR2 solubilization fraction to DOM"},
     "l3dom_f": {"value": 0.06, "units": "1", "long_name": "LITR3 solubilization fraction to DOM"},

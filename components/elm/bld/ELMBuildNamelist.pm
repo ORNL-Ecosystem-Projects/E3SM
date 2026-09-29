@@ -3056,6 +3056,7 @@ sub setup_logic_peatland_microbe_defaults {
 
   my %peatland_microbe_defaults = (
     'use_legacy_ch4_with_microbe'             => '.false.',
+    'use_elm_microbe_methane_transport'       => '.true.',
     'use_microbe_aqueous_transport'           => '.true.',
     'use_microbe_dom_preferential_flow'       => '.false.',
     'use_microbe_zwt_macrodispersion'          => '.true.',

@@ -44,7 +44,7 @@ EXPECTED_SCALAR_PARAMETERS = {
     "bacteria_initial_c", "fungi_initial_c", "dom_initial_c",
     "dom_som_diffusion_multiplier",
     "microbe_som2_q10", "microbe_som3_q10", "microbe_som4_q10",
-    "microbe_dom_q10",
+    "microbe_dom_q10", "dom_solubilization_anoxic_fraction",
     "l1dom_f", "l2dom_f", "l3dom_f",
     "s1dom_f", "s2dom_f", "s3dom_f", "s4dom_f",
     "l1s1_f", "l2s2_f", "l3s3_f",

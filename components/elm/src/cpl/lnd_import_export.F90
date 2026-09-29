@@ -88,13 +88,19 @@ contains
     real(r8) :: timetemp(2)
     real(r8) :: latixy(500000), longxy(500000)
     integer ::  ierr, varid, dimid, yr, mon, day, tod, nindex(2), caldaym(13)
+    integer ::  popdens_nlon, popdens_nlat, popdens_lon_dimid, popdens_lat_dimid
+    integer ::  lightng_nlon, lightng_nlat, lightng_ntime
+    integer ::  lightng_lon_dimid, lightng_lat_dimid, lightng_time_dimid
+    integer ::  deposition_nlon, deposition_nlat
+    integer ::  deposition_lon_dimid, deposition_lat_dimid
+    integer ::  aerosol_nlon, aerosol_nlat, aerosol_lon_dimid, aerosol_lat_dimid
     integer ::  ncid, met_ncids(14), mask_ncid, thisncid, ng, tm
     integer ::  aindex(2), tindex(14,2), starti(3), counti(3)
     integer ::  grid_map(500000), zone_map(500000)
     integer ::  met_nvars, nyears_spinup, nyears_trans, starti_site, endi_site
-    real(r8) :: smap05_lat(360), smap05_lon(720)
-    real(r8) :: smapt62_lat(94), smapt62_lon(192)
-    real(r8) :: smap2_lat(96), smap2_lon(144)
+    real(r8), allocatable :: popdens_lat(:), popdens_lon(:)
+    real(r8), allocatable :: lightng_lat(:), lightng_lon(:)
+    real(r8), allocatable :: deposition_lat(:), deposition_lon(:)
     real(r8) :: thisdist, mindist, thislon
     real(r8) :: tbot, tempndep(1,1,158), thiscalday, wt1(14), wt2(14), thisdoy
     real(r8) :: site_metdata(14,12)
@@ -524,9 +530,11 @@ contains
             if (atm2lnd_vars%metsource == 5) mystart=1850
 
             if (yr .lt. 1850) then 
-              atm2lnd_vars%tindex(g,v,1) = (mod(yr-1,nyears_spinup) + (1850-mystart)) * 365 * nint(24./atm2lnd_vars%timeres(v))
+              atm2lnd_vars%tindex(g,v,1) = modulo(modulo(yr-1,nyears_spinup) + (1850-mystart), nyears_spinup) * &
+                                            365 * nint(24./atm2lnd_vars%timeres(v))
             else if (yr .le. atm2lnd_vars%endyear_met_spinup) then
-              atm2lnd_vars%tindex(g,v,1) = (mod(yr-1850,nyears_spinup) + (1850-mystart)) * 365 * nint(24./atm2lnd_vars%timeres(v))
+              atm2lnd_vars%tindex(g,v,1) = modulo(modulo(yr-1850,nyears_spinup) + (1850-mystart), nyears_spinup) * &
+                                            365 * nint(24./atm2lnd_vars%timeres(v))
             else
               atm2lnd_vars%tindex(g,v,1) = (yr - atm2lnd_vars%startyear_met) * 365 * nint(24./atm2lnd_vars%timeres(v))
             end if
@@ -779,20 +787,54 @@ contains
               call relavu( nu_nml )
 
               ierr = nf90_open(trim(stream_fldFileName_popdens), NF90_NOWRITE, ncid)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR opening population-density stream file')
+              ierr = nf90_inq_dimid(ncid, 'lon', popdens_lon_dimid)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR finding lon dimension in population-density stream file')
+              ierr = nf90_inquire_dimension(ncid, popdens_lon_dimid, len=popdens_nlon)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR reading lon dimension in population-density stream file')
+              ierr = nf90_inq_dimid(ncid, 'lat', popdens_lat_dimid)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR finding lat dimension in population-density stream file')
+              ierr = nf90_inquire_dimension(ncid, popdens_lat_dimid, len=popdens_nlat)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR reading lat dimension in population-density stream file')
+            end if
+
+            if (i .eq. 1) then
+              call mpi_bcast(popdens_nlon, 1, MPI_INTEGER, 0, mpicom, ier)
+              call mpi_bcast(popdens_nlat, 1, MPI_INTEGER, 0, mpicom, ier)
+
+              if (associated(atm2lnd_vars%hdm1)) then
+                if (size(atm2lnd_vars%hdm1,1) /= popdens_nlon .or. &
+                    size(atm2lnd_vars%hdm1,2) /= popdens_nlat) then
+                  deallocate(atm2lnd_vars%hdm1, atm2lnd_vars%hdm2)
+                end if
+              end if
+              if (.not. associated(atm2lnd_vars%hdm1)) then
+                allocate(atm2lnd_vars%hdm1(popdens_nlon,popdens_nlat,1))
+                allocate(atm2lnd_vars%hdm2(popdens_nlon,popdens_nlat,1))
+              end if
+              allocate(popdens_lon(popdens_nlon), popdens_lat(popdens_nlat))
+            end if
+
+            if (masterproc .and. i .eq. 1) then
               ierr = nf90_inq_varid(ncid, 'lat', varid)
-              ierr = nf90_get_var(ncid, varid, smap05_lat)
+              if (ierr == nf90_noerr) ierr = nf90_get_var(ncid, varid, popdens_lat)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR reading lat from population-density stream file')
               ierr = nf90_inq_varid(ncid, 'lon', varid)
-              ierr = nf90_get_var(ncid, varid, smap05_lon)
+              if (ierr == nf90_noerr) ierr = nf90_get_var(ncid, varid, popdens_lon)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR reading lon from population-density stream file')
               ierr = nf90_inq_varid(ncid, 'hdm', varid)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR finding hdm in population-density stream file')
               starti(1:2) = 1 
               starti(3)   = nindex(1)
-              counti(1) = 720
-              counti(2) = 360
+              counti(1) = popdens_nlon
+              counti(2) = popdens_nlat
               counti(3) = 1       
               ierr = nf90_get_var(ncid, varid, atm2lnd_vars%hdm1, starti, counti)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR reading first hdm field from population-density stream file')
               starti(3) = nindex(2)
               if (nindex(1) .ne. nindex(2)) then 
                   ierr = nf90_get_var(ncid, varid, atm2lnd_vars%hdm2, starti, counti)
+                  if (ierr /= nf90_noerr) call endrun(msg='ERROR reading second hdm field from population-density stream file')
               else
                   atm2lnd_vars%hdm2 = atm2lnd_vars%hdm1 
               end if
@@ -800,25 +842,25 @@ contains
             end if
 
             if (i .eq. 1) then 
-              call mpi_bcast (atm2lnd_vars%hdm1, 360*720, MPI_REAL8, 0, mpicom, ier)
-              call mpi_bcast (atm2lnd_vars%hdm2, 360*720, MPI_REAL8, 0, mpicom, ier)
-              call mpi_bcast (smap05_lon, 720, MPI_REAL8, 0, mpicom, ier)
-              call mpi_bcast (smap05_lat, 360, MPI_REAL8, 0, mpicom, ier)
+              call mpi_bcast (atm2lnd_vars%hdm1, popdens_nlon*popdens_nlat, MPI_REAL8, 0, mpicom, ier)
+              call mpi_bcast (atm2lnd_vars%hdm2, popdens_nlon*popdens_nlat, MPI_REAL8, 0, mpicom, ier)
+              call mpi_bcast (popdens_lon, popdens_nlon, MPI_REAL8, 0, mpicom, ier)
+              call mpi_bcast (popdens_lat, popdens_nlat, MPI_REAL8, 0, mpicom, ier)
             end if
           end if
 
           !figure out which point to get
           if (atm2lnd_vars%loaded_bypassdata == 0) then 
             mindist=99999
-            do thisx = 1,720
-              do thisy = 1,360
+            do thisx = 1,popdens_nlon
+              do thisy = 1,popdens_nlat
                   if (ldomain%lonc(g) .lt. 0) then
-                      if (smap05_lon(thisx) >= 180) smap05_lon(thisx) = smap05_lon(thisx)-360._r8
+                      if (popdens_lon(thisx) >= 180) popdens_lon(thisx) = popdens_lon(thisx)-360._r8
                   else if (ldomain%lonc(g) .ge. 180) then
-                      if (smap05_lon(thisx) < 0) smap05_lon(thisx) = smap05_lon(thisx) + 360._r8
+                      if (popdens_lon(thisx) < 0) popdens_lon(thisx) = popdens_lon(thisx) + 360._r8
                   end if
-                  thisdist = 100*((smap05_lat(thisy) - ldomain%latc(g))**2 + &
-                          (smap05_lon(thisx) - ldomain%lonc(g))**2)**0.5
+                  thisdist = 100*((popdens_lat(thisy) - ldomain%latc(g))**2 + &
+                          (popdens_lon(thisx) - ldomain%lonc(g))**2)**0.5
                   if (thisdist .lt. mindist) then
                       mindist = thisdist
                       atm2lnd_vars%hdmind(g,1) = thisx
@@ -847,32 +889,65 @@ contains
             close(nu_nml)
             call relavu( nu_nml )
 
-            !Get all of the data (master processor only)
-            allocate(atm2lnd_vars%lnfm_all       (192,94,2920))
+            ! Get the source-grid shape and all data on the master processor.
+            ! The standard forcing is 192x94, but portable site packages use a
+            ! spatially subset 1x1 file. Do not assume the global-grid shape.
             ierr = nf90_open(trim(stream_fldFileName_lightng), NF90_NOWRITE, ncid)
-            ierr = nf90_inq_varid(ncid, 'lat', varid)
-            ierr = nf90_get_var(ncid, varid, smapt62_lat)
-            ierr = nf90_inq_varid(ncid, 'lon', varid)
-            ierr = nf90_get_var(ncid, varid, smapt62_lon)
-            ierr = nf90_inq_varid(ncid, 'lnfm', varid)
-            ierr = nf90_get_var(ncid, varid, atm2lnd_vars%lnfm_all)
-            ierr = nf90_close(ncid)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR opening lightning file: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_inq_dimid(ncid, 'lon', lightng_lon_dimid)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR finding lightning lon dimension: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_inquire_dimension(ncid, lightng_lon_dimid, len=lightng_nlon)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR reading lightning lon dimension: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_inq_dimid(ncid, 'lat', lightng_lat_dimid)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR finding lightning lat dimension: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_inquire_dimension(ncid, lightng_lat_dimid, len=lightng_nlat)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR reading lightning lat dimension: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_inq_dimid(ncid, 'time', lightng_time_dimid)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR finding lightning time dimension: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_inquire_dimension(ncid, lightng_time_dimid, len=lightng_ntime)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR reading lightning time dimension: '//trim(nf90_strerror(ierr)))
+            if (lightng_ntime /= 2920) then
+              call endrun(msg='ERROR: CPL-bypass lightning forcing must contain 2920 three-hourly records')
+            end if
           end if
           if (atm2lnd_vars%loaded_bypassdata .eq. 0 .and. i .eq. 1) then
-            call mpi_bcast (smapt62_lon, 192, MPI_REAL8, 0, mpicom, ier)
-            call mpi_bcast (smapt62_lat, 94, MPI_REAL8, 0, mpicom, ier)
+            call mpi_bcast(lightng_nlon, 1, MPI_INTEGER, 0, mpicom, ier)
+            call mpi_bcast(lightng_nlat, 1, MPI_INTEGER, 0, mpicom, ier)
+            call mpi_bcast(lightng_ntime, 1, MPI_INTEGER, 0, mpicom, ier)
+            allocate(lightng_lon(lightng_nlon), lightng_lat(lightng_nlat))
+          end if
+          if (atm2lnd_vars%loaded_bypassdata .eq. 0 .and. masterproc .and. i .eq. 1) then
+            allocate(atm2lnd_vars%lnfm_all(lightng_nlon,lightng_nlat,lightng_ntime))
+            ierr = nf90_inq_varid(ncid, 'lat', varid)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR finding lightning latitude: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_get_var(ncid, varid, lightng_lat)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR reading lightning latitude: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_inq_varid(ncid, 'lon', varid)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR finding lightning longitude: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_get_var(ncid, varid, lightng_lon)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR reading lightning longitude: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_inq_varid(ncid, 'lnfm', varid)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR finding lightning data: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_get_var(ncid, varid, atm2lnd_vars%lnfm_all)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR reading lightning data: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_close(ncid)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR closing lightning file: '//trim(nf90_strerror(ierr)))
+          end if
+          if (atm2lnd_vars%loaded_bypassdata .eq. 0 .and. i .eq. 1) then
+            call mpi_bcast(lightng_lon, lightng_nlon, MPI_REAL8, 0, mpicom, ier)
+            call mpi_bcast(lightng_lat, lightng_nlat, MPI_REAL8, 0, mpicom, ier)
           end if
           if (atm2lnd_vars%loaded_bypassdata .eq. 0) then
             mindist=99999
-            do thisx = 1,192
-              do thisy = 1,94
+            do thisx = 1,lightng_nlon
+              do thisy = 1,lightng_nlat
                 if (ldomain%lonc(g) .lt. 0) then 
-                  if (smapt62_lon(thisx) >= 180) smapt62_lon(thisx) = smapt62_lon(thisx)-360._r8
+                  if (lightng_lon(thisx) >= 180) lightng_lon(thisx) = lightng_lon(thisx)-360._r8
                 else if (ldomain%lonc(g) .ge. 180) then 
-                  if (smapt62_lon(thisx) < 0) smapt62_lon(thisx) = smapt62_lon(thisx) + 360._r8
+                  if (lightng_lon(thisx) < 0) lightng_lon(thisx) = lightng_lon(thisx) + 360._r8
                 end if
-                thisdist = 100*((smapt62_lat(thisy) - ldomain%latc(g))**2 + &
-                            (smapt62_lon(thisx) - ldomain%lonc(g))**2)**0.5
+                thisdist = 100*((lightng_lat(thisy) - ldomain%latc(g))**2 + &
+                            (lightng_lon(thisx) - ldomain%lonc(g))**2)**0.5
                 if (thisdist .lt. mindist) then
                   mindist = thisdist
                   lnfmind(1) = thisx
@@ -925,44 +1000,74 @@ contains
               call relavu( nu_nml )
 
               ierr = nf90_open(trim(stream_fldFileName_ndep), nf90_nowrite, ncid)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR opening N deposition file: '//trim(nf90_strerror(ierr)))
+              ierr = nf90_inq_dimid(ncid, 'lon', deposition_lon_dimid)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR finding N deposition lon dimension: '//trim(nf90_strerror(ierr)))
+              ierr = nf90_inquire_dimension(ncid, deposition_lon_dimid, len=deposition_nlon)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR reading N deposition lon dimension: '//trim(nf90_strerror(ierr)))
+              ierr = nf90_inq_dimid(ncid, 'lat', deposition_lat_dimid)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR finding N deposition lat dimension: '//trim(nf90_strerror(ierr)))
+              ierr = nf90_inquire_dimension(ncid, deposition_lat_dimid, len=deposition_nlat)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR reading N deposition lat dimension: '//trim(nf90_strerror(ierr)))
+            end if
+            if (i .eq. 1) then
+              call mpi_bcast(deposition_nlon, 1, MPI_INTEGER, 0, mpicom, ier)
+              call mpi_bcast(deposition_nlat, 1, MPI_INTEGER, 0, mpicom, ier)
+              allocate(deposition_lon(deposition_nlon), deposition_lat(deposition_nlat))
+              if (size(atm2lnd_vars%ndep1,1) /= deposition_nlon .or. &
+                  size(atm2lnd_vars%ndep1,2) /= deposition_nlat) then
+                deallocate(atm2lnd_vars%ndep1, atm2lnd_vars%ndep2)
+                allocate(atm2lnd_vars%ndep1(deposition_nlon,deposition_nlat,1))
+                allocate(atm2lnd_vars%ndep2(deposition_nlon,deposition_nlat,1))
+              end if
+            end if
+            if (masterproc .and. i .eq. 1) then
               ierr = nf90_inq_varid(ncid, 'lat', varid)
-              ierr = nf90_get_var(ncid, varid, smap2_lat)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR finding N deposition latitude: '//trim(nf90_strerror(ierr)))
+              ierr = nf90_get_var(ncid, varid, deposition_lat)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR reading N deposition latitude: '//trim(nf90_strerror(ierr)))
               ierr = nf90_inq_varid(ncid, 'lon', varid)      
-              ierr = nf90_get_var(ncid, varid, smap2_lon)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR finding N deposition longitude: '//trim(nf90_strerror(ierr)))
+              ierr = nf90_get_var(ncid, varid, deposition_lon)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR reading N deposition longitude: '//trim(nf90_strerror(ierr)))
               ierr = nf90_inq_varid(ncid, 'NDEP_year', varid)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR finding N deposition data: '//trim(nf90_strerror(ierr)))
               starti(1:2) = 1
               starti(3)   = nindex(1)
-              counti(1)   = 144
-              counti(2)   = 96
+              counti(1)   = deposition_nlon
+              counti(2)   = deposition_nlat
               counti(3)   = 1
               ierr = nf90_get_var(ncid, varid, atm2lnd_vars%ndep1, starti, counti)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR reading N deposition data: '//trim(nf90_strerror(ierr)))
               if (nindex(1) .ne. nindex(2)) then 
                 starti(3) = nindex(2)
                 ierr = nf90_get_var(ncid, varid, atm2lnd_vars%ndep2, starti, counti)
+                if (ierr /= nf90_noerr) call endrun(msg='ERROR reading next-year N deposition: '//trim(nf90_strerror(ierr)))
               else
                 atm2lnd_vars%ndep2 = atm2lnd_vars%ndep1
               end if
               ierr = nf90_close(ncid)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR closing N deposition file: '//trim(nf90_strerror(ierr)))
              end if
              if (i .eq. 1) then
-               call mpi_bcast (atm2lnd_vars%ndep1, 144*96, MPI_REAL8, 0, mpicom, ier)
-               call mpi_bcast (atm2lnd_vars%ndep2, 144*96, MPI_REAL8, 0, mpicom, ier)
-               call mpi_bcast (smap2_lon, 144, MPI_REAL8, 0, mpicom, ier)
-               call mpi_bcast (smap2_lat, 96, MPI_REAL8, 0, mpicom, ier)
+               call mpi_bcast(atm2lnd_vars%ndep1, deposition_nlon*deposition_nlat, MPI_REAL8, 0, mpicom, ier)
+               call mpi_bcast(atm2lnd_vars%ndep2, deposition_nlon*deposition_nlat, MPI_REAL8, 0, mpicom, ier)
+               call mpi_bcast(deposition_lon, deposition_nlon, MPI_REAL8, 0, mpicom, ier)
+               call mpi_bcast(deposition_lat, deposition_nlat, MPI_REAL8, 0, mpicom, ier)
              end if
           end if
 
           if (atm2lnd_vars%loaded_bypassdata .eq. 0) then 
             mindist=99999
-            do thisx = 1,144
-              do thisy = 1,96
+            do thisx = 1,deposition_nlon
+              do thisy = 1,deposition_nlat
                 if (ldomain%lonc(g) .lt. 0) then 
-                  if (smap2_lon(thisx) >= 180) smap2_lon(thisx) = smap2_lon(thisx)-360._r8
+                  if (deposition_lon(thisx) >= 180) deposition_lon(thisx) = deposition_lon(thisx)-360._r8
                 else if (ldomain%lonc(g) .ge. 180) then 
-                  if (smap2_lon(thisx) < 0) smap2_lon(thisx) = smap2_lon(thisx) + 360._r8
+                  if (deposition_lon(thisx) < 0) deposition_lon(thisx) = deposition_lon(thisx) + 360._r8
                 end if
-                thislon = smap2_lon(thisx)
-                thisdist = 100*((smap2_lat(thisy) - ldomain%latc(g))**2 + &
+                thislon = deposition_lon(thisx)
+                thisdist = 100*((deposition_lat(thisy) - ldomain%latc(g))**2 + &
                               (thislon - ldomain%lonc(g))**2)**0.5
                 if (thisdist .lt. mindist) then
                   mindist = thisdist
@@ -999,38 +1104,72 @@ contains
             aerovars(13) = 'DSTX03WD'
             aerovars(14) = 'DSTX04WD'
             ierr = nf90_open(trim(aero_file), nf90_nowrite, ncid)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR opening aerosol file: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_inq_dimid(ncid, 'lon', aerosol_lon_dimid)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR finding aerosol lon dimension: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_inquire_dimension(ncid, aerosol_lon_dimid, len=aerosol_nlon)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR reading aerosol lon dimension: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_inq_dimid(ncid, 'lat', aerosol_lat_dimid)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR finding aerosol lat dimension: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_inquire_dimension(ncid, aerosol_lat_dimid, len=aerosol_nlat)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR reading aerosol lat dimension: '//trim(nf90_strerror(ierr)))
+          end if
+          if (i .eq. 1) then
+            call mpi_bcast(aerosol_nlon, 1, MPI_INTEGER, 0, mpicom, ier)
+            call mpi_bcast(aerosol_nlat, 1, MPI_INTEGER, 0, mpicom, ier)
+            if (.not. allocated(deposition_lon)) then
+              deposition_nlon = aerosol_nlon
+              deposition_nlat = aerosol_nlat
+              allocate(deposition_lon(deposition_nlon), deposition_lat(deposition_nlat))
+            else if (aerosol_nlon /= deposition_nlon .or. aerosol_nlat /= deposition_nlat) then
+              call endrun(msg='ERROR: aerosol and N deposition forcing grids must match in CPL-bypass mode')
+            end if
+            if (size(atm2lnd_vars%aerodata,2) /= deposition_nlon .or. &
+                size(atm2lnd_vars%aerodata,3) /= deposition_nlat) then
+              deallocate(atm2lnd_vars%aerodata)
+              allocate(atm2lnd_vars%aerodata(14,deposition_nlon,deposition_nlat,14))
+            end if
+          end if
+          if (masterproc .and. i .eq. 1) then
             ierr = nf90_inq_varid(ncid, 'lat', varid)
-            ierr = nf90_get_var(ncid, varid, smap2_lat)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR finding aerosol latitude: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_get_var(ncid, varid, deposition_lat)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR reading aerosol latitude: '//trim(nf90_strerror(ierr)))
             ierr = nf90_inq_varid(ncid, 'lon', varid)      
-            ierr = nf90_get_var(ncid, varid, smap2_lon)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR finding aerosol longitude: '//trim(nf90_strerror(ierr)))
+            ierr = nf90_get_var(ncid, varid, deposition_lon)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR reading aerosol longitude: '//trim(nf90_strerror(ierr)))
             starti(1:2) = 1
             starti(3)   = max((min(yr,2100)-1849)*12+1, 13)-1
-            counti(1)   = 144
-            counti(2)   = 96
+            counti(1)   = aerosol_nlon
+            counti(2)   = aerosol_nlat
             counti(3)   = 14
             do av=1,14
               ierr = nf90_inq_varid(ncid, trim(aerovars(av)), varid)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR finding aerosol data: '//trim(nf90_strerror(ierr)))
               ierr = nf90_get_var(ncid, varid, atm2lnd_vars%aerodata(av,:,:,:), starti, counti)
+              if (ierr /= nf90_noerr) call endrun(msg='ERROR reading aerosol data: '//trim(nf90_strerror(ierr)))
             end do
             ierr = nf90_close(ncid)
+            if (ierr /= nf90_noerr) call endrun(msg='ERROR closing aerosol file: '//trim(nf90_strerror(ierr)))
           end if
           if (i .eq. 1) then 
-             call mpi_bcast (atm2lnd_vars%aerodata, 14*144*96*14, MPI_REAL8, 0, mpicom, ier)
+             call mpi_bcast(atm2lnd_vars%aerodata, 14*deposition_nlon*deposition_nlat*14, MPI_REAL8, 0, mpicom, ier)
           end if
         end if
 
         !Use ndep grid indices since they're on the same grid
         if (atm2lnd_vars%loaded_bypassdata .eq. 0 .and. (.not. (use_fates .or. use_cn) )   ) then
             mindist=99999
-            do thisx = 1,144
-              do thisy = 1,96
+            do thisx = 1,deposition_nlon
+              do thisy = 1,deposition_nlat
                 if (ldomain%lonc(g) .lt. 0) then
-                  if (smap2_lon(thisx) >= 180) smap2_lon(thisx) = smap2_lon(thisx)-360._r8
+                  if (deposition_lon(thisx) >= 180) deposition_lon(thisx) = deposition_lon(thisx)-360._r8
                 else if (ldomain%lonc(g) .ge. 180) then
-                  if (smap2_lon(thisx) < 0) smap2_lon(thisx) = smap2_lon(thisx) + 360._r8
+                  if (deposition_lon(thisx) < 0) deposition_lon(thisx) = deposition_lon(thisx) + 360._r8
                 end if
-                thislon = smap2_lon(thisx)
-                thisdist = 100*((smap2_lat(thisy) - ldomain%latc(g))**2 + &
+                thislon = deposition_lon(thisx)
+                thisdist = 100*((deposition_lat(thisy) - ldomain%latc(g))**2 + &
                               (thislon - ldomain%lonc(g))**2)**0.5
                 if (thisdist .lt. mindist) then
                   mindist = thisdist

@@ -36,6 +36,13 @@ STATE_HISTORY_NAMES = {
     "MM_CONC_O2_UNSAT", "MM_CONC_O2_SAT",
     "MM_CONC_CO2_UNSAT", "MM_CONC_CO2_SAT",
     "MM_CONC_H2_UNSAT", "MM_CONC_H2_SAT",
+    "C14_MM_ACETATE_C_UNSAT", "C14_MM_ACETATE_C_SAT",
+    "C14_MM_ACET_METH_C_UNSAT", "C14_MM_ACET_METH_C_SAT",
+    "C14_MM_H2_METH_C_UNSAT", "C14_MM_H2_METH_C_SAT",
+    "C14_MM_AER_METHANOTROPH_C_UNSAT", "C14_MM_AER_METHANOTROPH_C_SAT",
+    "C14_MM_ANAER_METHANOTROPH_C_UNSAT", "C14_MM_ANAER_METHANOTROPH_C_SAT",
+    "C14_MM_CONC_CH4_UNSAT", "C14_MM_CONC_CH4_SAT",
+    "C14_MM_CONC_CO2_UNSAT", "C14_MM_CONC_CO2_SAT",
 }
 
 CLM_MICROBE_RUNTIME_VALUES = {
@@ -228,6 +235,8 @@ class Phase3StateTest(unittest.TestCase):
         ))
         diagnostic_pointers = {
             "o2_stress_unsat_col", "o2_stress_sat_col",
+            "o2_stress_above_wt_col", "o2_stress_below_wt_col",
+            "unsat_wt_saturated_fraction_col",
             "ch4_porewater_col", "ch4_porewater_unsat_col", "ch4_porewater_sat_col",
             "dom_porewater_c_col", "dom_advective_flux_col", "dom_diffusive_flux_col",
             "dom_macrodispersion_scalar_col", "dom_diffusion_conductivity_col",
@@ -236,7 +245,8 @@ class Phase3StateTest(unittest.TestCase):
             "dom_standard_microbe_return_col", "dom_guild_mortality_return_col",
             "dom_standard_microbe_uptake_col", "dom_fermentation_col",
             "dom_to_som_col", "dom_cascade_respiration_col",
-            "dom_internal_transport_convergence_col", "dom_drainage_loss_col",
+            "dom_internal_transport_convergence_col", "dom_lateral_transport_tendency_col",
+            "dom_drainage_loss_col",
             "dom_net_tendency_col", "dom_profile_restoring_col",
             "dom_budget_residual_col", "dom_complete_bypass_tendency_col",
             "mineral_nh4_porewater_col", "mineral_no3_porewater_col",
@@ -246,7 +256,8 @@ class Phase3StateTest(unittest.TestCase):
         }
         self.assertTrue(diagnostic_pointers <= pointers)
         prognostic_pointers = pointers - diagnostic_pointers
-        self.assertEqual(len(prognostic_pointers), 18)
+        self.assertEqual(len(prognostic_pointers), 32)
+        self.assertEqual(len([name for name in prognostic_pointers if name.startswith("c14_")]), 14)
         for forbidden in ("dom", "bacteria", "fungi"):
             self.assertFalse(any(forbidden in name for name in prognostic_pointers))
         for state in ("acetate", "acetate_methanogen", "h2_methanogen",
@@ -298,7 +309,9 @@ class Phase3StateTest(unittest.TestCase):
             "end subroutine Restart", 1
         )[0]
         history_names = set(re.findall(r"call add_state\('([^']+)'", history_block))
-        restart_names = set(re.findall(r"call restart_state\('([^']+)'", restart_block))
+        restart_names = set(
+            re.findall(r"call restart_(?:c14_)?state\('([^']+)'", restart_block)
+        )
         self.assertEqual(history_names, STATE_HISTORY_NAMES)
         self.assertEqual(restart_names, STATE_HISTORY_NAMES)
         self.assertIn("MM_SAT_FRACTION_PREVIOUS", restart_block)
