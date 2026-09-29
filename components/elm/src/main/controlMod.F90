@@ -872,9 +872,9 @@ contains
        call endrun(msg=' ERROR: use_microbe_aqueous_transport=.true. requires '//&
             'use_vertsoilc=.true.'//errMsg(__FILE__, __LINE__))
     end if
-    if (use_microbe_aqueous_transport .and. (use_c13 .or. use_c14)) then
+    if (use_microbe_aqueous_transport .and. use_c13) then
        call endrun(msg=' ERROR: use_microbe_aqueous_transport does not yet transport '//&
-            'DOM carbon isotopes; use_c13 and use_c14 must be false.'//&
+            'C13 DOM; use_c13 must be false.'//&
             errMsg(__FILE__, __LINE__))
     end if
     if (use_clm_microbe_humhol_saturation .and. .not. use_humhol) then
@@ -915,8 +915,8 @@ contains
        call endrun(msg=' ERROR: use_microbe_methane=.true. currently requires nu_com=''RD''.'//&
             errMsg(__FILE__, __LINE__))
     end if
-    if (use_c13 .or. use_c14) then
-       call endrun(msg=' ERROR: use_microbe_methane=.true. does not yet support C13 or C14.'//&
+    if (use_c13) then
+       call endrun(msg=' ERROR: use_microbe_methane=.true. does not yet support C13.'//&
             errMsg(__FILE__, __LINE__))
     end if
     if (use_crop) then

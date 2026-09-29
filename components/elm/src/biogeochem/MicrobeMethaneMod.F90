@@ -46,7 +46,25 @@ module MicrobeMethaneMod
      real(r8), pointer :: conc_co2_sat_col(:,:) => null()
      real(r8), pointer :: conc_h2_unsat_col(:,:) => null()
      real(r8), pointer :: conc_h2_sat_col(:,:) => null()
-     ! Diagnostic shared-O2 limiter before ELM's 0.2 decomposition floor.
+     ! Passive C14-equivalent carbon state for the revised methane pools.
+     ! Organic fields use g C-equivalent m-3 and gas fields use mol
+     ! C-equivalent m-3, matching their corresponding bulk state.
+     real(r8), pointer :: c14_acetate_c_unsat_col(:,:) => null()
+     real(r8), pointer :: c14_acetate_c_sat_col(:,:) => null()
+     real(r8), pointer :: c14_acetate_methanogen_c_unsat_col(:,:) => null()
+     real(r8), pointer :: c14_acetate_methanogen_c_sat_col(:,:) => null()
+     real(r8), pointer :: c14_h2_methanogen_c_unsat_col(:,:) => null()
+     real(r8), pointer :: c14_h2_methanogen_c_sat_col(:,:) => null()
+     real(r8), pointer :: c14_aerobic_methanotroph_c_unsat_col(:,:) => null()
+     real(r8), pointer :: c14_aerobic_methanotroph_c_sat_col(:,:) => null()
+     real(r8), pointer :: c14_anaerobic_methanotroph_c_unsat_col(:,:) => null()
+     real(r8), pointer :: c14_anaerobic_methanotroph_c_sat_col(:,:) => null()
+     real(r8), pointer :: c14_conc_ch4_unsat_col(:,:) => null()
+     real(r8), pointer :: c14_conc_ch4_sat_col(:,:) => null()
+     real(r8), pointer :: c14_conc_co2_unsat_col(:,:) => null()
+     real(r8), pointer :: c14_conc_co2_sat_col(:,:) => null()
+     ! Diagnostic shared-O2 limiter before ELM applies the parameter-file
+     ! mino2lim floor.
      real(r8), pointer :: o2_stress_unsat_col(:,:) => null()
      real(r8), pointer :: o2_stress_sat_col(:,:) => null()
      real(r8), pointer :: o2_stress_above_wt_col(:,:) => null()
@@ -126,6 +144,8 @@ module MicrobeMethaneMod
      real(r8), pointer :: mineral_no3_transport_residual_col(:) => null()
      real(r8), pointer :: surface_ch4_flux_col(:) => null()
      real(r8), pointer :: surface_co2_flux_col(:) => null()
+     real(r8), pointer :: c14_surface_ch4_flux_col(:) => null()
+     real(r8), pointer :: c14_surface_co2_flux_col(:) => null()
      ! Area-weighted CH4 surface pathways in g C m-2 s-1, positive to air.
      real(r8), pointer :: ch4_surface_diffusion_col(:) => null()
      real(r8), pointer :: ch4_surface_diffusion_unsat_col(:) => null()
@@ -222,6 +242,36 @@ contains
     allocate(this%conc_co2_sat_col(begc:endc,1:nlevdecomp_full)); this%conc_co2_sat_col = nan
     allocate(this%conc_h2_unsat_col(begc:endc,1:nlevdecomp_full)); this%conc_h2_unsat_col = nan
     allocate(this%conc_h2_sat_col(begc:endc,1:nlevdecomp_full)); this%conc_h2_sat_col = nan
+    if (use_c14) then
+       allocate(this%c14_acetate_c_unsat_col(begc:endc,1:nlevdecomp_full)); &
+            this%c14_acetate_c_unsat_col = nan
+       allocate(this%c14_acetate_c_sat_col(begc:endc,1:nlevdecomp_full)); &
+            this%c14_acetate_c_sat_col = nan
+       allocate(this%c14_acetate_methanogen_c_unsat_col(begc:endc,1:nlevdecomp_full)); &
+            this%c14_acetate_methanogen_c_unsat_col = nan
+       allocate(this%c14_acetate_methanogen_c_sat_col(begc:endc,1:nlevdecomp_full)); &
+            this%c14_acetate_methanogen_c_sat_col = nan
+       allocate(this%c14_h2_methanogen_c_unsat_col(begc:endc,1:nlevdecomp_full)); &
+            this%c14_h2_methanogen_c_unsat_col = nan
+       allocate(this%c14_h2_methanogen_c_sat_col(begc:endc,1:nlevdecomp_full)); &
+            this%c14_h2_methanogen_c_sat_col = nan
+       allocate(this%c14_aerobic_methanotroph_c_unsat_col(begc:endc,1:nlevdecomp_full)); &
+            this%c14_aerobic_methanotroph_c_unsat_col = nan
+       allocate(this%c14_aerobic_methanotroph_c_sat_col(begc:endc,1:nlevdecomp_full)); &
+            this%c14_aerobic_methanotroph_c_sat_col = nan
+       allocate(this%c14_anaerobic_methanotroph_c_unsat_col(begc:endc,1:nlevdecomp_full)); &
+            this%c14_anaerobic_methanotroph_c_unsat_col = nan
+       allocate(this%c14_anaerobic_methanotroph_c_sat_col(begc:endc,1:nlevdecomp_full)); &
+            this%c14_anaerobic_methanotroph_c_sat_col = nan
+       allocate(this%c14_conc_ch4_unsat_col(begc:endc,1:nlevdecomp_full)); &
+            this%c14_conc_ch4_unsat_col = nan
+       allocate(this%c14_conc_ch4_sat_col(begc:endc,1:nlevdecomp_full)); &
+            this%c14_conc_ch4_sat_col = nan
+       allocate(this%c14_conc_co2_unsat_col(begc:endc,1:nlevdecomp_full)); &
+            this%c14_conc_co2_unsat_col = nan
+       allocate(this%c14_conc_co2_sat_col(begc:endc,1:nlevdecomp_full)); &
+            this%c14_conc_co2_sat_col = nan
+    end if
     allocate(this%o2_stress_unsat_col(begc:endc,1:nlevdecomp_full)); this%o2_stress_unsat_col = nan
     allocate(this%o2_stress_sat_col(begc:endc,1:nlevdecomp_full)); this%o2_stress_sat_col = nan
     allocate(this%o2_stress_above_wt_col(begc:endc,1:nlevdecomp_full)); &
@@ -332,6 +382,8 @@ contains
          this%mineral_no3_transport_residual_col = nan
     allocate(this%surface_ch4_flux_col(begc:endc)); this%surface_ch4_flux_col = nan
     allocate(this%surface_co2_flux_col(begc:endc)); this%surface_co2_flux_col = nan
+    allocate(this%c14_surface_ch4_flux_col(begc:endc)); this%c14_surface_ch4_flux_col = nan
+    allocate(this%c14_surface_co2_flux_col(begc:endc)); this%c14_surface_co2_flux_col = nan
     allocate(this%ch4_surface_diffusion_col(begc:endc)); this%ch4_surface_diffusion_col = nan
     allocate(this%ch4_surface_diffusion_unsat_col(begc:endc)); &
          this%ch4_surface_diffusion_unsat_col = nan
@@ -386,6 +438,7 @@ contains
 
   subroutine InitCold(this, bounds)
     use elm_varpar, only : nlevdecomp
+    use elm_varcon, only : c14ratio
     use ColumnType, only : col_pp
     use MicrobeMethaneParamsMod, only : MicrobeMethaneParamsInst
 
@@ -420,6 +473,22 @@ contains
     this%conc_co2_sat_col = 0._r8
     this%conc_h2_unsat_col = 0._r8
     this%conc_h2_sat_col = 0._r8
+    if (use_c14) then
+       this%c14_acetate_c_unsat_col = 0._r8
+       this%c14_acetate_c_sat_col = 0._r8
+       this%c14_acetate_methanogen_c_unsat_col = 0._r8
+       this%c14_acetate_methanogen_c_sat_col = 0._r8
+       this%c14_h2_methanogen_c_unsat_col = 0._r8
+       this%c14_h2_methanogen_c_sat_col = 0._r8
+       this%c14_aerobic_methanotroph_c_unsat_col = 0._r8
+       this%c14_aerobic_methanotroph_c_sat_col = 0._r8
+       this%c14_anaerobic_methanotroph_c_unsat_col = 0._r8
+       this%c14_anaerobic_methanotroph_c_sat_col = 0._r8
+       this%c14_conc_ch4_unsat_col = 0._r8
+       this%c14_conc_ch4_sat_col = 0._r8
+       this%c14_conc_co2_unsat_col = 0._r8
+       this%c14_conc_co2_sat_col = 0._r8
+    end if
     this%o2_stress_unsat_col = 0._r8
     this%o2_stress_sat_col = 0._r8
     this%o2_stress_above_wt_col = 0._r8
@@ -485,6 +554,8 @@ contains
     this%mineral_no3_transport_residual_col = 0._r8
     this%surface_ch4_flux_col = 0._r8
     this%surface_co2_flux_col = 0._r8
+    this%c14_surface_ch4_flux_col = 0._r8
+    this%c14_surface_co2_flux_col = 0._r8
     this%ch4_surface_diffusion_col = 0._r8
     this%ch4_surface_diffusion_unsat_col = 0._r8
     this%ch4_surface_diffusion_sat_col = 0._r8
@@ -536,6 +607,28 @@ contains
           this%conc_co2_sat_col(c,1:nlevdecomp) = 0._r8
           this%conc_h2_unsat_col(c,1:nlevdecomp) = 0._r8
           this%conc_h2_sat_col(c,1:nlevdecomp) = 0._r8
+          if (use_c14) then
+             this%c14_acetate_c_unsat_col(c,1:nlevdecomp) = 0._r8
+             this%c14_acetate_c_sat_col(c,1:nlevdecomp) = 0._r8
+             this%c14_acetate_methanogen_c_unsat_col(c,1:nlevdecomp) = &
+                  c14ratio * biomass_seed
+             this%c14_acetate_methanogen_c_sat_col(c,1:nlevdecomp) = &
+                  c14ratio * biomass_seed
+             this%c14_h2_methanogen_c_unsat_col(c,1:nlevdecomp) = c14ratio * biomass_seed
+             this%c14_h2_methanogen_c_sat_col(c,1:nlevdecomp) = c14ratio * biomass_seed
+             this%c14_aerobic_methanotroph_c_unsat_col(c,1:nlevdecomp) = &
+                  c14ratio * biomass_seed
+             this%c14_aerobic_methanotroph_c_sat_col(c,1:nlevdecomp) = &
+                  c14ratio * biomass_seed
+             this%c14_anaerobic_methanotroph_c_unsat_col(c,1:nlevdecomp) = &
+                  c14ratio * biomass_seed
+             this%c14_anaerobic_methanotroph_c_sat_col(c,1:nlevdecomp) = &
+                  c14ratio * biomass_seed
+             this%c14_conc_ch4_unsat_col(c,1:nlevdecomp) = 0._r8
+             this%c14_conc_ch4_sat_col(c,1:nlevdecomp) = 0._r8
+             this%c14_conc_co2_unsat_col(c,1:nlevdecomp) = 0._r8
+             this%c14_conc_co2_sat_col(c,1:nlevdecomp) = 0._r8
+          end if
           this%o2_stress_unsat_col(c,1:nlevdecomp) = 0._r8
           this%o2_stress_sat_col(c,1:nlevdecomp) = 0._r8
           this%o2_stress_above_wt_col(c,1:nlevdecomp) = 0._r8
@@ -548,6 +641,8 @@ contains
           this%lateral_phosphorus_flux_col(c) = 0._r8
           this%surface_ch4_flux_col(c) = 0._r8
           this%surface_co2_flux_col(c) = 0._r8
+          this%c14_surface_ch4_flux_col(c) = 0._r8
+          this%c14_surface_co2_flux_col(c) = 0._r8
        end if
     end do
     call this%UpdateAdditionalCarbon(bounds)
@@ -611,6 +706,56 @@ contains
          'bulk-soil carbon dioxide inventory density in unsaturated subarea', this%conc_co2_unsat_col)
     call add_state('MM_CONC_CO2_SAT', 'mol/m^3', &
          'bulk-soil carbon dioxide inventory density in saturated subarea', this%conc_co2_sat_col)
+    if (use_c14) then
+       call add_state('C14_MM_ACETATE_C_UNSAT', 'gC14/m^3', &
+            'C14-equivalent acetate carbon in unsaturated subarea', &
+            this%c14_acetate_c_unsat_col)
+       call add_state('C14_MM_ACETATE_C_SAT', 'gC14/m^3', &
+            'C14-equivalent acetate carbon in saturated subarea', &
+            this%c14_acetate_c_sat_col)
+       call add_state('C14_MM_ACET_METH_C_UNSAT', 'gC14/m^3', &
+            'C14-equivalent acetoclastic methanogen biomass in unsaturated subarea', &
+            this%c14_acetate_methanogen_c_unsat_col)
+       call add_state('C14_MM_ACET_METH_C_SAT', 'gC14/m^3', &
+            'C14-equivalent acetoclastic methanogen biomass in saturated subarea', &
+            this%c14_acetate_methanogen_c_sat_col)
+       call add_state('C14_MM_H2_METH_C_UNSAT', 'gC14/m^3', &
+            'C14-equivalent hydrogenotrophic methanogen biomass in unsaturated subarea', &
+            this%c14_h2_methanogen_c_unsat_col)
+       call add_state('C14_MM_H2_METH_C_SAT', 'gC14/m^3', &
+            'C14-equivalent hydrogenotrophic methanogen biomass in saturated subarea', &
+            this%c14_h2_methanogen_c_sat_col)
+       call add_state('C14_MM_AER_METHANOTROPH_C_UNSAT', 'gC14/m^3', &
+            'C14-equivalent aerobic methanotroph biomass in unsaturated subarea', &
+            this%c14_aerobic_methanotroph_c_unsat_col)
+       call add_state('C14_MM_AER_METHANOTROPH_C_SAT', 'gC14/m^3', &
+            'C14-equivalent aerobic methanotroph biomass in saturated subarea', &
+            this%c14_aerobic_methanotroph_c_sat_col)
+       call add_state('C14_MM_ANAER_METHANOTROPH_C_UNSAT', 'gC14/m^3', &
+            'C14-equivalent anaerobic methanotroph biomass in unsaturated subarea', &
+            this%c14_anaerobic_methanotroph_c_unsat_col)
+       call add_state('C14_MM_ANAER_METHANOTROPH_C_SAT', 'gC14/m^3', &
+            'C14-equivalent anaerobic methanotroph biomass in saturated subarea', &
+            this%c14_anaerobic_methanotroph_c_sat_col)
+       call add_state('C14_MM_CONC_CH4_UNSAT', 'molC14/m^3', &
+            'C14-equivalent methane inventory in unsaturated subarea', &
+            this%c14_conc_ch4_unsat_col)
+       call add_state('C14_MM_CONC_CH4_SAT', 'molC14/m^3', &
+            'C14-equivalent methane inventory in saturated subarea', &
+            this%c14_conc_ch4_sat_col)
+       call add_state('C14_MM_CONC_CO2_UNSAT', 'molC14/m^3', &
+            'C14-equivalent carbon dioxide inventory in unsaturated subarea', &
+            this%c14_conc_co2_unsat_col)
+       call add_state('C14_MM_CONC_CO2_SAT', 'molC14/m^3', &
+            'C14-equivalent carbon dioxide inventory in saturated subarea', &
+            this%c14_conc_co2_sat_col)
+       call hist_addfld1d(fname='C14_MM_SURFACE_CH4_FLUX', units='gC14/m^2/s', &
+            avgflag='A', long_name='C14-equivalent revised methane CH4 flux; positive to atmosphere', &
+            ptr_col=this%c14_surface_ch4_flux_col, default='inactive')
+       call hist_addfld1d(fname='C14_MM_SURFACE_CO2_FLUX', units='gC14/m^2/s', &
+            avgflag='A', long_name='C14-equivalent revised methane CO2 flux; positive to atmosphere', &
+            ptr_col=this%c14_surface_co2_flux_col, default='inactive')
+    end if
     call add_state('MM_CONC_H2_UNSAT', 'mol/m^3', &
          'bulk-soil hydrogen inventory density in unsaturated subarea', this%conc_h2_unsat_col)
     call add_state('MM_CONC_H2_SAT', 'mol/m^3', &
@@ -960,6 +1105,22 @@ contains
           call repartition_pair(this%conc_o2_unsat_col(c,j), this%conc_o2_sat_col(c,j))
           call repartition_pair(this%conc_co2_unsat_col(c,j), this%conc_co2_sat_col(c,j))
           call repartition_pair(this%conc_h2_unsat_col(c,j), this%conc_h2_sat_col(c,j))
+          if (use_c14) then
+             call repartition_pair(this%c14_acetate_c_unsat_col(c,j), &
+                  this%c14_acetate_c_sat_col(c,j))
+             call repartition_pair(this%c14_acetate_methanogen_c_unsat_col(c,j), &
+                  this%c14_acetate_methanogen_c_sat_col(c,j))
+             call repartition_pair(this%c14_h2_methanogen_c_unsat_col(c,j), &
+                  this%c14_h2_methanogen_c_sat_col(c,j))
+             call repartition_pair(this%c14_aerobic_methanotroph_c_unsat_col(c,j), &
+                  this%c14_aerobic_methanotroph_c_sat_col(c,j))
+             call repartition_pair(this%c14_anaerobic_methanotroph_c_unsat_col(c,j), &
+                  this%c14_anaerobic_methanotroph_c_sat_col(c,j))
+             call repartition_pair(this%c14_conc_ch4_unsat_col(c,j), &
+                  this%c14_conc_ch4_sat_col(c,j))
+             call repartition_pair(this%c14_conc_co2_unsat_col(c,j), &
+                  this%c14_conc_co2_sat_col(c,j))
+          end if
        end do
        this%sat_fraction_previous_col(c) = new_fraction
     end do
@@ -980,7 +1141,8 @@ contains
   subroutine Advance(this, bounds, num_soilc, filter_soilc, num_soilp, filter_soilp, &
        dt, atm2lnd_vars, &
        col_es, col_ws, col_wf, chemstate_vars, soilstate_vars, soilhydrology_vars, &
-       ground_conductance_patch, ch4_vars, col_cs, col_cf, veg_cf, col_ns, col_nf, col_ps)
+       ground_conductance_patch, ch4_vars, cnstate_vars, col_cs, c14_col_cs, &
+       col_cf, veg_cf, col_ns, col_nf, col_ps)
     ! Mutable ELM boundary for the pure revised-methane kernels. Every update
     ! for one column is staged locally, checked, and then committed once.
     use abortutils, only : endrun
@@ -988,6 +1150,7 @@ contains
     use elm_varctl, only : iulog
     use elm_varpar, only : nlevdecomp, i_dom, ndecomp_cascade_transitions
     use elm_varcon, only : denh2o, denice, tfrz, d_con_w, d_con_g, catomw, rgas, spval
+    use elm_varcon, only : c14ratio
     use elm_varcon, only : c_h_inv, kh_theta, kh_tbase
     use ColumnType, only : col_pp
     use TopounitType, only : top_pp
@@ -995,6 +1158,7 @@ contains
     use ColumnDataType, only : column_carbon_state, column_carbon_flux
     use ColumnDataType, only : column_nitrogen_state, column_nitrogen_flux
     use ColumnDataType, only : column_phosphorus_state
+    use CNStateType, only : cnstate_type
     use VegetationType, only : veg_pp
     use VegetationDataType, only : vegetation_carbon_flux
     use pftvarcon, only : noveg
@@ -1024,6 +1188,10 @@ contains
     use MicrobeMethaneStateUpdateMod, only : microbeMethaneSurfaceCarbonFlux
     use MicrobeMethaneStateUpdateMod, only : microbeMethaneCH4SurfaceFluxKgC
     use MicrobeMethaneStateUpdateMod, only : microbeMethaneCO2Correction
+    use MicrobeMethaneIsotopeMod, only : advanceMicrobeMethaneCarbonTracerReactionLayer
+    use MicrobeMethaneIsotopeMod, only : advanceMicrobeMethaneCarbonTracerGasTransport
+    use C14DecayMod, only : C14DecayFactor
+    use timeInfoMod, only : dayspyr_mod
     use MicrobeGasTransportMod, only : repartitionMicrobeMethaneScalar
     use MicrobeGasTransportMod, only : microbeMethaneEffectiveAqueousDiffusivity
     use MicrobeGasTransportMod, only : computeMicrobeTopounitLateralDiffusion
@@ -1048,7 +1216,9 @@ contains
     type(soilhydrology_type), intent(in) :: soilhydrology_vars
     real(r8), intent(in) :: ground_conductance_patch(bounds%begp:)
     type(ch4_type), intent(inout) :: ch4_vars
+    type(cnstate_type), intent(in) :: cnstate_vars
     type(column_carbon_state), intent(inout) :: col_cs
+    type(column_carbon_state), intent(inout) :: c14_col_cs
     type(column_carbon_flux), intent(in) :: col_cf
     type(vegetation_carbon_flux), intent(in) :: veg_cf
     type(column_nitrogen_state), intent(inout) :: col_ns
@@ -1064,7 +1234,22 @@ contains
     type(microbe_methane_reaction_environment_type) :: unsaturated_environment
     type(microbe_methane_reaction_environment_type) :: saturated_environment
     type(microbe_methane_reaction_transaction_type) :: reaction(nlevdecomp)
+    type(microbe_methane_reaction_state_type) :: c14_unsaturated_state(nlevdecomp)
+    type(microbe_methane_reaction_state_type) :: c14_saturated_state(nlevdecomp)
+    type(microbe_methane_reaction_state_type) :: c14_unsaturated_work(nlevdecomp)
+    type(microbe_methane_reaction_state_type) :: c14_saturated_work(nlevdecomp)
+    type(microbe_methane_reaction_state_type) :: c14_unsaturated_candidate(nlevdecomp)
+    type(microbe_methane_reaction_state_type) :: c14_saturated_candidate(nlevdecomp)
     real(r8) :: dom_c(nlevdecomp), dom_n(nlevdecomp), dom_p(nlevdecomp)
+    real(r8) :: c14_dom_c(nlevdecomp), updated_c14_dom_c(nlevdecomp)
+    real(r8) :: c14_reaction_residual(nlevdecomp)
+    real(r8) :: c14_dummy_n(nlevdecomp), c14_dummy_p(nlevdecomp)
+    real(r8) :: updated_c14_dummy_n(nlevdecomp), updated_c14_dummy_p(nlevdecomp)
+    real(r8) :: c14_transport_tendency(nlevdecomp)
+    real(r8) :: c14_solute_advective_flux(0:nlevdecomp)
+    real(r8) :: c14_solute_diffusive_flux(0:nlevdecomp)
+    real(r8) :: c14_acetate_concentration(nlevdecomp)
+    real(r8) :: updated_c14_acetate(nlevdecomp)
     real(r8) :: updated_dom_c(nlevdecomp), updated_dom_n(nlevdecomp)
     real(r8) :: updated_dom_p(nlevdecomp), dom_relaxation_rate(nlevdecomp)
     real(r8) :: target_dom_c(nlevdecomp), dom_profile_restoring_rate(nlevdecomp)
@@ -1103,8 +1288,11 @@ contains
     real(r8) :: unsaturated_ebullition_activation(nlevdecomp)
     real(r8) :: saturated_ebullition_activation(nlevdecomp)
     real(r8) :: interface_flux(0:nlevdecomp,microbe_gas_count)
+    real(r8) :: c14_interface_flux(0:nlevdecomp,microbe_gas_count)
     real(r8) :: aerenchyma_flux(nlevdecomp,microbe_gas_count)
+    real(r8) :: c14_aerenchyma_flux(nlevdecomp,microbe_gas_count)
     real(r8) :: ch4_ebullition_loss(nlevdecomp)
+    real(r8) :: c14_ch4_ebullition_loss(nlevdecomp)
     real(r8) :: unsaturated_surface_diffusive_flux(microbe_gas_count)
     real(r8) :: unsaturated_surface_aerenchyma_flux(microbe_gas_count)
     real(r8) :: unsaturated_surface_flux(microbe_gas_count)
@@ -1113,9 +1301,14 @@ contains
     real(r8) :: acetate_interface_flux(0:nlevdecomp)
     real(r8) :: acetate_tendency(nlevdecomp)
     real(r8) :: ground_conductance_col(bounds%begc:bounds%endc)
+    real(r8) :: atmospheric_c14_ratio_col(bounds%begc:bounds%endc)
     real(r8) :: root_fraction_col(bounds%begc:bounds%endc,1:nlevdecomp)
     real(r8) :: root_respiration_col_vr(bounds%begc:bounds%endc,1:nlevdecomp)
     real(r8) :: partial_pressure(microbe_gas_count)
+    real(r8) :: c14_surface_equilibrium(microbe_gas_count)
+    real(r8) :: c14_surface_flux(microbe_gas_count)
+    real(r8) :: c14_unsaturated_surface_flux(microbe_gas_count)
+    real(r8) :: c14_saturated_surface_flux(microbe_gas_count)
     real(r8) :: liquid_saturation, thawed_fraction, moisture_scalar
     real(r8) :: saturation_scalar, fraction, old_fraction, depth_scale
     real(r8) :: plant_transport_activity
@@ -1124,8 +1317,14 @@ contains
     real(r8) :: saturated_surface_diffusive_flux(microbe_gas_count)
     real(r8) :: saturated_surface_aerenchyma_flux(microbe_gas_count)
     real(r8) :: saturated_surface_ebullition_flux
+    real(r8) :: c14_unsaturated_gas_residual, c14_saturated_gas_residual
     real(r8) :: unsaturated_gas_residual, saturated_gas_residual
     real(r8) :: unsaturated_acetate_residual, saturated_acetate_residual
+    real(r8) :: c14_unsaturated_acetate_residual, c14_saturated_acetate_residual
+    real(r8) :: c14_dom_transport_residual, c14_dom_export
+    real(r8) :: c14_complete_bypass_flux, c14_complete_bypass_residual
+    real(r8) :: c14_dummy_flux_n, c14_dummy_flux_p
+    real(r8) :: c14_dummy_residual_n, c14_dummy_residual_p
     real(r8) :: dom_carbon_residual, dom_nitrogen_residual, dom_phosphorus_residual
     real(r8) :: dom_carbon_export, dom_nitrogen_export, dom_phosphorus_export
     real(r8) :: mineral_nh4_export, mineral_no3_export
@@ -1139,6 +1338,7 @@ contains
     real(r8) :: unsaturated_acetate_export, saturated_acetate_export
     real(r8) :: aqueous_temperature_scalar, relative_liquid_saturation
     real(r8) :: saturated_macrodispersion_scalar
+    real(r8) :: c14_decay_factor
     logical :: column_valid
     logical :: unsaturated_acetate_valid, saturated_acetate_valid
     logical :: unsaturated_gas_valid, saturated_gas_valid
@@ -1148,6 +1348,10 @@ contains
     logical :: dom_phosphorus_transport_valid
     logical :: mineral_nh4_transport_valid, mineral_no3_transport_valid
     logical :: dom_complete_bypass_valid
+    logical :: c14_reaction_valid(nlevdecomp)
+    logical :: c14_dom_transport_valid, c14_complete_bypass_valid
+    logical :: c14_unsaturated_acetate_valid, c14_saturated_acetate_valid
+    logical :: c14_unsaturated_gas_valid, c14_saturated_gas_valid
     logical :: aerenchyma_allows_influx(microbe_gas_count)
     integer :: c, donor_pool, fc, fp, g, gas, j, p, receiver_pool, transition
     character(len=512) :: message
@@ -1156,6 +1360,10 @@ contains
     if (dt <= 0._r8) then
        call endrun(msg=' ERROR: revised methane adapter requires a positive timestep'//&
             errMsg(__FILE__, __LINE__))
+    end if
+    if (use_c14 .and. use_microbe_observed_dom_calibration) then
+       call endrun(msg=' ERROR: C14 revised methane does not yet define the isotope signature '//&
+            'of the imposed observed-DOM calibration source'//errMsg(__FILE__, __LINE__))
     end if
 
     this%surface_carbon_flux_col(bounds%begc:bounds%endc) = 0._r8
@@ -1219,6 +1427,8 @@ contains
     this%mineral_no3_transport_residual_col(bounds%begc:bounds%endc) = 0._r8
     this%surface_ch4_flux_col(bounds%begc:bounds%endc) = 0._r8
     this%surface_co2_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%c14_surface_ch4_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%c14_surface_co2_flux_col(bounds%begc:bounds%endc) = 0._r8
     this%ch4_surface_diffusion_col(bounds%begc:bounds%endc) = 0._r8
     this%ch4_surface_diffusion_unsat_col(bounds%begc:bounds%endc) = 0._r8
     this%ch4_surface_diffusion_sat_col(bounds%begc:bounds%endc) = 0._r8
@@ -1253,6 +1463,11 @@ contains
     call p2c(bounds, num_soilc, filter_soilc, &
          ground_conductance_patch(bounds%begp:bounds%endp), &
          ground_conductance_col(bounds%begc:bounds%endc))
+    if (use_c14) then
+       call p2c(bounds, num_soilc, filter_soilc, &
+            cnstate_vars%rc14_atm_patch(bounds%begp:bounds%endp), &
+            atmospheric_c14_ratio_col(bounds%begc:bounds%endc))
+    end if
     ! Legacy CH4 computes this column average inside its solver. Revised mode
     ! bypasses that solver, so it must establish its own plant-transport
     ! input directly from the authoritative patch root profile.
@@ -1356,12 +1571,31 @@ contains
        call repartitionColumnState(old_fraction, fraction, unsaturated_state, saturated_state)
        unsaturated_work = unsaturated_state
        saturated_work = saturated_state
+       c14_unsaturated_surface_flux = 0._r8
+       c14_saturated_surface_flux = 0._r8
+       if (use_c14) then
+          call gatherC14ColumnState(c, c14_unsaturated_state, c14_saturated_state)
+          call repartitionColumnState(old_fraction, fraction, c14_unsaturated_state, &
+               c14_saturated_state)
+          ! C14Decay has already decayed ELM's standard pools at this point in
+          ! the driver. Apply the same physical Libby decay to the old
+          ! revised-methane inventory before routing this step's reactions.
+          ! Newly formed products therefore enter after decay, matching the
+          ! existing ELM operator order. Explicit methane pools and guilds
+          ! have no defensible AD-spinup cascade factor.
+          c14_decay_factor = C14DecayFactor(dt, dayspyr_mod)
+          call scaleC14ColumnState(c14_unsaturated_state, c14_decay_factor)
+          call scaleC14ColumnState(c14_saturated_state, c14_decay_factor)
+          c14_unsaturated_work = c14_unsaturated_state
+          c14_saturated_work = c14_saturated_state
+       end if
        column_valid = .true.
 
        do j = 1, nlevdecomp
           layer_thickness(j) = col_pp%dz(c,j)
           layer_depth(j) = col_pp%z(c,j)
           dom_c(j) = col_cs%decomp_cpools_vr(c,j,i_dom)
+          if (use_c14) c14_dom_c(j) = c14_col_cs%decomp_cpools_vr(c,j,i_dom)
           dom_n(j) = col_ns%decomp_npools_vr(c,j,i_dom)
           dom_p(j) = col_ps%decomp_ppools_vr(c,j,i_dom)
           ! The standard cascade has already updated the authoritative DOM
@@ -1565,6 +1799,22 @@ contains
                MicrobeMethaneParamsInst, MicrobeDecompParamsInst%cn_dom, &
                MicrobeDecompParamsInst%cp_dom, dt, reaction(j))
           if (.not. reaction(j)%valid) column_valid = .false.
+          if (use_c14 .and. reaction(j)%valid) then
+             call advanceMicrobeMethaneCarbonTracerReactionLayer( &
+                  dom_c(j), reaction(j)%dom_c, fraction, &
+                  unsaturated_work(j), saturated_work(j), &
+                  reaction(j)%unsaturated_state, reaction(j)%saturated_state, &
+                  reaction(j)%unsaturated_rates, reaction(j)%saturated_rates, &
+                  MicrobeMethaneParamsInst, dt, c14_dom_c(j), &
+                  c14_unsaturated_work(j), c14_saturated_work(j), &
+                  updated_c14_dom_c(j), c14_unsaturated_candidate(j), &
+                  c14_saturated_candidate(j), c14_reaction_residual(j), &
+                  c14_reaction_valid(j))
+             column_valid = column_valid .and. c14_reaction_valid(j)
+             c14_dom_c(j) = updated_c14_dom_c(j)
+             c14_unsaturated_work(j) = c14_unsaturated_candidate(j)
+             c14_saturated_work(j) = c14_saturated_candidate(j)
+          end if
           this%dom_fermentation_col(c,j) = 1.5_r8 * catomw * &
                ((1._r8 - fraction) * reaction(j)%unsaturated_rates%dom_to_acetate_c + &
                fraction * reaction(j)%saturated_rates%dom_to_acetate_c)
@@ -1682,6 +1932,26 @@ contains
           dom_c = updated_dom_c
           dom_n = updated_dom_n
           dom_p = updated_dom_p
+          if (use_c14) then
+             ! The bypass removal fraction depends on water and mobile
+             ! fraction, not concentration. Applying the same conservative
+             ! operator therefore transfers the passive tracer with the exact
+             ! accepted bulk pathway while retaining each donor signature.
+             c14_dummy_n = c14_dom_c
+             c14_dummy_p = c14_dom_c
+             call advanceMicrobeDOMCompleteBypass(c14_dom_c, c14_dummy_n, c14_dummy_p, &
+                  layer_thickness, liquid_fraction, dom_mobile_fraction, &
+                  MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, &
+                  soilhydrology_vars%zwt_col(c), water_flux(0), &
+                  MicrobeMethaneParamsInst%dom_complete_bypass_fraction, dt, &
+                  updated_c14_dom_c, updated_c14_dummy_n, updated_c14_dummy_p, &
+                  c14_transport_tendency, c14_complete_bypass_flux, &
+                  c14_dummy_flux_n, c14_dummy_flux_p, &
+                  c14_complete_bypass_residual, c14_dummy_residual_n, &
+                  c14_dummy_residual_p, c14_complete_bypass_valid)
+             c14_dom_c = updated_c14_dom_c
+             column_valid = column_valid .and. c14_complete_bypass_valid
+          end if
           this%dom_complete_bypass_tendency_col(c,1:nlevdecomp) = &
                dom_complete_bypass_tendency
           this%dom_complete_bypass_carbon_flux_col(c) = dom_complete_bypass_carbon_flux
@@ -1718,6 +1988,13 @@ contains
           dom_c = updated_dom_c
           dom_n = updated_dom_n
           dom_p = updated_dom_p
+          if (use_c14) then
+             call advanceMicrobeMethaneTracerRelaxation(c14_dom_c, &
+                  layer_thickness, dom_relaxation_rate, dt, updated_c14_dom_c, &
+                  c14_dom_transport_residual, c14_dom_transport_valid)
+             c14_dom_c = updated_c14_dom_c
+             column_valid = column_valid .and. c14_dom_transport_valid
+          end if
        else if (use_microbe_aqueous_transport) then
           call advanceMicrobeAqueousTracerTransport(dom_c, layer_thickness, &
                liquid_fraction, dom_diffusion_conductivity, water_flux, &
@@ -1767,6 +2044,17 @@ contains
           this%dom_carbon_transport_residual_col(c) = dom_carbon_residual
           this%dom_nitrogen_transport_residual_col(c) = dom_nitrogen_residual
           this%dom_phosphorus_transport_residual_col(c) = dom_phosphorus_residual
+          if (use_c14) then
+             call advanceMicrobeAqueousTracerTransport(c14_dom_c, layer_thickness, &
+                  liquid_fraction, dom_diffusion_conductivity, water_flux, &
+                  dom_mobile_fraction, &
+                  MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, &
+                  updated_c14_dom_c, c14_solute_advective_flux, &
+                  c14_solute_diffusive_flux, c14_transport_tendency, c14_dom_export, &
+                  c14_dom_transport_residual, c14_dom_transport_valid)
+             c14_dom_c = updated_c14_dom_c
+             column_valid = column_valid .and. c14_dom_transport_valid
+          end if
        end if
 
        if (use_microbe_aqueous_transport) then
@@ -1880,7 +2168,16 @@ contains
                   saturated_diffusivity(1,gas), layer_thickness(1), &
                   col_es%t_soisno(c,1))
           end if
+          c14_surface_equilibrium(gas) = c14ratio * surface_equilibrium(gas)
        end do
+       if (use_c14) then
+          ! CO2 follows ELM's time-varying atmospheric radiocarbon forcing.
+          ! No atmospheric-CH4 radiocarbon forcing exists yet, so methane
+          ! retains the explicit modern-carbon fallback above.
+          c14_surface_equilibrium(microbe_gas_co2) = &
+               max(0._r8, atmospheric_c14_ratio_col(c)) * &
+               surface_equilibrium(microbe_gas_co2)
+       end if
 
        if (use_clm_microbe_dom_relaxation) then
           ! The released CLM-SPRUCE implementation applies dom_diffus to both
@@ -1909,6 +2206,26 @@ contains
           do j = 1, nlevdecomp
              saturated_candidate(j)%acetate_c = updated_acetate(j)
           end do
+          if (use_c14) then
+             do j = 1, nlevdecomp
+                c14_acetate_concentration(j) = c14_unsaturated_work(j)%acetate_c
+             end do
+             call advanceMicrobeMethaneTracerRelaxation(c14_acetate_concentration, &
+                  layer_thickness, dom_relaxation_rate, dt, updated_c14_acetate, &
+                  c14_unsaturated_acetate_residual, c14_unsaturated_acetate_valid)
+             c14_unsaturated_candidate = c14_unsaturated_work
+             do j = 1, nlevdecomp
+                c14_unsaturated_candidate(j)%acetate_c = updated_c14_acetate(j)
+                c14_acetate_concentration(j) = c14_saturated_work(j)%acetate_c
+             end do
+             call advanceMicrobeMethaneTracerRelaxation(c14_acetate_concentration, &
+                  layer_thickness, dom_relaxation_rate, dt, updated_c14_acetate, &
+                  c14_saturated_acetate_residual, c14_saturated_acetate_valid)
+             c14_saturated_candidate = c14_saturated_work
+             do j = 1, nlevdecomp
+                c14_saturated_candidate(j)%acetate_c = updated_c14_acetate(j)
+             end do
+          end if
        else if (use_microbe_aqueous_transport) then
           do j = 1, nlevdecomp
              acetate_concentration(j) = unsaturated_work(j)%acetate_c
@@ -1942,6 +2259,34 @@ contains
           this%aqueous_carbon_export_col(c) = this%aqueous_carbon_export_col(c) + &
                (1._r8 - fraction) * unsaturated_acetate_export + &
                fraction * saturated_acetate_export
+          if (use_c14) then
+             do j = 1, nlevdecomp
+                c14_acetate_concentration(j) = c14_unsaturated_work(j)%acetate_c
+             end do
+             call advanceMicrobeAqueousTracerTransport(c14_acetate_concentration, &
+                  layer_thickness, liquid_fraction, acetate_diffusion_conductivity, &
+                  water_flux, acetate_mobile_fraction, &
+                  MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, &
+                  updated_c14_acetate, c14_solute_advective_flux, &
+                  c14_solute_diffusive_flux, c14_transport_tendency, c14_dom_export, &
+                  c14_unsaturated_acetate_residual, c14_unsaturated_acetate_valid)
+             c14_unsaturated_candidate = c14_unsaturated_work
+             do j = 1, nlevdecomp
+                c14_unsaturated_candidate(j)%acetate_c = updated_c14_acetate(j)
+                c14_acetate_concentration(j) = c14_saturated_work(j)%acetate_c
+             end do
+             call advanceMicrobeAqueousTracerTransport(c14_acetate_concentration, &
+                  layer_thickness, liquid_fraction, acetate_diffusion_conductivity, &
+                  water_flux, acetate_mobile_fraction, &
+                  MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, &
+                  updated_c14_acetate, c14_solute_advective_flux, &
+                  c14_solute_diffusive_flux, c14_transport_tendency, c14_dom_export, &
+                  c14_saturated_acetate_residual, c14_saturated_acetate_valid)
+             c14_saturated_candidate = c14_saturated_work
+             do j = 1, nlevdecomp
+                c14_saturated_candidate(j)%acetate_c = updated_c14_acetate(j)
+             end do
+          end if
        else
           unsaturated_acetate_export = 0._r8
           saturated_acetate_export = 0._r8
@@ -1953,9 +2298,23 @@ contains
                saturated_acetate_diffusivity, dt, saturated_candidate, &
                acetate_interface_flux, acetate_tendency, saturated_acetate_residual, &
                saturated_acetate_valid)
+          if (use_c14) then
+             call advanceMicrobeMethaneAcetateTransport(c14_unsaturated_work, &
+                  layer_thickness, unsaturated_acetate_diffusivity, dt, &
+                  c14_unsaturated_candidate, acetate_interface_flux, &
+                  acetate_tendency, c14_unsaturated_acetate_residual, &
+                  c14_unsaturated_acetate_valid)
+             call advanceMicrobeMethaneAcetateTransport(c14_saturated_work, &
+                  layer_thickness, saturated_acetate_diffusivity, dt, &
+                  c14_saturated_candidate, acetate_interface_flux, &
+                  acetate_tendency, c14_saturated_acetate_residual, &
+                  c14_saturated_acetate_valid)
+          end if
        end if
        column_valid = column_valid .and. unsaturated_acetate_valid .and. &
             saturated_acetate_valid
+       if (use_c14) column_valid = column_valid .and. &
+            c14_unsaturated_acetate_valid .and. c14_saturated_acetate_valid
 
        call advanceMicrobeMethaneGasTransport(unsaturated_candidate, layer_thickness, &
             unsaturated_diffusivity, unsaturated_transport_capacity, surface_equilibrium, &
@@ -1966,6 +2325,18 @@ contains
             aerenchyma_flux, ch4_ebullition_loss, unsaturated_surface_diffusive_flux, &
             unsaturated_surface_aerenchyma_flux, unsaturated_surface_ebullition_flux, &
             unsaturated_surface_flux, unsaturated_gas_residual, unsaturated_gas_valid)
+       c14_unsaturated_gas_valid = .false.
+       if (use_c14 .and. unsaturated_gas_valid) then
+          call advanceMicrobeMethaneCarbonTracerGasTransport( &
+               unsaturated_candidate, unsaturated_work, c14_unsaturated_candidate, &
+               layer_thickness, unsaturated_diffusivity, unsaturated_transport_capacity, &
+               surface_equilibrium, c14_surface_equilibrium, &
+               unsaturated_surface_conductance, interface_flux, aerenchyma_flux, &
+               ch4_ebullition_loss, dt, c14_unsaturated_work, c14_interface_flux, &
+               c14_aerenchyma_flux, c14_ch4_ebullition_loss, c14_surface_flux, &
+               c14_unsaturated_gas_residual, c14_unsaturated_gas_valid)
+          c14_unsaturated_surface_flux = c14_surface_flux
+       end if
        call advanceMicrobeMethaneGasTransport(saturated_candidate, layer_thickness, &
             saturated_diffusivity, saturated_transport_capacity, surface_equilibrium, &
             saturated_surface_conductance, &
@@ -1976,7 +2347,21 @@ contains
             aerenchyma_flux, ch4_ebullition_loss, saturated_surface_diffusive_flux, &
             saturated_surface_aerenchyma_flux, saturated_surface_ebullition_flux, &
             saturated_surface_flux, saturated_gas_residual, saturated_gas_valid)
+       c14_saturated_gas_valid = .false.
+       if (use_c14 .and. saturated_gas_valid) then
+          call advanceMicrobeMethaneCarbonTracerGasTransport( &
+               saturated_candidate, saturated_work, c14_saturated_candidate, &
+               layer_thickness, saturated_diffusivity, saturated_transport_capacity, &
+               surface_equilibrium, c14_surface_equilibrium, &
+               saturated_surface_conductance, interface_flux, aerenchyma_flux, &
+               ch4_ebullition_loss, dt, c14_saturated_work, c14_interface_flux, &
+               c14_aerenchyma_flux, c14_ch4_ebullition_loss, c14_surface_flux, &
+               c14_saturated_gas_residual, c14_saturated_gas_valid)
+          c14_saturated_surface_flux = c14_surface_flux
+       end if
        column_valid = column_valid .and. unsaturated_gas_valid .and. saturated_gas_valid
+       if (use_c14) column_valid = column_valid .and. &
+            c14_unsaturated_gas_valid .and. c14_saturated_gas_valid
        bulk_surface_flux = (1._r8 - fraction) * unsaturated_surface_flux + &
             fraction * saturated_surface_flux
 
@@ -2015,6 +2400,45 @@ contains
           write(iulog,*) 'revised methane unsaturated top state after gas transport: ', &
                unsaturated_work(1)%conc_ch4, unsaturated_work(1)%conc_o2, &
                unsaturated_work(1)%conc_co2, unsaturated_work(1)%conc_h2
+          if (use_c14) then
+             write(iulog,*) 'revised methane C14 reaction validity and max residual: ', &
+                  all(c14_reaction_valid), maxval(abs(c14_reaction_residual))
+             do j = 1, nlevdecomp
+                if (.not. c14_reaction_valid(j)) then
+                   write(iulog,*) 'invalid revised methane C14 reaction layer: ', j
+                   write(iulog,*) 'C14 DOM initial/final and bulk final: ', &
+                        c14_col_cs%decomp_cpools_vr(c,j,i_dom), c14_dom_c(j), dom_c(j)
+                   call reportReactionState('C14 unsaturated reaction state', &
+                        c14_unsaturated_candidate(j))
+                   call reportReactionState('bulk unsaturated reaction state', &
+                        reaction(j)%unsaturated_state)
+                   call reportReactionState('C14 saturated reaction state', &
+                        c14_saturated_candidate(j))
+                   call reportReactionState('bulk saturated reaction state', &
+                        reaction(j)%saturated_state)
+                end if
+             end do
+             write(iulog,*) 'revised methane C14 DOM min/max and bulk DOM max: ', &
+                  minval(c14_dom_c), maxval(c14_dom_c), maxval(dom_c)
+             write(iulog,*) 'revised methane C14 DOM transport validity/residual: ', &
+                  c14_dom_transport_valid, c14_dom_transport_residual
+             write(iulog,*) 'revised methane C14 acetate validity unsat/sat: ', &
+                  c14_unsaturated_acetate_valid, c14_saturated_acetate_valid
+             write(iulog,*) 'revised methane C14 acetate residual unsat/sat: ', &
+                  c14_unsaturated_acetate_residual, c14_saturated_acetate_residual
+             write(iulog,*) 'revised methane C14 gas validity unsat/sat: ', &
+                  c14_unsaturated_gas_valid, c14_saturated_gas_valid
+             write(iulog,*) 'revised methane C14 gas residual unsat/sat: ', &
+                  c14_unsaturated_gas_residual, c14_saturated_gas_residual
+             write(iulog,*) 'revised methane C14 unsaturated CH4 min/max and bulk max: ', &
+                  minval([(c14_unsaturated_work(j)%conc_ch4, j=1,nlevdecomp)]), &
+                  maxval([(c14_unsaturated_work(j)%conc_ch4, j=1,nlevdecomp)]), &
+                  maxval([(unsaturated_work(j)%conc_ch4, j=1,nlevdecomp)])
+             write(iulog,*) 'revised methane C14 unsaturated CO2 min/max and bulk max: ', &
+                  minval([(c14_unsaturated_work(j)%conc_co2, j=1,nlevdecomp)]), &
+                  maxval([(c14_unsaturated_work(j)%conc_co2, j=1,nlevdecomp)]), &
+                  maxval([(unsaturated_work(j)%conc_co2, j=1,nlevdecomp)])
+          end if
           write(message,'(a,i0,7(a,l1),7(a,es12.4))') &
                ' ERROR: revised methane column transaction failed validation for column ', c, &
                '; reaction=', all(reaction(:)%valid), &
@@ -2035,6 +2459,10 @@ contains
        end if
 
        call commitColumnState(c, unsaturated_work, saturated_work)
+       if (use_c14) then
+          c14_col_cs%decomp_cpools_vr(c,1:nlevdecomp,i_dom) = c14_dom_c
+          call commitC14ColumnState(c, c14_unsaturated_work, c14_saturated_work)
+       end if
        do j = 1, nlevdecomp
           this%ch4_porewater_unsat_col(c,j) = ch4PorewaterConcentration( &
                c, j, .false., unsaturated_work(j)%conc_ch4)
@@ -2078,6 +2506,14 @@ contains
        this%surface_carbon_flux_col(c) = microbeMethaneSurfaceCarbonFlux(bulk_surface_flux)
        this%surface_ch4_flux_col(c) = microbeMethaneCH4SurfaceFluxKgC(bulk_surface_flux)
        this%surface_co2_flux_col(c) = microbeMethaneCO2Correction(bulk_surface_flux)
+       if (use_c14) then
+          this%c14_surface_ch4_flux_col(c) = catomw * &
+               ((1._r8 - fraction) * c14_unsaturated_surface_flux(microbe_gas_ch4) + &
+               fraction * c14_saturated_surface_flux(microbe_gas_ch4))
+          this%c14_surface_co2_flux_col(c) = catomw * &
+               ((1._r8 - fraction) * c14_unsaturated_surface_flux(microbe_gas_co2) + &
+               fraction * c14_saturated_surface_flux(microbe_gas_co2))
+       end if
        this%ch4_surface_diffusion_unsat_col(c) = catomw * (1._r8 - fraction) * &
             unsaturated_surface_diffusive_flux(microbe_gas_ch4)
        this%ch4_surface_diffusion_sat_col(c) = catomw * fraction * &
@@ -2499,11 +2935,13 @@ contains
       real(r8) :: lateral_diffusivity(num_soilc,nlevdecomp)
       real(r8) :: lateral_edge_distance(num_soilc)
       real(r8) :: additional_carbon_before(num_soilc)
-      real(r8) :: lateral_residual, partition_fraction, updated_additional_carbon
+      real(r8) :: lateral_residual, c14_lateral_residual
+      real(r8) :: partition_fraction, updated_additional_carbon
       integer :: lateral_edge_source(num_soilc), lateral_edge_target(num_soilc)
       integer :: soil_fc_by_topounit(bounds%begt:bounds%endt)
       integer :: edge_count, edge, source_fc, target_fc, target_t, t, partition
       logical :: lateral_valid, duplicate_edge
+      logical :: c14_lateral_valid
 
       if (num_soilc <= 0) return
       soil_fc_by_topounit = 0
@@ -2655,6 +3093,62 @@ contains
                   end select
                end do
             end do
+
+            if (use_c14 .and. (gas == microbe_gas_ch4 .or. gas == microbe_gas_co2)) then
+               do source_fc = 1, num_soilc
+                  c = filter_soilc(source_fc)
+                  do j = 1, nlevdecomp
+                     if (gas == microbe_gas_ch4) then
+                        if (partition == 1) then
+                           lateral_concentration(source_fc,j) = &
+                                this%c14_conc_ch4_unsat_col(c,j)
+                        else
+                           lateral_concentration(source_fc,j) = &
+                                this%c14_conc_ch4_sat_col(c,j)
+                        end if
+                     else
+                        if (partition == 1) then
+                           lateral_concentration(source_fc,j) = &
+                                this%c14_conc_co2_unsat_col(c,j)
+                        else
+                           lateral_concentration(source_fc,j) = &
+                                this%c14_conc_co2_sat_col(c,j)
+                        end if
+                     end if
+                  end do
+               end do
+               call computeMicrobeTopounitLateralDiffusion(lateral_concentration, &
+                    lateral_storage_weight, lateral_layer_top, lateral_layer_bottom, &
+                    lateral_diffusivity, lateral_edge_source(1:edge_count), &
+                    lateral_edge_target(1:edge_count), lateral_edge_distance(1:edge_count), &
+                    dt, lateral_updated, c14_lateral_residual, c14_lateral_valid)
+               if (.not. c14_lateral_valid) then
+                  write(message,'(a,i0,a,i0,a,es24.16)') &
+                       ' ERROR: invalid C14 revised methane lateral transport partition ', &
+                       partition, ' gas ', gas, ' residual ', c14_lateral_residual
+                  call endrun(msg=trim(message)//errMsg(__FILE__, __LINE__))
+               end if
+               do source_fc = 1, num_soilc
+                  c = filter_soilc(source_fc)
+                  if (gas == microbe_gas_ch4) then
+                     if (partition == 1) then
+                        this%c14_conc_ch4_unsat_col(c,1:nlevdecomp) = &
+                             lateral_updated(source_fc,:)
+                     else
+                        this%c14_conc_ch4_sat_col(c,1:nlevdecomp) = &
+                             lateral_updated(source_fc,:)
+                     end if
+                  else
+                     if (partition == 1) then
+                        this%c14_conc_co2_unsat_col(c,1:nlevdecomp) = &
+                             lateral_updated(source_fc,:)
+                     else
+                        this%c14_conc_co2_sat_col(c,1:nlevdecomp) = &
+                             lateral_updated(source_fc,:)
+                     end if
+                  end if
+               end do
+            end if
          end do
       end do
 
@@ -2672,7 +3166,7 @@ contains
          end do
          updated_additional_carbon = microbeMethaneColumnAdditionalCarbon( &
               fraction, unsaturated_state, saturated_state, layer_thickness)
-         this%lateral_carbon_flux_col(c) = &
+         this%lateral_carbon_flux_col(c) = this%lateral_carbon_flux_col(c) + &
               (updated_additional_carbon - additional_carbon_before(source_fc)) / dt
          this%additional_carbon_col(c) = updated_additional_carbon
       end do
@@ -2790,6 +3284,40 @@ contains
       end do
     end subroutine gatherColumnState
 
+    subroutine gatherC14ColumnState(column, unsaturated, saturated)
+      integer, intent(in) :: column
+      type(microbe_methane_reaction_state_type), intent(out) :: unsaturated(nlevdecomp)
+      type(microbe_methane_reaction_state_type), intent(out) :: saturated(nlevdecomp)
+      integer :: layer
+
+      unsaturated = microbe_methane_reaction_state_type()
+      saturated = microbe_methane_reaction_state_type()
+      do layer = 1, nlevdecomp
+         unsaturated(layer)%acetate_c = this%c14_acetate_c_unsat_col(column,layer)
+         saturated(layer)%acetate_c = this%c14_acetate_c_sat_col(column,layer)
+         unsaturated(layer)%acetate_methanogen_c = &
+              this%c14_acetate_methanogen_c_unsat_col(column,layer)
+         saturated(layer)%acetate_methanogen_c = &
+              this%c14_acetate_methanogen_c_sat_col(column,layer)
+         unsaturated(layer)%h2_methanogen_c = &
+              this%c14_h2_methanogen_c_unsat_col(column,layer)
+         saturated(layer)%h2_methanogen_c = &
+              this%c14_h2_methanogen_c_sat_col(column,layer)
+         unsaturated(layer)%aerobic_methanotroph_c = &
+              this%c14_aerobic_methanotroph_c_unsat_col(column,layer)
+         saturated(layer)%aerobic_methanotroph_c = &
+              this%c14_aerobic_methanotroph_c_sat_col(column,layer)
+         unsaturated(layer)%anaerobic_methanotroph_c = &
+              this%c14_anaerobic_methanotroph_c_unsat_col(column,layer)
+         saturated(layer)%anaerobic_methanotroph_c = &
+              this%c14_anaerobic_methanotroph_c_sat_col(column,layer)
+         unsaturated(layer)%conc_ch4 = this%c14_conc_ch4_unsat_col(column,layer)
+         saturated(layer)%conc_ch4 = this%c14_conc_ch4_sat_col(column,layer)
+         unsaturated(layer)%conc_co2 = this%c14_conc_co2_unsat_col(column,layer)
+         saturated(layer)%conc_co2 = this%c14_conc_co2_sat_col(column,layer)
+      end do
+    end subroutine gatherC14ColumnState
+
     subroutine repartitionColumnState(old_sat, new_sat, unsaturated, saturated)
       real(r8), intent(in) :: old_sat, new_sat
       type(microbe_methane_reaction_state_type), intent(inout) :: unsaturated(nlevdecomp)
@@ -2862,6 +3390,55 @@ contains
          this%conc_h2_sat_col(column,layer) = saturated(layer)%conc_h2
       end do
     end subroutine commitColumnState
+
+    subroutine commitC14ColumnState(column, unsaturated, saturated)
+      integer, intent(in) :: column
+      type(microbe_methane_reaction_state_type), intent(in) :: unsaturated(nlevdecomp)
+      type(microbe_methane_reaction_state_type), intent(in) :: saturated(nlevdecomp)
+      integer :: layer
+      do layer = 1, nlevdecomp
+         this%c14_acetate_c_unsat_col(column,layer) = unsaturated(layer)%acetate_c
+         this%c14_acetate_c_sat_col(column,layer) = saturated(layer)%acetate_c
+         this%c14_acetate_methanogen_c_unsat_col(column,layer) = &
+              unsaturated(layer)%acetate_methanogen_c
+         this%c14_acetate_methanogen_c_sat_col(column,layer) = &
+              saturated(layer)%acetate_methanogen_c
+         this%c14_h2_methanogen_c_unsat_col(column,layer) = &
+              unsaturated(layer)%h2_methanogen_c
+         this%c14_h2_methanogen_c_sat_col(column,layer) = &
+              saturated(layer)%h2_methanogen_c
+         this%c14_aerobic_methanotroph_c_unsat_col(column,layer) = &
+              unsaturated(layer)%aerobic_methanotroph_c
+         this%c14_aerobic_methanotroph_c_sat_col(column,layer) = &
+              saturated(layer)%aerobic_methanotroph_c
+         this%c14_anaerobic_methanotroph_c_unsat_col(column,layer) = &
+              unsaturated(layer)%anaerobic_methanotroph_c
+         this%c14_anaerobic_methanotroph_c_sat_col(column,layer) = &
+              saturated(layer)%anaerobic_methanotroph_c
+         this%c14_conc_ch4_unsat_col(column,layer) = unsaturated(layer)%conc_ch4
+         this%c14_conc_ch4_sat_col(column,layer) = saturated(layer)%conc_ch4
+         this%c14_conc_co2_unsat_col(column,layer) = unsaturated(layer)%conc_co2
+         this%c14_conc_co2_sat_col(column,layer) = saturated(layer)%conc_co2
+      end do
+    end subroutine commitC14ColumnState
+
+    subroutine scaleC14ColumnState(state, factor)
+      type(microbe_methane_reaction_state_type), intent(inout) :: state(nlevdecomp)
+      real(r8), intent(in) :: factor
+      integer :: layer
+      do layer = 1, nlevdecomp
+         state(layer)%acetate_c = state(layer)%acetate_c * factor
+         state(layer)%acetate_methanogen_c = &
+              state(layer)%acetate_methanogen_c * factor
+         state(layer)%h2_methanogen_c = state(layer)%h2_methanogen_c * factor
+         state(layer)%aerobic_methanotroph_c = &
+              state(layer)%aerobic_methanotroph_c * factor
+         state(layer)%anaerobic_methanotroph_c = &
+              state(layer)%anaerobic_methanotroph_c * factor
+         state(layer)%conc_ch4 = state(layer)%conc_ch4 * factor
+         state(layer)%conc_co2 = state(layer)%conc_co2 * factor
+      end do
+    end subroutine scaleC14ColumnState
 
     real(r8) function layerLiquidSaturation(column, layer) result(value)
       integer, intent(in) :: column, layer
@@ -3313,6 +3890,7 @@ contains
     use ncdio_pio, only : ncd_double
     use restUtilMod, only : restartvar
     use elm_varctl, only : nsrest, nsrStartup
+    use elm_varcon, only : c14ratio
     use abortutils, only : endrun
     use shr_log_mod, only : errMsg => shr_log_errMsg
 
@@ -3341,6 +3919,36 @@ contains
     call restart_state('MM_CONC_CO2_SAT', 'mol/m^3', this%conc_co2_sat_col)
     call restart_state('MM_CONC_H2_UNSAT', 'mol/m^3', this%conc_h2_unsat_col)
     call restart_state('MM_CONC_H2_SAT', 'mol/m^3', this%conc_h2_sat_col)
+    if (use_c14) then
+       call restart_c14_state('C14_MM_ACETATE_C_UNSAT', 'gC14/m^3', &
+            this%c14_acetate_c_unsat_col, this%acetate_c_unsat_col)
+       call restart_c14_state('C14_MM_ACETATE_C_SAT', 'gC14/m^3', &
+            this%c14_acetate_c_sat_col, this%acetate_c_sat_col)
+       call restart_c14_state('C14_MM_ACET_METH_C_UNSAT', 'gC14/m^3', &
+            this%c14_acetate_methanogen_c_unsat_col, this%acetate_methanogen_c_unsat_col)
+       call restart_c14_state('C14_MM_ACET_METH_C_SAT', 'gC14/m^3', &
+            this%c14_acetate_methanogen_c_sat_col, this%acetate_methanogen_c_sat_col)
+       call restart_c14_state('C14_MM_H2_METH_C_UNSAT', 'gC14/m^3', &
+            this%c14_h2_methanogen_c_unsat_col, this%h2_methanogen_c_unsat_col)
+       call restart_c14_state('C14_MM_H2_METH_C_SAT', 'gC14/m^3', &
+            this%c14_h2_methanogen_c_sat_col, this%h2_methanogen_c_sat_col)
+       call restart_c14_state('C14_MM_AER_METHANOTROPH_C_UNSAT', 'gC14/m^3', &
+            this%c14_aerobic_methanotroph_c_unsat_col, this%aerobic_methanotroph_c_unsat_col)
+       call restart_c14_state('C14_MM_AER_METHANOTROPH_C_SAT', 'gC14/m^3', &
+            this%c14_aerobic_methanotroph_c_sat_col, this%aerobic_methanotroph_c_sat_col)
+       call restart_c14_state('C14_MM_ANAER_METHANOTROPH_C_UNSAT', 'gC14/m^3', &
+            this%c14_anaerobic_methanotroph_c_unsat_col, this%anaerobic_methanotroph_c_unsat_col)
+       call restart_c14_state('C14_MM_ANAER_METHANOTROPH_C_SAT', 'gC14/m^3', &
+            this%c14_anaerobic_methanotroph_c_sat_col, this%anaerobic_methanotroph_c_sat_col)
+       call restart_c14_state('C14_MM_CONC_CH4_UNSAT', 'molC14/m^3', &
+            this%c14_conc_ch4_unsat_col, this%conc_ch4_unsat_col)
+       call restart_c14_state('C14_MM_CONC_CH4_SAT', 'molC14/m^3', &
+            this%c14_conc_ch4_sat_col, this%conc_ch4_sat_col)
+       call restart_c14_state('C14_MM_CONC_CO2_UNSAT', 'molC14/m^3', &
+            this%c14_conc_co2_unsat_col, this%conc_co2_unsat_col)
+       call restart_c14_state('C14_MM_CONC_CO2_SAT', 'molC14/m^3', &
+            this%c14_conc_co2_sat_col, this%conc_co2_sat_col)
+    end if
     call restartvar(ncid=ncid, flag=flag, varname='MM_SAT_FRACTION_PREVIOUS', xtype=ncd_double, &
          dim1name='column', long_name='previous revised-methane saturated-area fraction', units='1', &
          readvar=readvar, interpinic_flag='interp', data=this%sat_fraction_previous_col)
@@ -3357,6 +3965,21 @@ contains
            readvar=readvar, interpinic_flag='interp', data=field)
       call require_state_on_restart(name, readvar)
     end subroutine restart_state
+
+    subroutine restart_c14_state(name, units, field, bulk_field)
+      character(len=*), intent(in) :: name, units
+      real(r8), pointer, intent(inout) :: field(:,:)
+      real(r8), pointer, intent(in) :: bulk_field(:,:)
+      call restartvar(ncid=ncid, flag=flag, varname=name, xtype=ncd_double, &
+           dim1name='column', dim2name='levgrnd', switchdim=.true., &
+           long_name='revised microbial methane C14 prognostic state', units=units, &
+           readvar=readvar, interpinic_flag='interp', data=field)
+      if (flag == 'read' .and. .not. readvar) then
+         call endrun(msg=' ERROR: C14 runs require a C14 restart; revised methane state is missing: '// &
+              trim(name)//'. Begin the C14 experiment from a cold start.'// &
+              errMsg(__FILE__, __LINE__))
+      end if
+    end subroutine restart_c14_state
 
     subroutine require_state_on_restart(name, was_read)
       character(len=*), intent(in) :: name

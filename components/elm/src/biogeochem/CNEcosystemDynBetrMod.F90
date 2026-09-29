@@ -429,7 +429,7 @@ module CNEcosystemDynBetrMod
        end if
        if ( use_c14 ) then
           call CarbonStateUpdate2h(num_soilc, filter_soilc, num_soilp, filter_soilp, &
-               c14_col_cs, c13_veg_cs, c14_col_cf, c14_veg_cf, dt)
+               c14_col_cs, c14_veg_cs, c14_col_cf, c14_veg_cf, dt)
        end if
 
        call NStateUpdate2h(num_soilc, filter_soilc, num_soilp, filter_soilp, &

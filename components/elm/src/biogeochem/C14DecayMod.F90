@@ -22,6 +22,7 @@ module C14DecayMod
   !
   ! !PUBLIC MEMBER FUNCTIONS:
   public:: C14Decay
+  public:: C14DecayFactor
   public:: C14BombSpike
   public:: C14_init_BombSpike
 
@@ -39,6 +40,21 @@ module C14DecayMod
   !-----------------------------------------------------------------------
 
 contains
+
+  pure real(r8) function C14DecayFactor(dt, days_per_year, acceleration) result(factor)
+    ! Retain ELM's Libby-half-life convention and first-order timestep form.
+    ! The optional acceleration is used by standard accelerated-decomposition
+    ! pools; revised methane calls this with physical time because its explicit
+    ! substrates and guilds do not have an assigned cascade spinup factor.
+    real(r8), intent(in) :: dt, days_per_year
+    real(r8), intent(in), optional :: acceleration
+    real(r8) :: decay_const, scale
+
+    scale = 1._r8
+    if (present(acceleration)) scale = acceleration
+    decay_const = -log(0.5_r8) / (5568._r8 * secspday * days_per_year)
+    factor = max(0._r8, 1._r8 - decay_const * max(0._r8, scale) * dt)
+  end function C14DecayFactor
 
   !-----------------------------------------------------------------------
   subroutine C14Decay( num_soilc, filter_soilc, num_soilp, filter_soilp, &

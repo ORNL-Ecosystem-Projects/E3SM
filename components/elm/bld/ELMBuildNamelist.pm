@@ -3119,9 +3119,8 @@ sub setup_logic_microbe_methane {
     fatal_error("use_microbe_aqueous_transport=.true. requires use_vertsoilc=.true.\n");
   }
   if (value_is_true($nl->get_value('use_microbe_aqueous_transport')) &&
-      (value_is_true($nl->get_value('use_c13')) ||
-       value_is_true($nl->get_value('use_c14')))) {
-    fatal_error("use_microbe_aqueous_transport does not yet transport DOM carbon isotopes; use_c13 and use_c14 must be false.\n");
+      value_is_true($nl->get_value('use_c13'))) {
+    fatal_error("use_microbe_aqueous_transport does not yet transport C13 DOM; use_c13 must be false.\n");
   }
 
   if (value_is_true($nl->get_value('use_clm_microbe_humhol_saturation')) &&
@@ -3156,9 +3155,8 @@ sub setup_logic_microbe_methane {
   if (value_is_true($nl->get_value('use_crop'))) {
     fatal_error("use_microbe_methane=.true. does not yet support prognostic crop.\n");
   }
-  if (value_is_true($nl->get_value('use_c13')) ||
-      value_is_true($nl->get_value('use_c14'))) {
-    fatal_error("use_microbe_methane=.true. does not yet support C13 or C14.\n");
+  if (value_is_true($nl->get_value('use_c13'))) {
+    fatal_error("use_microbe_methane=.true. does not yet support C13.\n");
   }
 
   my $nu_com = $nl->get_value('nu_com') || 'RD';

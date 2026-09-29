@@ -868,9 +868,9 @@ acetate. The operator uses porewater concentration, ELM interlayer water flux,
 molecular diffusion, and hydrodynamic dispersion. It bypasses the generic SOM
 transport operator for DOM, does not move bacteria or fungi, and is mutually
 exclusive with use_clm_microbe_dom_relaxation. This option requires
-use_microbe_methane=.true. and use_vertsoilc=.true. Carbon-isotope DOM
-transport is not yet implemented, so use_c13 and use_c14 must be FALSE. It
-defaults to TRUE for HUMHOL revised-microbial-methane cases.
+use_microbe_methane=.true. and use_vertsoilc=.true. C14 is transported with
+the revised methane pools; C13 transport is not yet implemented, so use_c13
+must be FALSE. It defaults to TRUE for HUMHOL revised-microbial-methane cases.
 </entry>
 
 <entry id="use_microbe_lateral_aqueous_transport" type="logical" category="bgc"

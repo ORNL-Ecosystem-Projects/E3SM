@@ -1232,7 +1232,8 @@ contains
                filter(nc)%num_soilp, filter(nc)%soilp, dtime_mod, &
                atm2lnd_vars, col_es, col_ws, col_wf, chemstate_vars, soilstate_vars, &
                soilhydrology_vars, ch4_vars%grnd_ch4_cond_patch, &
-               ch4_vars, col_cs, col_cf, veg_cf, col_ns, col_nf, col_ps)
+               ch4_vars, cnstate_vars, col_cs, c14_col_cs, col_cf, veg_cf, &
+               col_ns, col_nf, col_ps)
           call t_stopf('microbe_methane')
        else if (use_lch4 .and. .not. is_active_betr_bgc) then
           ! Warning: do not call CH4 before AnnualUpdate, which will fail the legacy model.

@@ -772,6 +772,14 @@ contains
        this%annsum_counter_col (c) = spval
        this%totcolch4_col      (c) = spval
 
+       ! These accumulators are normally zeroed on the first call to the
+       ! legacy methane annual-mean update. Revised-methane runs do not call
+       ! that path, but the fields are still written to the common ELM
+       ! restart. Keep the unused restart state finite rather than carrying
+       ! the allocation-time NaN into a continuation run.
+       this%tempavg_somhr_col  (c) = 0._r8
+       this%tempavg_finrw_col  (c) = 0._r8
+
        ! To detect first year
        this%annavg_somhr_col(c)   = spval
        this%annavg_finrw_col(c)   = spval

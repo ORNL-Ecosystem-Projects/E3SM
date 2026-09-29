@@ -2491,6 +2491,18 @@ contains
     ! set cold-start initial values for select members of col_cs
     !-----------------------------------------------------------------------
 
+    if (carbon_type == 'c14') then
+       ! C14 experiments are cold-start only. Initialize the complete
+       ! allocated decomposition column before applying the normal soil/crop
+       ! atmospheric-ratio initialization below. This prevents a legacy
+       ! classification gap or the nlevdecomp+1 transport boundary from
+       ! introducing spval into the first vertical solve.
+       this%decomp_cpools_vr(begc:endc,:,:) = 0._r8
+       this%ctrunc_vr(begc:endc,:) = 0._r8
+       this%decomp_cpools(begc:endc,:) = 0._r8
+       this%decomp_cpools_1m(begc:endc,:) = 0._r8
+    end if
+
     do c = begc, endc
        l = col_pp%landunit(c)
        if (col_pp%is_soil(c) .or. col_pp%is_crop(c)) then
@@ -2779,10 +2791,16 @@ contains
           if (flag=='read' .and. .not. readvar) then
              write(iulog,*) 'initializing this%decomp_cpools_vr with atmospheric c13 value for: '//varname
              do i = bounds%begc,bounds%endc
-                do j = 1, nlevdecomp
+                ! The vertical transport solver uses nlevdecomp+1 as its
+                ! lower boundary. Initialize the complete allocated column
+                ! when an older restart has no isotope fields so a fill value
+                ! cannot diffuse into the active profile on the first solve.
+                do j = 1, nlevdecomp_full
                    if (c12_carbonstate_vars%decomp_cpools_vr(i,j,k) /= spval .and. &
-                        .not. isnan(this%decomp_cpools_vr(i,j,k)) ) then
-                         this%decomp_cpools_vr(i,j,k) = c12_carbonstate_vars%decomp_cpools_vr(i,j,k) * c14ratio
+                        .not. isnan(c12_carbonstate_vars%decomp_cpools_vr(i,j,k)) ) then
+                         this%decomp_cpools_vr(i,j,k) = c12_carbonstate_vars%decomp_cpools_vr(i,j,k) * c3_r2
+                   else
+                      this%decomp_cpools_vr(i,j,k) = 0._r8
                    endif
                 end do
              end do
@@ -2800,6 +2818,18 @@ contains
           call restartvar(ncid=ncid, flag=flag, varname="col_ctrunc_c13", xtype=ncd_double,  &
                dim1name='column', long_name='',  units='', fill_value=spval, &
                interpinic_flag='interp' , readvar=readvar, data=ptr1d)
+       end if
+       if (flag=='read' .and. .not. readvar) then
+          do i = bounds%begc,bounds%endc
+             do j = 1, nlevdecomp_full
+                if (c12_carbonstate_vars%ctrunc_vr(i,j) /= spval .and. &
+                     .not. isnan(c12_carbonstate_vars%ctrunc_vr(i,j))) then
+                   this%ctrunc_vr(i,j) = c12_carbonstate_vars%ctrunc_vr(i,j) * c3_r2
+                else
+                   this%ctrunc_vr(i,j) = 0._r8
+                end if
+             end do
+          end do
        end if
 
        call restartvar(ncid=ncid, flag=flag, varname='totlitc_13', xtype=ncd_double,  &
@@ -2894,15 +2924,8 @@ contains
                   interpinic_flag='interp' , readvar=readvar, data=ptr1d)
           end if
           if (flag=='read' .and. .not. readvar) then
-             write(iulog,*) 'initializing this%decomp_cpools_vr with atmospheric c14 value for: '//trim(varname)
-             do i = bounds%begc,bounds%endc
-                do j = 1, nlevdecomp
-                   if (c12_carbonstate_vars%decomp_cpools_vr(i,j,k) /= spval .and. &
-                        .not. isnan(c12_carbonstate_vars%decomp_cpools_vr(i,j,k)) ) then
-                         this%decomp_cpools_vr(i,j,k) = c12_carbonstate_vars%decomp_cpools_vr(i,j,k) * c3_r2
-                   endif
-                end do
-             end do
+             call endrun(msg='ERROR: C14 runs require a C14 restart; missing '// &
+                  trim(varname)//errMsg(__FILE__, __LINE__))
           end if
        end do
 
@@ -2917,6 +2940,18 @@ contains
           call restartvar(ncid=ncid, flag=flag, varname="col_ctrunc_c14", xtype=ncd_double,  &
                dim1name='column', long_name='',  units='', fill_value=spval, &
                interpinic_flag='interp' , readvar=readvar, data=ptr1d)
+       end if
+       if (flag=='read' .and. .not. readvar) then
+          do i = bounds%begc,bounds%endc
+             do j = 1, nlevdecomp_full
+                if (c12_carbonstate_vars%ctrunc_vr(i,j) /= spval .and. &
+                     .not. isnan(c12_carbonstate_vars%ctrunc_vr(i,j))) then
+                   this%ctrunc_vr(i,j) = c12_carbonstate_vars%ctrunc_vr(i,j) * c14ratio
+                else
+                   this%ctrunc_vr(i,j) = 0._r8
+                end if
+             end do
+          end do
        end if
 
        call restartvar(ncid=ncid, flag=flag, varname='totlitc_14', xtype=ncd_double,  &
