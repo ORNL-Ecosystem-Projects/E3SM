@@ -19,6 +19,7 @@ module SoilStateType
   use landunit_varcon , only : istice, istdlak, istwet, istsoil, istcrop, istice_mec
   use column_varcon   , only : icol_roof, icol_sunwall, icol_shadewall, icol_road_perv, icol_road_imperv
   use elm_varctl      , only : use_cn, use_lch4,use_dynroot, use_fates, use_humhol
+  use elm_varctl      , only : use_jules_peat_hydraulics
   use elm_varctl      , only : use_erosion
   use elm_varctl      , only : use_var_soil_thick
   use elm_varctl      , only : iulog, fsurdat, hist_wrtch4diag
@@ -305,6 +306,19 @@ contains
     end if
 
     if (use_cn) then
+       call hist_addfld2d (fname='SOIL_HKSAT', units='mm/s', type2d='levgrnd', &
+            avgflag='A', long_name='soil saturated hydraulic conductivity', &
+            ptr_col=this%hksat_col, default='inactive')
+       call hist_addfld2d (fname='SOIL_SUCSAT', units='mm', type2d='levgrnd', &
+            avgflag='A', long_name='soil saturated matric suction', &
+            ptr_col=this%sucsat_col, default='inactive')
+       call hist_addfld2d (fname='SOIL_DRY_BULK_DENSITY', units='kg/m^3', &
+            type2d='levgrnd', avgflag='A', &
+            long_name='dry soil bulk density used by soil hydraulics', &
+            ptr_col=this%bd_col, default='inactive')
+    end if
+
+    if (use_cn) then
        this%eff_porosity_col(begc:endc,:) = spval
        call hist_addfld2d (fname='EFF_POROSITY', units='proportion', type2d='levgrnd', &
             avgflag='A', long_name='effective porosity = porosity - vol_ice', &
@@ -330,7 +344,8 @@ contains
     use pftvarcon           , only : peat_zsapric_depth, hummock_acrotelm_depth
     use fileutils           , only : getfil
     use organicFileMod      , only : organicrd
-    use SharedParamsMod   , only : ParamsShareInst
+    use SharedParamsMod   , only : ParamsShareInst, peat_hydraulic_b_max, peat_hydraulic_hksat_min, &
+                                       peat_hydraulic_bulk_density_min, peat_hydraulic_bulk_density_max
     use FuncPedotransferMod , only : pedotransf, get_ipedof
     use RootBiophysMod      , only : init_vegrootfr
     use, intrinsic :: ieee_exceptions
@@ -357,6 +372,7 @@ contains
     real(r8)           :: zsapric        = 0.5_r8       ! depth (m) that organic matter takes on characteristics of sapric peat
     real(r8)           :: zsapric_col                   ! column-local organic hydraulic transition depth (m)
     real(r8)           :: organic_depth                 ! depth used by organic hydraulic functions (m)
+    real(r8)           :: organic_bulk_density          ! dry organic-matter bulk density (kg/m3)
     real(r8)           :: max_bog_elevation             ! highest active bog-peat elevation in this gridcell (m)
     real(r8)           :: csol_bedrock   = 2.0e6_r8     ! vol. heat capacity of granite/sandstone  J/(m3 K)(Shabbir, 2000)
     real(r8)           :: pcalpha        = 0.5_r8       ! percolation threshold
@@ -775,19 +791,42 @@ contains
                 if (use_bog_organic) zsapric_col = peat_zsapric_depth
                 if (use_hummock_organic) organic_depth = max(0._r8, zsoi(lev) - hummock_acrotelm_depth)
 
-                om_watsat         = max(0.93_r8 - 0.1_r8   *(organic_depth/zsapric_col), 0.83_r8)
-                om_b              = min(2.7_r8  + 9.3_r8   *(organic_depth/zsapric_col), 12.0_r8)
-                if (use_bog_organic) then
-                   ! Preserve the modern ELM calculation outside peatland topounits.
-                   ! For bog peat, follow the intended CLM-SPRUCE fibric-to-sapric
-                   ! profile: suction declines from 10.3 mm toward a 10.1 mm floor.
-                   om_sucsat      = max(10.3_r8 - 0.2_r8   *(organic_depth/zsapric_col), 10.1_r8)
+                if (use_humhol .and. use_jules_peat_hydraulics .and. &
+                     top_pp%peat_depth(t) > 0._r8 .and. &
+                     organic_depth <= top_pp%peat_depth(t)) then
+                   ! Initialize density-dependent peat hydraulics from the
+                   ! supplied dry organic-matter density. During integration,
+                   ! SoilLittVertTransp refreshes these properties from the
+                   ! modeled physical-equivalent solid peat density.
+                   organic_bulk_density = this%cellorg_col(c,min(lev,nlevsoi))
+                   call jules_peat_hydraulic_properties(organic_bulk_density, &
+                        om_watsat, om_b, om_sucsat, om_hksat)
                 else
-                   om_sucsat      = min(10.3_r8 - 0.2_r8   *(organic_depth/zsapric_col), 10.1_r8)
+                   om_watsat      = max(0.93_r8 - 0.1_r8   *(organic_depth/zsapric_col), 0.83_r8)
+                   om_b           = min(2.7_r8  + 9.3_r8   *(organic_depth/zsapric_col), 12.0_r8)
+                   if (use_bog_organic) om_b = min(2.7_r8 + 9.3_r8 * &
+                        (organic_depth/zsapric_col), peat_hydraulic_b_max)
+                   if (use_bog_organic) then
+                      ! Preserve the modern ELM calculation outside peatland topounits.
+                      ! For bog peat, follow the intended CLM-SPRUCE fibric-to-sapric
+                      ! profile: suction declines from 10.3 mm toward a 10.1 mm floor.
+                      om_sucsat   = max(10.3_r8 - 0.2_r8   *(organic_depth/zsapric_col), 10.1_r8)
+                   else
+                      om_sucsat   = min(10.3_r8 - 0.2_r8   *(organic_depth/zsapric_col), 10.1_r8)
+                   end if
+                   om_hksat       = max(0.28_r8 - 0.2799_r8*(organic_depth/zsapric_col), 0.0001_r8)
+                   if (use_bog_organic) om_hksat = max(0.28_r8 - 0.2799_r8 * &
+                        (organic_depth/zsapric_col), peat_hydraulic_hksat_min)
                 end if
-                om_hksat          = max(0.28_r8 - 0.2799_r8*(organic_depth/zsapric_col), 0.0001_r8)
 
-                this%bd_col(c,lev)        = (1._r8 - this%watsat_col(c,lev))*2.7e3_r8
+                if (use_humhol .and. use_jules_peat_hydraulics .and. &
+                     top_pp%peat_depth(t) > 0._r8 .and. &
+                     organic_depth <= top_pp%peat_depth(t)) then
+                   this%bd_col(c,lev) = min(peat_hydraulic_bulk_density_max, &
+                        max(peat_hydraulic_bulk_density_min, organic_bulk_density))
+                else
+                   this%bd_col(c,lev) = (1._r8 - this%watsat_col(c,lev))*2.7e3_r8
+                end if
                 this%watsat_col(c,lev)    = (1._r8 - om_frac) * this%watsat_col(c,lev) + om_watsat*om_frac
                 tkm                       = (1._r8-om_frac) * (8.80_r8*sand+2.92_r8*clay)/(sand+clay)+om_tkm*om_frac ! W/(m K)
                 this%bsw_col(c,lev)       = (1._r8-om_frac) * (2.91_r8 + 0.159_r8*clay) + om_frac*om_b
@@ -959,6 +998,32 @@ contains
     deallocate(zisoifl, zsoifl, dzsoifl)
 
   end subroutine InitCold
+
+  !------------------------------------------------------------------------
+  subroutine jules_peat_hydraulic_properties(bulk_density, watsat, bsw, &
+       sucsat, hksat)
+    !$acc routine seq
+    !
+    ! Convert dry organic-matter bulk density to Clapp-Hornberger peat
+    ! hydraulic properties using Chadburn et al. (2022), equations 13-16:
+    ! https://doi.org/10.5194/gmd-15-1633-2022
+    !
+    use SharedParamsMod, only : peat_hydraulic_particle_density, &
+         peat_hydraulic_bulk_density_min, peat_hydraulic_bulk_density_max
+    real(r8), intent(in)  :: bulk_density ! kg dry organic matter / m3
+    real(r8), intent(out) :: watsat       ! m3/m3
+    real(r8), intent(out) :: bsw          ! unitless
+    real(r8), intent(out) :: sucsat       ! mm
+    real(r8), intent(out) :: hksat        ! mm/s
+    real(r8) :: rho
+
+    rho = min(peat_hydraulic_bulk_density_max, &
+         max(peat_hydraulic_bulk_density_min, bulk_density))
+    sucsat = 1000._r8 * exp(0.023_r8 * rho - 5.08_r8)
+    bsw = 0.0304_r8 * rho + 1.53_r8
+    hksat = 1000._r8 * exp(-0.0532_r8 * rho - 6.63_r8)
+    watsat = 1._r8 - rho / peat_hydraulic_particle_density
+  end subroutine jules_peat_hydraulic_properties
 
   !------------------------------------------------------------------------
   subroutine Restart(this, bounds, ncid, flag)

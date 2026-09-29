@@ -499,13 +499,33 @@ module elm_varctl
   logical, public            :: use_fen_bog_drainage         = .false.
   logical, public            :: use_peatland_roots           = .false.
   logical, public            :: use_moss_capillary_nutrients = .false.
+  logical, public            :: use_prognostic_moss_water    = .false.
   logical, public            :: use_peatland_vertical_transport = .false.
   logical, public            :: use_peatland_compaction_profile = .false.
+  logical, public            :: use_jules_peat_hydraulics       = .false.
+
+  ! Deep-soil warming treatment. The prognostic thermal solution is retained;
+  ! an explicitly budgeted heater source is controlled against an external
+  ! reference-temperature stream (for SPRUCE, T0.00 at 2 m).
+  logical, public            :: use_deep_soil_heating = .false.
+  character(len=256), public :: soil_heating_reference_file = ' '
+  integer, public            :: soil_heating_stream_year_first = 1
+  integer, public            :: soil_heating_stream_year_last = 1
+  integer, public            :: soil_heating_model_year_align = 1
+  integer, public            :: soil_heating_start_ymd = 0
+  real(r8), public           :: soil_heating_target_offset = 0._r8
+  real(r8), public           :: soil_heating_control_depth = 2._r8
+  real(r8), public           :: soil_heating_top_depth = 2._r8
+  real(r8), public           :: soil_heating_bottom_depth = 3._r8
+  real(r8), public           :: soil_heating_controller_timescale_days = 1._r8
+  real(r8), public           :: soil_heating_max_power = 60._r8
 
   !$acc declare copyin(use_peatland_roots)
   !$acc declare copyin(use_moss_capillary_nutrients)
+  !$acc declare copyin(use_prognostic_moss_water)
   !$acc declare copyin(use_peatland_vertical_transport)
   !$acc declare copyin(use_peatland_compaction_profile)
+  !$acc declare copyin(use_jules_peat_hydraulics)
  
   !-----------------------------------------------------------------------
   ! flux limiter for phenology flux calculation

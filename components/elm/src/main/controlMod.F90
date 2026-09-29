@@ -73,8 +73,17 @@ module controlMod
                         use_hydrstress, lateral_connectivity, domain_decomp_type, &
                         use_IM2_hillslope_hydrology, use_humhol, use_fen_bog_drainage, &
                         use_peatland_roots, use_moss_capillary_nutrients, &
+                        use_prognostic_moss_water, &
                         use_peatland_vertical_transport, &
                         use_peatland_compaction_profile, &
+                        use_jules_peat_hydraulics, &
+                        use_deep_soil_heating, soil_heating_reference_file, &
+                        soil_heating_stream_year_first, soil_heating_stream_year_last, &
+                        soil_heating_model_year_align, soil_heating_start_ymd, &
+                        soil_heating_target_offset, &
+                        soil_heating_control_depth, soil_heating_top_depth, &
+                        soil_heating_bottom_depth, soil_heating_controller_timescale_days, &
+                        soil_heating_max_power, &
                         use_petsc_thermal_model, &
                         do_budgets, budget_inst, budget_daily, budget_month, &
                         budget_ann, budget_ltann, budget_ltend, &
@@ -403,8 +412,16 @@ contains
          use_IM2_hillslope_hydrology
 
     namelist /elm_inparm/ use_humhol, use_fen_bog_drainage, use_peatland_roots, &
-         use_moss_capillary_nutrients, use_peatland_vertical_transport, &
-         use_peatland_compaction_profile
+         use_moss_capillary_nutrients, use_prognostic_moss_water, &
+         use_peatland_vertical_transport, &
+         use_peatland_compaction_profile, use_jules_peat_hydraulics, &
+         use_deep_soil_heating, &
+         soil_heating_reference_file, soil_heating_stream_year_first, &
+         soil_heating_stream_year_last, soil_heating_model_year_align, &
+         soil_heating_start_ymd, &
+         soil_heating_target_offset, soil_heating_control_depth, &
+         soil_heating_top_depth, soil_heating_bottom_depth, &
+         soil_heating_controller_timescale_days, soil_heating_max_power
 
     namelist /elm_inparm/ &
          use_petsc_thermal_model
@@ -1207,11 +1224,27 @@ contains
     call mpi_bcast (use_fen_bog_drainage, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_peatland_roots, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_moss_capillary_nutrients, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_prognostic_moss_water, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_peatland_vertical_transport, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_peatland_compaction_profile, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_jules_peat_hydraulics, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_deep_soil_heating, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (soil_heating_reference_file, len(soil_heating_reference_file), MPI_CHARACTER, 0, mpicom, ier)
+    call mpi_bcast (soil_heating_stream_year_first, 1, MPI_INTEGER, 0, mpicom, ier)
+    call mpi_bcast (soil_heating_stream_year_last, 1, MPI_INTEGER, 0, mpicom, ier)
+    call mpi_bcast (soil_heating_model_year_align, 1, MPI_INTEGER, 0, mpicom, ier)
+    call mpi_bcast (soil_heating_start_ymd, 1, MPI_INTEGER, 0, mpicom, ier)
+    call mpi_bcast (soil_heating_target_offset, 1, MPI_REAL8, 0, mpicom, ier)
+    call mpi_bcast (soil_heating_control_depth, 1, MPI_REAL8, 0, mpicom, ier)
+    call mpi_bcast (soil_heating_top_depth, 1, MPI_REAL8, 0, mpicom, ier)
+    call mpi_bcast (soil_heating_bottom_depth, 1, MPI_REAL8, 0, mpicom, ier)
+    call mpi_bcast (soil_heating_controller_timescale_days, 1, MPI_REAL8, 0, mpicom, ier)
+    call mpi_bcast (soil_heating_max_power, 1, MPI_REAL8, 0, mpicom, ier)
     !$acc update device(use_peatland_vertical_transport)
     !$acc update device(use_moss_capillary_nutrients)
+    !$acc update device(use_prognostic_moss_water)
     !$acc update device(use_peatland_compaction_profile)
+    !$acc update device(use_jules_peat_hydraulics)
 
     if ((use_cn .or. use_fates) .and. use_vertsoilc) then
        !$acc update device(peat_som_adv_flux, peat_som_diffus, peat_adv_reference_depth)
@@ -1231,6 +1264,10 @@ contains
        call endrun(msg=' ERROR: use_moss_capillary_nutrients=.true. requires '//&
             'use_peatland_roots=.true.'//errMsg(__FILE__, __LINE__))
     end if
+    if (use_prognostic_moss_water .and. .not. use_humhol) then
+       call endrun(msg=' ERROR: use_prognostic_moss_water=.true. requires '//&
+            'use_humhol=.true.'//errMsg(__FILE__, __LINE__))
+    end if
     if (use_peatland_vertical_transport .and. .not. use_humhol) then
        call endrun(msg=' ERROR: use_peatland_vertical_transport=.true. requires '//&
             'use_humhol=.true.'//errMsg(__FILE__, __LINE__))
@@ -1239,12 +1276,34 @@ contains
        call endrun(msg=' ERROR: use_peatland_compaction_profile=.true. requires '//&
             'use_peatland_vertical_transport=.true.'//errMsg(__FILE__, __LINE__))
     end if
+    if (use_jules_peat_hydraulics .and. .not. use_peatland_compaction_profile) then
+       call endrun(msg=' ERROR: use_jules_peat_hydraulics=.true. requires '//&
+            'use_peatland_compaction_profile=.true.'//errMsg(__FILE__, __LINE__))
+    end if
     if (use_peatland_vertical_transport .and. &
          (peat_som_adv_flux < 0._r8 .or. peat_som_diffus < 0._r8 .or. &
           peat_adv_reference_depth <= 0._r8)) then
        call endrun(msg=' ERROR: peatland vertical-transport coefficients must be '//&
             'nonnegative and peat_adv_reference_depth must be positive'//&
             errMsg(__FILE__, __LINE__))
+    end if
+    if (use_deep_soil_heating) then
+       if (len_trim(soil_heating_reference_file) == 0) then
+          call endrun(msg=' ERROR: use_deep_soil_heating=.true. requires '//&
+               'soil_heating_reference_file'//errMsg(__FILE__, __LINE__))
+       end if
+       if (soil_heating_control_depth <= 0._r8 .or. &
+            soil_heating_top_depth < 0._r8 .or. &
+            soil_heating_bottom_depth <= soil_heating_top_depth .or. &
+            soil_heating_controller_timescale_days <= 0._r8 .or. &
+            soil_heating_max_power <= 0._r8) then
+          call endrun(msg=' ERROR: invalid deep-soil-heating depth, timescale, or power setting'//&
+               errMsg(__FILE__, __LINE__))
+       end if
+       if (use_petsc_thermal_model) then
+          call endrun(msg=' ERROR: deep-soil heating is not yet implemented for the PETSc thermal solver'//&
+               errMsg(__FILE__, __LINE__))
+       end if
     end if
     ! bgc & pflotran interface
     call mpi_bcast (use_elm_interface, 1, MPI_LOGICAL, 0, mpicom, ier)
@@ -1387,8 +1446,21 @@ contains
     write(iulog,*) '    use_fen_bog_drainage = ', use_fen_bog_drainage
     write(iulog,*) '    use_peatland_roots = ', use_peatland_roots
     write(iulog,*) '    use_moss_capillary_nutrients = ', use_moss_capillary_nutrients
+    write(iulog,*) '    use_prognostic_moss_water = ', use_prognostic_moss_water
     write(iulog,*) '    use_peatland_vertical_transport = ', use_peatland_vertical_transport
     write(iulog,*) '    use_peatland_compaction_profile = ', use_peatland_compaction_profile
+    write(iulog,*) '    use_jules_peat_hydraulics = ', use_jules_peat_hydraulics
+    write(iulog,*) '    use_deep_soil_heating = ', use_deep_soil_heating
+    if (use_deep_soil_heating) then
+       write(iulog,*) '    soil_heating_reference_file = ', trim(soil_heating_reference_file)
+       write(iulog,*) '    soil_heating_target_offset = ', soil_heating_target_offset
+       write(iulog,*) '    soil_heating_start_ymd = ', soil_heating_start_ymd
+       write(iulog,*) '    soil_heating_control_depth = ', soil_heating_control_depth
+       write(iulog,*) '    soil_heating_interval = ', soil_heating_top_depth, soil_heating_bottom_depth
+       write(iulog,*) '    soil_heating_controller_timescale_days = ', &
+            soil_heating_controller_timescale_days
+       write(iulog,*) '    soil_heating_max_power = ', soil_heating_max_power
+    end if
     write(iulog,*) '    use_shrub_moss_shading = ', use_shrub_moss_shading
     write(iulog,*) '    use_surface_structure_shading = ', use_surface_structure_shading
     write(iulog,*) '    use_atm_downscaling_to_topunit = ', use_atm_downscaling_to_topunit

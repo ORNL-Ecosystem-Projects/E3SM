@@ -995,6 +995,85 @@ transport is enabled. Set it explicitly to FALSE to recover historical
 constant-with-depth peat burial.
 </entry>
 
+<entry id="use_jules_peat_hydraulics" type="logical" category="physics"
+       group="elm_inparm" valid_values="" value=".false.">
+If TRUE, derive peatland porosity, Clapp-Hornberger b, saturated suction,
+and saturated hydraulic conductivity from modeled solid-peat bulk density
+using the JULES-Peat relationships. This option requires
+use_peatland_compaction_profile and defaults to TRUE when that option is
+enabled. Set it explicitly to FALSE to retain the historical depth-based
+fibric-to-sapric hydraulic profile.
+</entry>
+
+<entry id="use_deep_soil_heating" type="logical" category="physics"
+       group="elm_inparm" valid_values="" value=".false.">
+Apply an explicitly budgeted deep-soil heater source while retaining the
+prognostic thermal solution. Heater power is controlled against an external
+reference temperature at soil_heating_control_depth. Disabled by default.
+</entry>
+
+<entry id="soil_heating_reference_file" type="char*256" category="physics"
+       group="elm_inparm" valid_values="" value=" ">
+NetCDF stream containing T_SOIL_REFERENCE (K), normally generated from the
+T0.00 treatment. This runtime-generated dependency is deliberately not marked
+as an input_pathname so CIME does not require it before the T0.00 job runs.
+</entry>
+
+<entry id="soil_heating_stream_year_first" type="integer" category="physics"
+       group="elm_inparm" valid_values="" value="1">
+First year in the deep-soil reference-temperature stream.
+</entry>
+
+<entry id="soil_heating_stream_year_last" type="integer" category="physics"
+       group="elm_inparm" valid_values="" value="1">
+Last year in the deep-soil reference-temperature stream.
+</entry>
+
+<entry id="soil_heating_model_year_align" type="integer" category="physics"
+       group="elm_inparm" valid_values="" value="1">
+Model year aligned with soil_heating_stream_year_first.
+</entry>
+
+<entry id="soil_heating_start_ymd" type="integer" category="physics"
+       group="elm_inparm" valid_values="" value="0">
+First date on which heater power may be applied, encoded as YYYYMMDD. Zero
+starts at the beginning of the simulation. SPRUCE warming uses 20150815.
+</entry>
+
+<entry id="soil_heating_target_offset" type="real" category="physics"
+       group="elm_inparm" valid_values="" value="0.0">
+Prescribed treatment increment (K) above the reference temperature.
+</entry>
+
+<entry id="soil_heating_control_depth" type="real" category="physics"
+       group="elm_inparm" valid_values="" value="2.0">
+Depth (m) at which modeled temperature is compared with the reference plus
+treatment increment. The SPRUCE experimental control depth is 2 m.
+</entry>
+
+<entry id="soil_heating_top_depth" type="real" category="physics"
+       group="elm_inparm" valid_values="" value="2.0">
+Upper boundary (m) of the interior deep-heater source interval.
+</entry>
+
+<entry id="soil_heating_bottom_depth" type="real" category="physics"
+       group="elm_inparm" valid_values="" value="3.0">
+Lower boundary (m) of the interior deep-heater source interval.
+</entry>
+
+<entry id="soil_heating_controller_timescale_days" type="real" category="physics"
+       group="elm_inparm" valid_values="" value="1.0">
+Proportional-controller timescale (days). A 1 K error requests enough energy
+to warm the heat capacity of the active 2--3 m interval by 1 K over this time,
+subject to soil_heating_max_power. It is not the experiment duration.
+</entry>
+
+<entry id="soil_heating_max_power" type="real" category="physics"
+       group="elm_inparm" valid_values="" value="60.0">
+Maximum one-sided heater power per ground area (W m-2). The default is the
+approximately 59 W m-2 installed capacity of 67 100-W heaters over 113 m2.
+</entry>
+
 <entry id="use_crop" type="logical" category="physics"
        group="elm_inparm" valid_values="" value=".false.">
 Toggle to turn on the prognostic crop model

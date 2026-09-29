@@ -2050,6 +2050,7 @@ sub process_namelist_inline_logic {
   setup_logic_peatland_roots($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
   setup_logic_peatland_vertical_transport($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
   setup_logic_peatland_compaction_profile($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
+  setup_logic_jules_peat_hydraulics($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
   setup_logic_decomp_performance($opts->{'test'}, $nl_flags, $definition, $defaults, $nl);
   setup_logic_snow($opts, $nl_flags, $definition, $defaults, $nl, $physv);
   setup_logic_glacier($opts, $nl_flags, $definition, $defaults, $nl,  $envxml_ref, $physv);
@@ -2367,6 +2368,25 @@ sub setup_logic_peatland_compaction_profile {
     my $value = ($use_transport =~ /true/i) ? '.true.' : '.false.';
     add_default($test_files, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl,
                 'use_peatland_compaction_profile', 'val'=>$value);
+  }
+}
+
+#-------------------------------------------------------------------------------
+
+sub setup_logic_jules_peat_hydraulics {
+  my ($test_files, $nl_flags, $definition, $defaults, $nl) = @_;
+
+  # New peatland cases use the density-dependent JULES-Peat formulation.
+  # An explicit FALSE preserves the historical depth-based curve.
+  if ( ! defined($nl->get_value('use_jules_peat_hydraulics')) ) {
+    my $use_compaction = $nl->get_value('use_peatland_compaction_profile') || '.false.';
+    my $value = ($use_compaction =~ /true/i) ? '.true.' : '.false.';
+    add_default($test_files, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl,
+                'use_jules_peat_hydraulics', 'val'=>$value);
+  }
+  if (value_is_true($nl->get_value('use_jules_peat_hydraulics')) &&
+      !value_is_true($nl->get_value('use_peatland_compaction_profile'))) {
+    fatal_error("use_jules_peat_hydraulics=.true. requires use_peatland_compaction_profile=.true.\n");
   }
 }
 
