@@ -428,6 +428,11 @@ module ColumnDataType
     real(r8), pointer :: eflx_bot                (:)   => null() ! heat flux from beneath the soil or ice column (W/m2)
     real(r8), pointer :: eflx_fgr12              (:)   => null() ! ground heat flux between soil layers 1 and 2 (W/m2)
     real(r8), pointer :: eflx_fgr                (:,:) => null() ! (rural) soil downward heat flux (W/m2) (1:nlevgrnd)  (pos upward; usually eflx_bot >= 0)
+    real(r8), pointer :: eflx_soil_heating       (:)   => null() ! applied deep-soil heater power (W/m2)
+    real(r8), pointer :: eflx_soil_heating_vr    (:,:) => null() ! layer-resolved deep-soil heater power (W/m2)
+    real(r8), pointer :: tsoil_heating_control   (:)   => null() ! modeled soil temperature at controller depth (K)
+    real(r8), pointer :: tsoil_heating_reference (:)   => null() ! untreated reference temperature at controller depth (K)
+    real(r8), pointer :: tsoil_heating_target    (:)   => null() ! reference plus treatment target (K)
     real(r8), pointer :: eflx_building_heat      (:)   => null() ! heat flux from urban building interior to urban walls, roof (W/m2)
     real(r8), pointer :: eflx_urban_ac           (:)   => null() ! urban air conditioning flux (W/m2)
     real(r8), pointer :: eflx_urban_heat         (:)   => null() ! urban heating flux (W/m**2)
@@ -5686,6 +5691,11 @@ contains
     allocate(this%eflx_bot             (begc:endc))              ; this%eflx_bot             (:)   = spval
     allocate(this%eflx_fgr12           (begc:endc))              ; this%eflx_fgr12           (:)   = spval
     allocate(this%eflx_fgr             (begc:endc, 1:nlevgrnd))  ; this%eflx_fgr             (:,:) = spval
+    allocate(this%eflx_soil_heating    (begc:endc))              ; this%eflx_soil_heating    (:)   = 0._r8
+    allocate(this%eflx_soil_heating_vr (begc:endc, 1:nlevgrnd))  ; this%eflx_soil_heating_vr (:,:) = 0._r8
+    allocate(this%tsoil_heating_control(begc:endc))              ; this%tsoil_heating_control(:)   = spval
+    allocate(this%tsoil_heating_reference(begc:endc))            ; this%tsoil_heating_reference(:) = spval
+    allocate(this%tsoil_heating_target (begc:endc))              ; this%tsoil_heating_target (:)   = spval
     allocate(this%eflx_building_heat   (begc:endc))              ; this%eflx_building_heat   (:)   = spval
     allocate(this%eflx_urban_ac        (begc:endc))              ; this%eflx_urban_ac        (:)   = spval
     allocate(this%eflx_urban_heat      (begc:endc))              ; this%eflx_urban_heat      (:)   = spval
@@ -5750,6 +5760,27 @@ contains
      call hist_addfld2d (fname='FGR_SOIL_R', units='watt/m^2', type2d='levgrnd', &
           avgflag='A', long_name='Rural downward heat flux at interface below each soil layer', &
            ptr_col=this%eflx_fgr, set_spec=spval, default='inactive')
+
+    call hist_addfld1d (fname='EFLX_SOIL_HEATING', units='W/m^2', &
+         avgflag='A', long_name='applied deep-soil heater power', &
+         ptr_col=this%eflx_soil_heating, default='inactive')
+
+    call hist_addfld2d (fname='EFLX_SOIL_HEATING_VR', units='W/m^2', &
+         type2d='levgrnd', avgflag='A', &
+         long_name='layer-resolved applied deep-soil heater power', &
+         ptr_col=this%eflx_soil_heating_vr, default='inactive')
+
+    call hist_addfld1d (fname='TSOI_HEATING_CONTROL', units='K', &
+         avgflag='A', long_name='modeled soil temperature at deep-heating control depth', &
+         ptr_col=this%tsoil_heating_control, default='inactive')
+
+    call hist_addfld1d (fname='TSOI_HEATING_REFERENCE', units='K', &
+         avgflag='A', long_name='untreated reference temperature for deep-soil heating', &
+         ptr_col=this%tsoil_heating_reference, default='inactive')
+
+    call hist_addfld1d (fname='TSOI_HEATING_TARGET', units='K', &
+         avgflag='A', long_name='reference plus prescribed deep-soil warming target', &
+         ptr_col=this%tsoil_heating_target, default='inactive')
 
     this%errsoi(begc:endc) = spval
      call hist_addfld1d (fname='ERRSOI',  units='W/m^2',  &

@@ -12,7 +12,11 @@ module SoilTemperatureMod
   use shr_infnan_mod    , only : nan => shr_infnan_nan
   use decompMod         , only : bounds_type
   use abortutils        , only : endrun
-  use elm_varctl        , only : iulog, use_finetop_rad
+  use elm_varctl        , only : iulog, use_finetop_rad, use_deep_soil_heating, &
+       soil_heating_target_offset, soil_heating_control_depth, &
+       soil_heating_top_depth, soil_heating_bottom_depth, &
+       soil_heating_controller_timescale_days, soil_heating_max_power, &
+       soil_heating_start_ymd
   use elm_varcon        , only : spval
   use UrbanParamsType   , only : urbanparams_type
   use atm2lndType       , only : atm2lnd_type
@@ -21,6 +25,7 @@ module SoilTemperatureMod
   use SoilStateType     , only : soilstate_type
   use EnergyFluxType    , only : energyflux_type
   use TopounitDataType  , only : top_af
+  use TopounitType      , only : top_pp
   use LandunitType      , only : lun_pp
   use LandunitDataType  , only : lun_es, lun_ef
   use ColumnType        , only : col_pp
@@ -28,12 +33,14 @@ module SoilTemperatureMod
   use VegetationType    , only : veg_pp
   use VegetationDataType, only : veg_ef, veg_wf
   use timeinfoMod
+  use elm_time_manager, only : get_curr_date
   use perfMod_GPU
   use ExternalModelConstants   , only : EM_ID_PTM
   use ExternalModelConstants   , only : EM_PTM_TBASED_SOLVE_STAGE
   use ExternalModelInterfaceMod, only : EMI_Driver
   use shr_const_mod            , only : SHR_CONST_PI
   use GridcellType             , only : grc_pp
+  use soilTemperatureTreatmentStreamMod, only : soil_heating_reference_grc
 
   !! Needed beacuse EMI is still using them as arguments
   use WaterstateType    , only : waterstate_type
@@ -115,6 +122,7 @@ module SoilTemperatureMod
   public :: SetMatrix_StandingSurfaceWater_Soil ! Set up the matrix entries corresponding to standing surface water-soil interaction
   public :: SetMatrix_Soil_StandingSurfaceWater ! Set up the matrix entries corresponding to soil-standing surface water interction
   public :: init_soil_temperature               ! Initializes soil tempreature model
+  public :: TemperatureAtDepth                  ! Linear interpolation of layer-center temperature
   !
   ! !PRIVATE MEMBER FUNCTIONS:
   private :: SoilThermProp      ! Set therm conduct. and heat cap of snow/soil layers
@@ -200,6 +208,8 @@ contains
     !
     ! !LOCAL VARIABLES:
     integer  :: j,c,l,g,pi                                                  ! indices
+    integer  :: t                                                           ! topounit index
+    integer  :: year, month, day, seconds, current_ymd
     integer  :: fc                                                          ! lake filtered column indices
     integer  :: fl                                                          ! urban filtered landunit indices
     integer  :: jtop(bounds%begc:bounds%endc)                               ! top level at each column
@@ -232,6 +242,14 @@ contains
     integer, allocatable :: filter_lun(:)
     logical  :: urban_column
     logical  :: update_temperature
+    real(r8) :: control_temperature
+    real(r8) :: target_temperature
+    real(r8) :: controller_error
+    real(r8) :: heated_heat_capacity
+    real(r8) :: layer_overlap_fraction
+    real(r8) :: layer_top
+    real(r8) :: layer_bottom
+    real(r8) :: controller_timescale_seconds
     !-----------------------------------------------------------------------
 
     associate(                                                                   &
@@ -274,6 +292,11 @@ contains
          eflx_bot                => col_ef%eflx_bot            , & ! Input:  [real(r8) (:)   ]  heat flux from beneath column (W/m**2) [+ = upward]
          eflx_fgr12              => col_ef%eflx_fgr12          , & ! Input:  [real(r8) (:)   ]  heat flux between soil layer 1 and 2 (W/m2)
          eflx_fgr                => col_ef%eflx_fgr            , & ! Input:  [real(r8) (:,:) ]  (rural) soil downward heat flux (W/m2) (1:nlevgrnd)
+         eflx_soil_heating       => col_ef%eflx_soil_heating   , & ! Output: [real(r8) (:)   ]  applied deep-soil heater power (W/m2)
+         eflx_soil_heating_vr    => col_ef%eflx_soil_heating_vr, & ! Output: [real(r8) (:,:) ]  layer-resolved heater power (W/m2)
+         tsoil_heating_control   => col_ef%tsoil_heating_control, & ! Output: [real(r8) (:) ] controller-depth temperature (K)
+         tsoil_heating_reference => col_ef%tsoil_heating_reference, & ! Output: [real(r8) (:) ] untreated reference (K)
+         tsoil_heating_target    => col_ef%tsoil_heating_target, & ! Output: [real(r8) (:) ] treatment target (K)
          eflx_gnet               => veg_ef%eflx_gnet         , & ! Output: [real(r8) (:)   ]  net ground heat flux into the surface (W/m**2)
          eflx_building_heat      => col_ef%eflx_building_heat  , & ! Output: [real(r8) (:)   ]  heat flux from urban building interior to walls, roof (W/m**2)
          eflx_urban_ac           => col_ef%eflx_urban_ac       , & ! Output: [real(r8) (:)   ]  urban air conditioning flux (W/m**2)
@@ -413,6 +436,66 @@ contains
            fact( begc:endc, -nlevsno+1: ),                                   &
            energyflux_vars)
 
+      ! Diagnose the control-depth temperature for all columns so an untreated
+      ! T0.00 run can be converted into the reference stream. For warmed bog
+      ! columns, convert the control error into a capped heater flux and
+      ! distribute that flux over the configured heater interval in proportion
+      ! to the heat capacity intersected by each layer.
+      controller_timescale_seconds = soil_heating_controller_timescale_days * 86400._r8
+      call get_curr_date(year, month, day, seconds)
+      current_ymd = year * 10000 + month * 100 + day
+      do fc = 1, num_nolakec
+         c = filter_nolakec(fc)
+         call TemperatureAtDepth(nlevgrnd, z(c,1:nlevgrnd), &
+              t_soisno(c,1:nlevgrnd), soil_heating_control_depth, &
+              control_temperature)
+         tsoil_heating_control(c) = control_temperature
+         tsoil_heating_reference(c) = spval
+         tsoil_heating_target(c) = spval
+         eflx_soil_heating(c) = 0._r8
+         eflx_soil_heating_vr(c,1:nlevgrnd) = 0._r8
+
+         if (use_deep_soil_heating) then
+            t = col_pp%topounit(c)
+            if (top_pp%is_bog(t) .and. top_pp%peat_depth(t) > 0._r8) then
+               g = col_pp%gridcell(c)
+               tsoil_heating_reference(c) = soil_heating_reference_grc(g)
+               target_temperature = soil_heating_reference_grc(g) + &
+                    soil_heating_target_offset
+               tsoil_heating_target(c) = target_temperature
+
+               heated_heat_capacity = 0._r8
+               do j = 1, nlevgrnd
+                  layer_top = max(0._r8, z(c,j) - 0.5_r8 * dz(c,j))
+                  layer_bottom = z(c,j) + 0.5_r8 * dz(c,j)
+                  layer_overlap_fraction = max(0._r8, &
+                       min(layer_bottom, soil_heating_bottom_depth) - &
+                       max(layer_top, soil_heating_top_depth)) / dz(c,j)
+                  heated_heat_capacity = heated_heat_capacity + &
+                       cv(c,j) * layer_overlap_fraction
+               end do
+
+               if (heated_heat_capacity > 0._r8 .and. &
+                    (soil_heating_start_ymd == 0 .or. &
+                     current_ymd >= soil_heating_start_ymd)) then
+                  controller_error = target_temperature - control_temperature
+                  eflx_soil_heating(c) = min(soil_heating_max_power, &
+                       max(0._r8, heated_heat_capacity * controller_error / &
+                       controller_timescale_seconds))
+                  do j = 1, nlevgrnd
+                     layer_top = max(0._r8, z(c,j) - 0.5_r8 * dz(c,j))
+                     layer_bottom = z(c,j) + 0.5_r8 * dz(c,j)
+                     layer_overlap_fraction = max(0._r8, &
+                          min(layer_bottom, soil_heating_bottom_depth) - &
+                          max(layer_top, soil_heating_top_depth)) / dz(c,j)
+                     eflx_soil_heating_vr(c,j) = eflx_soil_heating(c) * &
+                          cv(c,j) * layer_overlap_fraction / heated_heat_capacity
+                  end do
+               end if
+            end if
+         end if
+      end do
+
       ! compute thermal properties of h2osfc
 
       do fc = 1,num_nolakec
@@ -468,6 +551,7 @@ contains
               tk( begc:endc, -nlevsno+1: ),           &
               tk_h2osfc( begc:endc ),                 &
               fact( begc:endc, -nlevsno+1: ),         &
+              eflx_soil_heating_vr(begc:endc, 1:nlevgrnd), &
               fn( begc:endc, -nlevsno+1: ),           &
               c_h2osfc( begc:endc ),                  &
               dz_h2osfc( begc:endc ),                 &
@@ -522,6 +606,7 @@ contains
            tk( begc:endc, -nlevsno+1: ),           &
            tk_h2osfc( begc:endc ),                 &
            fact( begc:endc, -nlevsno+1: ),         &
+           eflx_soil_heating_vr(begc:endc, 1:nlevgrnd), &
            fn( begc:endc, -nlevsno+1: ),           &
            c_h2osfc( begc:endc ),                  &
            dz_h2osfc( begc:endc ),                 &
@@ -657,6 +742,15 @@ contains
          endif
       end do
 
+      ! Store the post-solve value so the T0.00 history diagnostic is the
+      ! reference actually realized by the prognostic thermal solution.
+      do fc = 1, num_nolakec
+         c = filter_nolakec(fc)
+         call TemperatureAtDepth(nlevgrnd, z(c,1:nlevgrnd), &
+              t_soisno(c,1:nlevgrnd), soil_heating_control_depth, &
+              tsoil_heating_control(c))
+      end do
+
       ! Initialize soil heat content
 
       do fc = 1,num_nolakec
@@ -711,7 +805,7 @@ contains
 
   subroutine SolveTemperature(bounds, num_filter, filter, dtime, &
        hs_h2osfc, hs_top_snow, hs_soil, hs_top, dhsdT, sabg_lyr_col, tk, &
-       tk_h2osfc, fact, fn, c_h2osfc, dz_h2osfc, jtop, jbot, &
+       tk_h2osfc, fact, soil_heating_vr, fn, c_h2osfc, dz_h2osfc, jtop, jbot, &
        urban_column, tvector)
     !
     ! !DESCRIPTION:
@@ -742,6 +836,7 @@ contains
     real(r8)               , intent(in)  :: tk( bounds%begc: , -nlevsno+1: )           ! thermal conductivity [W/(m K)]
     real(r8)               , intent(in)  :: tk_h2osfc( bounds%begc: )                  ! thermal conductivity of h2osfc [W/(m K)] [col]
     real(r8)               , intent(in)  :: fact( bounds%begc: , -nlevsno+1: )         ! used in computing tridiagonal matrix [col, lev]
+    real(r8)               , intent(in)  :: soil_heating_vr(bounds%begc:, 1:)           ! layer-resolved internal heater power [W/m2]
     real(r8)               , intent(in)  :: fn( bounds%begc: , -nlevsno+1: )           ! heat diffusion through the layer interface [W/m2]
     real(r8)               , intent(in)  :: c_h2osfc( bounds%begc: )                   ! heat capacity of surface water [col]
     real(r8)               , intent(in)  :: dz_h2osfc( bounds%begc: )                  ! Thickness of standing water [m]
@@ -783,6 +878,17 @@ contains
          urban_column,                           &
          rvector( begc:endc, -nlevsno: ))
 
+    ! Internal source term: fact=dt/heat_capacity, so fact*power is the
+    ! temperature increment contributed by the heater over this time step.
+    if (.not. urban_column) then
+       do fc = 1, num_filter
+          c = filter(fc)
+          do j = 1, nlevgrnd
+             rvector(c,j) = rvector(c,j) + fact(c,j) * soil_heating_vr(c,j)
+          end do
+       end do
+    end if
+
     ! Set up the banded diagonal matrix
 
     call SetMatrix(bounds, num_filter, filter,   &
@@ -809,6 +915,40 @@ contains
   end associate
 
   end subroutine SolveTemperature
+
+  !-----------------------------------------------------------------------
+  subroutine TemperatureAtDepth(nlev, layer_depth, layer_temperature, &
+       requested_depth, temperature)
+    ! Linear interpolation between soil-layer centers. At depths outside the
+    ! represented center range, use the nearest layer-center temperature.
+    integer, intent(in) :: nlev
+    real(r8), intent(in) :: layer_depth(nlev)
+    real(r8), intent(in) :: layer_temperature(nlev)
+    real(r8), intent(in) :: requested_depth
+    real(r8), intent(out) :: temperature
+    integer :: j
+    real(r8) :: weight
+
+    if (requested_depth <= layer_depth(1)) then
+       temperature = layer_temperature(1)
+       return
+    end if
+    if (requested_depth >= layer_depth(nlev)) then
+       temperature = layer_temperature(nlev)
+       return
+    end if
+    do j = 1, nlev - 1
+       if (requested_depth >= layer_depth(j) .and. &
+            requested_depth <= layer_depth(j+1)) then
+          weight = (requested_depth - layer_depth(j)) / &
+               (layer_depth(j+1) - layer_depth(j))
+          temperature = (1._r8 - weight) * layer_temperature(j) + &
+               weight * layer_temperature(j+1)
+          return
+       end if
+    end do
+    temperature = layer_temperature(nlev)
+  end subroutine TemperatureAtDepth
 
   !-----------------------------------------------------------------------
   subroutine SoilThermProp (bounds,  num_nolakec, filter_nolakec, &

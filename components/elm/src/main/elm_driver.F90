@@ -15,7 +15,7 @@ module elm_driver
   use elm_varctl             , only : wrtdia, iulog, create_glacier_mec_landunit, use_fates, use_betr, use_firn_percolation_and_compaction
   use elm_varctl             , only : use_cn, use_lch4, use_microbe_methane, use_legacy_ch4_with_microbe, &
        use_voc, use_noio, use_c13, use_c14
-  use elm_varctl             , only : use_erosion, use_fates_sp, use_fan
+  use elm_varctl             , only : use_erosion, use_fates_sp, use_fan, use_deep_soil_heating
   use elm_varctl             , only : iac_present
   use elm_varctl             , only : mpi_sync_nstep_freq
   use elm_varctl             , only : nsrest, nsrStartup
@@ -78,6 +78,7 @@ module elm_driver
   use FireMod              , only : FireInterp
   use SatellitePhenologyMod  , only : SatellitePhenology, interpMonthlyVeg
   use ndepStreamMod          , only : ndep_interp
+  use soilTemperatureTreatmentStreamMod, only : soil_temperature_treatment_stream_interp
   use pdepStreamMod          , only : pdep_interp
   use ActiveLayerMod         , only : alt_calc
   use CH4Mod                 , only : CH4
@@ -682,6 +683,12 @@ contains
     end if
 
 #endif
+
+    if (use_deep_soil_heating) then
+       call t_startf('soil_heating_reference_interp')
+       call soil_temperature_treatment_stream_interp(bounds_proc)
+       call t_stopf('soil_heating_reference_interp')
+    end if
 
     if (use_fan) then
        call fanstream_interp(bounds_proc, atm2lnd_vars)

@@ -547,6 +547,7 @@ contains
     use landunit_varcon       , only : istice, istice_mec, istsoil
     use elm_varctl            , only : finidat, finidat_interp_source, finidat_interp_dest, fsurdat
     use elm_varctl            , only : use_century_decomp, single_column, scmlat, scmlon, use_cn
+    use elm_varctl            , only : use_deep_soil_heating
     use elm_varorb            , only : eccen, mvelpp, lambm0, obliqr
     use elm_time_manager      , only : get_step_size, get_curr_calday
     use elm_time_manager      , only : get_curr_date, get_nstep, advance_timestep
@@ -568,6 +569,9 @@ contains
     use restFileMod           , only : restFile_read, restFile_write
     use accumulMod            , only : print_accum_fields
     use ndepStreamMod         , only : ndep_init, ndep_interp
+    use soilTemperatureTreatmentStreamMod, only : &
+         soil_temperature_treatment_stream_init, &
+         soil_temperature_treatment_stream_interp
     use EcosystemDynMod     , only : EcosystemDynInit
     use pdepStreamMod         , only : pdep_init, pdep_interp
     use DecompCascadeBGCMod , only : init_decompcascade_bgc
@@ -799,6 +803,13 @@ contains
 
     if (crop_prog) then
        call crop_vars%initAccBuffer(bounds_proc)
+    end if
+
+    if (use_deep_soil_heating) then
+       call t_startf('init_soil_heating_reference')
+       call soil_temperature_treatment_stream_init(bounds_proc)
+       call soil_temperature_treatment_stream_interp(bounds_proc)
+       call t_stopf('init_soil_heating_reference')
     end if
 
     call cnstate_vars%initAccBuffer(bounds_proc)
