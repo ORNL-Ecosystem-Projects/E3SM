@@ -32,20 +32,64 @@ module SharedParamsMod
   integer, public :: nlev_soildecomp_standard = 5
   real(r8), public :: moss_capillary_max_demand_fraction = 0.10_r8
   real(r8), public :: moss_capillary_connectivity_timescale_days = 30._r8
-  real(r8), public :: peat_compaction_surface_density = 25._r8
-  real(r8), public :: peat_compaction_deep_density = 100._r8
-  real(r8), public :: peat_compaction_efolding_depth = 0.25_r8
+  real(r8), public :: moss_water_layer_thickness = 0.05_r8
+  real(r8), public :: moss_water_saturated_suction = 10._r8
+  real(r8), public :: moss_water_clapp_hornberger_b = 3.5_r8
+  real(r8), public :: moss_water_hydraulic_conductivity_sat = 1.5_r8
+  real(r8), public :: moss_water_conductivity_exponent = 5._r8
+  real(r8), public :: moss_initial_carbon = 10._r8
+  real(r8), public :: moss_carbon_fraction_dry_mass = 0.5_r8
+  real(r8), public :: moss_water_initial_content = 5._r8
+  real(r8), public :: moss_water_content_min = 0.5_r8
+  real(r8), public :: moss_water_content_max = 8._r8
+  real(r8), public :: moss_water_drainage_threshold = 8.5_r8
+  real(r8), public :: peat_compaction_surface_density = 20._r8
+  real(r8), public :: peat_compaction_deep_density = 90._r8
+  real(r8), public :: peat_compaction_initial_acrotelm_depth = 0.25_r8
+  real(r8), public :: peat_compaction_transition_width = 0.10_r8
+  real(r8), public :: peat_compaction_zwt_running_mean_days = 30._r8
+  real(r8), public :: peat_compaction_zwt_smoothing_years = 10._r8
+  real(r8), public :: peat_compaction_growing_season_start_doy = 121._r8
+  real(r8), public :: peat_compaction_growing_season_end_doy = 305._r8
   real(r8), public :: peat_compaction_timescale_years = 1._r8
   real(r8), public :: soil_ice_impedance_exponent = 6._r8
+  real(r8), public :: peat_hydraulic_b_max = 12._r8
+  real(r8), public :: peat_hydraulic_hksat_min = 1.e-4_r8
+  real(r8), public :: peat_hydraulic_carbon_fraction = 0.56_r8
+  real(r8), public :: peat_hydraulic_particle_density = 1260._r8
+  real(r8), public :: peat_hydraulic_bulk_density_min = 35._r8
+  real(r8), public :: peat_hydraulic_bulk_density_max = 210._r8
   !$acc declare create(anoxia_wtsat)
   !$acc declare create(nlev_soildecomp_standard)
   !$acc declare copyin(moss_capillary_max_demand_fraction)
   !$acc declare copyin(moss_capillary_connectivity_timescale_days)
+  !$acc declare copyin(moss_water_layer_thickness)
+  !$acc declare copyin(moss_water_saturated_suction)
+  !$acc declare copyin(moss_water_clapp_hornberger_b)
+  !$acc declare copyin(moss_water_hydraulic_conductivity_sat)
+  !$acc declare copyin(moss_water_conductivity_exponent)
+  !$acc declare copyin(moss_initial_carbon)
+  !$acc declare copyin(moss_carbon_fraction_dry_mass)
+  !$acc declare copyin(moss_water_initial_content)
+  !$acc declare copyin(moss_water_content_min)
+  !$acc declare copyin(moss_water_content_max)
+  !$acc declare copyin(moss_water_drainage_threshold)
   !$acc declare copyin(peat_compaction_surface_density)
   !$acc declare copyin(peat_compaction_deep_density)
-  !$acc declare copyin(peat_compaction_efolding_depth)
+  !$acc declare copyin(peat_compaction_initial_acrotelm_depth)
+  !$acc declare copyin(peat_compaction_transition_width)
+  !$acc declare copyin(peat_compaction_zwt_running_mean_days)
+  !$acc declare copyin(peat_compaction_zwt_smoothing_years)
+  !$acc declare copyin(peat_compaction_growing_season_start_doy)
+  !$acc declare copyin(peat_compaction_growing_season_end_doy)
   !$acc declare copyin(peat_compaction_timescale_years)
   !$acc declare copyin(soil_ice_impedance_exponent)
+  !$acc declare copyin(peat_hydraulic_b_max)
+  !$acc declare copyin(peat_hydraulic_hksat_min)
+  !$acc declare copyin(peat_hydraulic_carbon_fraction)
+  !$acc declare copyin(peat_hydraulic_particle_density)
+  !$acc declare copyin(peat_hydraulic_bulk_density_min)
+  !$acc declare copyin(peat_hydraulic_bulk_density_max)
 
   !-----------------------------------------------------------------------
 
@@ -144,6 +188,50 @@ contains
         call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
         if (readv) moss_capillary_connectivity_timescale_days=tempr
 
+        tString='moss_water_layer_thickness'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) moss_water_layer_thickness=tempr
+
+        tString='moss_water_saturated_suction'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) moss_water_saturated_suction=tempr
+
+        tString='moss_water_clapp_hornberger_b'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) moss_water_clapp_hornberger_b=tempr
+
+        tString='moss_water_hydraulic_conductivity_sat'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) moss_water_hydraulic_conductivity_sat=tempr
+
+        tString='moss_water_conductivity_exponent'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) moss_water_conductivity_exponent=tempr
+
+        tString='moss_initial_carbon'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) moss_initial_carbon=tempr
+
+        tString='moss_carbon_fraction_dry_mass'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) moss_carbon_fraction_dry_mass=tempr
+
+        tString='moss_water_initial_content'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) moss_water_initial_content=tempr
+
+        tString='moss_water_content_min'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) moss_water_content_min=tempr
+
+        tString='moss_water_content_max'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) moss_water_content_max=tempr
+
+        tString='moss_water_drainage_threshold'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) moss_water_drainage_threshold=tempr
+
         tString='peat_compaction_surface_density'
         call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
         if (readv) peat_compaction_surface_density=tempr
@@ -152,9 +240,38 @@ contains
         call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
         if (readv) peat_compaction_deep_density=tempr
 
-        tString='peat_compaction_efolding_depth'
+        tString='peat_compaction_initial_acrotelm_depth'
         call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
-        if (readv) peat_compaction_efolding_depth=tempr
+        if (readv) then
+           peat_compaction_initial_acrotelm_depth=tempr
+        else
+           ! Backward-compatible interpretation of the former fixed-profile
+           ! e-folding depth while parameter files transition to the
+           ! hydrologically diagnosed acrotelm boundary.
+           tString='peat_compaction_efolding_depth'
+           call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+           if (readv) peat_compaction_initial_acrotelm_depth=tempr
+        end if
+
+        tString='peat_compaction_transition_width'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_compaction_transition_width=tempr
+
+        tString='peat_compaction_zwt_running_mean_days'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_compaction_zwt_running_mean_days=tempr
+
+        tString='peat_compaction_zwt_smoothing_years'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_compaction_zwt_smoothing_years=tempr
+
+        tString='peat_compaction_growing_season_start_doy'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_compaction_growing_season_start_doy=tempr
+
+        tString='peat_compaction_growing_season_end_doy'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_compaction_growing_season_end_doy=tempr
 
         tString='peat_compaction_timescale_years'
         call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
@@ -163,6 +280,30 @@ contains
         tString='soil_ice_impedance_exponent'
         call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
         if (readv) soil_ice_impedance_exponent=tempr
+
+        tString='peat_hydraulic_b_max'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_hydraulic_b_max=tempr
+
+        tString='peat_hydraulic_hksat_min'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_hydraulic_hksat_min=tempr
+
+        tString='peat_hydraulic_carbon_fraction'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_hydraulic_carbon_fraction=tempr
+
+        tString='peat_hydraulic_particle_density'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_hydraulic_particle_density=tempr
+
+        tString='peat_hydraulic_bulk_density_min'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_hydraulic_bulk_density_min=tempr
+
+        tString='peat_hydraulic_bulk_density_max'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) peat_hydraulic_bulk_density_max=tempr
 
         if (moss_capillary_max_demand_fraction < 0._r8 .or. &
              moss_capillary_max_demand_fraction > 1._r8) then
@@ -173,37 +314,131 @@ contains
            call endrun(msg=' ERROR: moss_capillary_connectivity_timescale_days must be positive'//&
                 errMsg(__FILE__, __LINE__))
         end if
+        if (moss_water_layer_thickness <= 0._r8 .or. &
+             moss_water_saturated_suction <= 0._r8 .or. &
+             moss_water_clapp_hornberger_b <= 0._r8 .or. &
+             moss_water_hydraulic_conductivity_sat <= 0._r8 .or. &
+             moss_water_conductivity_exponent <= 0._r8 .or. &
+             moss_initial_carbon <= 0._r8 .or. &
+             moss_carbon_fraction_dry_mass <= 0._r8 .or. &
+             moss_carbon_fraction_dry_mass > 1._r8 .or. &
+             moss_water_initial_content < 0._r8 .or. &
+             moss_water_content_min < 0._r8 .or. &
+             moss_water_content_max <= moss_water_content_min .or. &
+             moss_water_drainage_threshold < moss_water_content_max .or. &
+             moss_water_initial_content > moss_water_content_max) then
+           call endrun(msg=' ERROR: invalid prognostic moss-water parameters'//&
+                errMsg(__FILE__, __LINE__))
+        end if
         if (soil_ice_impedance_exponent < 0._r8) then
            call endrun(msg=' ERROR: soil_ice_impedance_exponent must be nonnegative'//&
                 errMsg(__FILE__, __LINE__))
         end if
+        if (peat_hydraulic_b_max < 2.7_r8) then
+           call endrun(msg=' ERROR: peat_hydraulic_b_max must be at least 2.7'//&
+                errMsg(__FILE__, __LINE__))
+        end if
+        if (peat_hydraulic_hksat_min <= 0._r8 .or. &
+             peat_hydraulic_hksat_min > 0.28_r8) then
+           call endrun(msg=' ERROR: peat_hydraulic_hksat_min must be in (0,0.28] mm/s'//&
+                errMsg(__FILE__, __LINE__))
+        end if
+        if (peat_hydraulic_carbon_fraction <= 0._r8 .or. &
+             peat_hydraulic_carbon_fraction > 1._r8 .or. &
+             peat_hydraulic_particle_density <= 0._r8 .or. &
+             peat_hydraulic_bulk_density_min <= 0._r8 .or. &
+             peat_hydraulic_bulk_density_max <= peat_hydraulic_bulk_density_min .or. &
+             peat_hydraulic_bulk_density_max >= peat_hydraulic_particle_density) then
+           call endrun(msg=' ERROR: invalid JULES-Peat density conversion parameters'//&
+                errMsg(__FILE__, __LINE__))
+        end if
         if (peat_compaction_surface_density <= 0._r8 .or. &
              peat_compaction_deep_density < peat_compaction_surface_density .or. &
-             peat_compaction_efolding_depth <= 0._r8 .or. &
+             peat_compaction_initial_acrotelm_depth <= 0._r8 .or. &
+             peat_compaction_transition_width <= 0._r8 .or. &
+             peat_compaction_zwt_running_mean_days <= 0._r8 .or. &
+             peat_compaction_zwt_smoothing_years <= 0._r8 .or. &
+             peat_compaction_growing_season_start_doy < 1._r8 .or. &
+             peat_compaction_growing_season_end_doy > 366._r8 .or. &
+             peat_compaction_growing_season_end_doy < &
+                  peat_compaction_growing_season_start_doy .or. &
              peat_compaction_timescale_years <= 0._r8) then
            call endrun(msg=' ERROR: peat compaction densities must be positive, deep density '//&
-                'must be at least surface density, and depth/time scales must be positive'//&
+                'must be at least surface density, and hydrologic depth/time settings must be valid'//&
                 errMsg(__FILE__, __LINE__))
         end if
 
         !$acc update device(moss_capillary_max_demand_fraction)
         !$acc update device(moss_capillary_connectivity_timescale_days)
+        !$acc update device(moss_water_layer_thickness)
+        !$acc update device(moss_water_saturated_suction)
+        !$acc update device(moss_water_clapp_hornberger_b)
+        !$acc update device(moss_water_hydraulic_conductivity_sat)
+        !$acc update device(moss_water_conductivity_exponent)
+        !$acc update device(moss_initial_carbon)
+        !$acc update device(moss_carbon_fraction_dry_mass)
+        !$acc update device(moss_water_initial_content)
+        !$acc update device(moss_water_content_min)
+        !$acc update device(moss_water_content_max)
+        !$acc update device(moss_water_drainage_threshold)
         !$acc update device(peat_compaction_surface_density)
         !$acc update device(peat_compaction_deep_density)
-        !$acc update device(peat_compaction_efolding_depth)
+        !$acc update device(peat_compaction_initial_acrotelm_depth)
+        !$acc update device(peat_compaction_transition_width)
+        !$acc update device(peat_compaction_zwt_running_mean_days)
+        !$acc update device(peat_compaction_zwt_smoothing_years)
+        !$acc update device(peat_compaction_growing_season_start_doy)
+        !$acc update device(peat_compaction_growing_season_end_doy)
         !$acc update device(peat_compaction_timescale_years)
         !$acc update device(soil_ice_impedance_exponent)
+        !$acc update device(peat_hydraulic_b_max)
+        !$acc update device(peat_hydraulic_hksat_min)
+        !$acc update device(peat_hydraulic_carbon_fraction)
+        !$acc update device(peat_hydraulic_particle_density)
+        !$acc update device(peat_hydraulic_bulk_density_min)
+        !$acc update device(peat_hydraulic_bulk_density_max)
 
         if (masterproc) then
            write(iulog,*) 'Peatland parameters read from ELM parameter file:'
            write(iulog,*) '  moss_capillary_max_demand_fraction = ', moss_capillary_max_demand_fraction
            write(iulog,*) '  moss_capillary_connectivity_timescale_days = ', &
                 moss_capillary_connectivity_timescale_days
+           write(iulog,*) '  moss_water_layer_thickness (m) = ', moss_water_layer_thickness
+           write(iulog,*) '  moss_water saturated suction (mm) = ', &
+                moss_water_saturated_suction
+           write(iulog,*) '  moss_water Clapp-Hornberger b = ', &
+                moss_water_clapp_hornberger_b
+           write(iulog,*) '  moss_water Ksat (mm/s) and exponent = ', &
+                moss_water_hydraulic_conductivity_sat, moss_water_conductivity_exponent
+           write(iulog,*) '  moss initial carbon (gC/m2) and C fraction of dry mass = ', &
+                moss_initial_carbon, moss_carbon_fraction_dry_mass
+           write(iulog,*) '  moss initial water content (gH2O/g dry mass) = ', &
+                moss_water_initial_content
+           write(iulog,*) '  moss physiological water-content range (gH2O/g dry mass) = ', &
+                moss_water_content_min, moss_water_content_max
+           write(iulog,*) '  moss drainage threshold (gH2O/g dry mass) = ', &
+                moss_water_drainage_threshold
            write(iulog,*) '  peat_compaction_surface_density (kg C/m3) = ', peat_compaction_surface_density
            write(iulog,*) '  peat_compaction_deep_density (kg C/m3) = ', peat_compaction_deep_density
-           write(iulog,*) '  peat_compaction_efolding_depth (m) = ', peat_compaction_efolding_depth
+           write(iulog,*) '  peat_compaction_initial_acrotelm_depth (m) = ', &
+                peat_compaction_initial_acrotelm_depth
+           write(iulog,*) '  peat_compaction_transition_width (m) = ', peat_compaction_transition_width
+           write(iulog,*) '  peat_compaction_zwt_running_mean_days = ', &
+                peat_compaction_zwt_running_mean_days
+           write(iulog,*) '  peat_compaction_zwt_smoothing_years = ', &
+                peat_compaction_zwt_smoothing_years
+           write(iulog,*) '  peat_compaction growing-season DOY range = ', &
+                peat_compaction_growing_season_start_doy, &
+                peat_compaction_growing_season_end_doy
            write(iulog,*) '  peat_compaction_timescale_years (yr) = ', peat_compaction_timescale_years
            write(iulog,*) '  soil_ice_impedance_exponent = ', soil_ice_impedance_exponent
+           write(iulog,*) '  peat_hydraulic_b_max = ', peat_hydraulic_b_max
+           write(iulog,*) '  peat_hydraulic_hksat_min (mm/s) = ', peat_hydraulic_hksat_min
+           write(iulog,*) '  peat_hydraulic_carbon_fraction = ', peat_hydraulic_carbon_fraction
+           write(iulog,*) '  peat_hydraulic_particle_density (kg/m3) = ', &
+                peat_hydraulic_particle_density
+           write(iulog,*) '  peat_hydraulic_bulk_density range (kg/m3) = ', &
+                peat_hydraulic_bulk_density_min, peat_hydraulic_bulk_density_max
         end if
      end if
 

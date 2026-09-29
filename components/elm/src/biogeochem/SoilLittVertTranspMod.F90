@@ -9,6 +9,7 @@ module SoilLittVertTranspMod
   use elm_varctl             , only : use_microbe_methane
   use elm_varctl             , only : use_peatland_vertical_transport
   use elm_varctl             , only : use_peatland_compaction_profile
+  use elm_varctl             , only : use_jules_peat_hydraulics
   use elm_varctl             , only : use_microbe_aqueous_transport
   use elm_varcon             , only : secspday
   use decompMod              , only : bounds_type
@@ -17,10 +18,20 @@ module SoilLittVertTranspMod
   use MicrobeDecompMod       , only : MicrobeDecompParamsInst
   use SharedParamsMod        , only : peat_compaction_surface_density, &
                                       peat_compaction_deep_density, &
-                                      peat_compaction_efolding_depth, &
-                                      peat_compaction_timescale_years
+                                      peat_compaction_initial_acrotelm_depth, &
+                                      peat_compaction_transition_width, &
+                                      peat_compaction_zwt_running_mean_days, &
+                                      peat_compaction_zwt_smoothing_years, &
+                                      peat_compaction_growing_season_start_doy, &
+                                      peat_compaction_growing_season_end_doy, &
+                                      peat_compaction_timescale_years, &
+                                      peat_hydraulic_carbon_fraction, &
+                                      peat_hydraulic_bulk_density_min, &
+                                      peat_hydraulic_bulk_density_max
   use CanopyStateType        , only : canopystate_type
   use CNStateType            , only : cnstate_type
+  use SoilHydrologyType      , only : soilhydrology_type
+  use SoilStateType          , only : soilstate_type, jules_peat_hydraulic_properties
   use elm_varctl             , only : nu_com
   use ColumnDataType         , only : col_cs, c13_col_cs, c14_col_cs
   use ColumnDataType         , only : col_cf, c13_col_cf, c14_col_cf
@@ -36,6 +47,10 @@ module SoilLittVertTranspMod
   public :: createLitterTransportList
   public :: readSoilLittVertTranspParams
   private :: calc_diffus_advflux
+  private :: peat_zwt_percentile90_5
+
+  integer, parameter :: peat_zwt_history_years = 5
+  real(r8), parameter :: peat_zwt_target_quantile = 0.90_r8
 
   type, public :: SoilLittVertTranspParamsType
      real(r8)  :: som_diffus                  ! Soil organic matter diffusion
@@ -69,6 +84,50 @@ module SoilLittVertTranspMod
   !-----------------------------------------------------------------------
 
 contains
+
+   real(r8) function peat_zwt_percentile90_5(value1, value2, value3, value4, &
+        value5, nvalid) result(percentile)
+      ! Return the linearly interpolated 90th percentile (Hyndman-Fan type 7)
+      ! of as many as five annual sustained low-water depths.  A fixed-size
+      ! helper keeps the calculation deterministic and accelerator friendly.
+      !$acc routine seq
+      real(r8), intent(in) :: value1, value2, value3, value4, value5
+      integer, intent(in) :: nvalid
+      real(r8) :: values(peat_zwt_history_years)
+      real(r8) :: candidate
+      real(r8) :: position
+      real(r8) :: weight
+      integer :: i
+      integer :: j
+      integer :: lower_index
+      integer :: upper_index
+      integer :: count
+
+      values = (/ value1, value2, value3, value4, value5 /)
+      count = max(0, min(peat_zwt_history_years, nvalid))
+      if (count == 0) then
+         percentile = 0._r8
+         return
+      end if
+
+      do i = 2,count
+         candidate = values(i)
+         j = i - 1
+         do while (j >= 1)
+            if (values(j) <= candidate) exit
+            values(j+1) = values(j)
+            j = j - 1
+         end do
+         values(j+1) = candidate
+      end do
+
+      position = 1._r8 + peat_zwt_target_quantile * real(count - 1,r8)
+      lower_index = floor(position)
+      upper_index = min(count, lower_index + 1)
+      weight = position - real(lower_index,r8)
+      percentile = values(lower_index) + weight * &
+           (values(upper_index) - values(lower_index))
+   end function peat_zwt_percentile90_5
 
    subroutine createLitterTransportList()
       ! This subroutine creates a list that will point to the
@@ -203,7 +262,7 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine SoilLittVertTransp(num_soilc, filter_soilc,   &
-       canopystate_vars, cnstate_vars )
+       canopystate_vars, soilstate_vars, soilhydrology_vars, cnstate_vars )
     !
     ! !DESCRIPTION:
     ! Calculate vertical mixing of soil and litter pools.  Also reconcile sources and sinks of these pools
@@ -219,6 +278,8 @@ contains
     integer                  , intent(in)    :: num_soilc        ! number of soil columns in filter
     integer                  , intent(in)    :: filter_soilc(:)  ! filter for soil columns
     type(canopystate_type)   , intent(in)    :: canopystate_vars
+    type(soilstate_type)     , intent(inout) :: soilstate_vars
+    type(soilhydrology_type) , intent(in)    :: soilhydrology_vars
     type(cnstate_type)       , intent(inout) :: cnstate_vars
     !
     ! !LOCAL VARIABLES:
@@ -251,7 +312,27 @@ contains
     real(r8) :: peat_target_density
     real(r8) :: peat_pool_factor
     real(r8) :: peat_excess_flux
+    real(r8) :: peat_solid_source_flux
+    real(r8) :: peat_storage_demand
+    real(r8) :: peat_available_flux
     real(r8) :: peat_compaction_timescale_seconds
+    real(r8) :: peat_zwt_running_alpha
+    real(r8) :: peat_zwt_annual_alpha
+    real(r8) :: peat_zwt_sample
+    real(r8) :: peat_zwt_p90
+    integer  :: peat_zwt_history_index
+    real(r8) :: peat_transition_fraction
+    real(r8) :: peat_transition_top
+    real(r8) :: peat_transition_bottom
+    real(r8) :: peat_transition_integral_top
+    real(r8) :: peat_transition_integral_bottom
+    real(r8) :: peat_layer_top
+    real(r8) :: peat_layer_bottom
+    real(r8) :: peat_bulk_density
+    real(r8) :: peat_watsat
+    real(r8) :: peat_bsw
+    real(r8) :: peat_sucsat
+    real(r8) :: peat_hksat
     real(r8) :: dom_diffusion_multiplier
     logical  :: peat_dynamic_column(num_soilc)
     logical  :: transport_pool(num_soilc,ndecomp_pools)
@@ -279,6 +360,16 @@ contains
          peat_c_density_diag => cnstate_vars%peat_c_density_col  , &
          peat_c_target_diag => cnstate_vars%peat_c_target_density_col, &
          peat_c_burial_flux_diag => cnstate_vars%peat_c_burial_flux_col, &
+         peat_zwt_running_mean => cnstate_vars%peat_zwt_running_mean_col, &
+         peat_zwt_gs_deepest => cnstate_vars%peat_zwt_gs_deepest_col, &
+         peat_zwt_annual_low => cnstate_vars%peat_zwt_annual_low_col, &
+         peat_zwt_annual_low_count => cnstate_vars%peat_zwt_annual_low_count_col, &
+         peat_zwt_gs_p90 => cnstate_vars%peat_zwt_gs_p90_col, &
+         peat_acrotelm_depth => cnstate_vars%peat_acrotelm_depth_col, &
+         peat_zwt_gs_elapsed => cnstate_vars%peat_zwt_gs_elapsed_col, &
+         peat_zwt_stat_year => cnstate_vars%peat_zwt_stat_year_col, &
+         zwt => soilhydrology_vars%zwt_col, &
+         icefrac => soilhydrology_vars%icefrac_col, &
          ! !Set parameters of vertical mixing of SOM
           som_diffus                 => SoilLittVertTranspParamsInst%som_diffus   , &
           cryoturb_diffusion_k       => SoilLittVertTranspParamsInst%cryoturb_diffusion_k  , &
@@ -310,12 +401,20 @@ contains
 
       peat_compaction_timescale_seconds = peat_compaction_timescale_years * &
            secspday * 365._r8
-      !$acc enter data copyin(peat_compaction_timescale_seconds)
+      peat_zwt_running_alpha = 1._r8 - exp(-dtime_mod / &
+           (peat_compaction_zwt_running_mean_days * secspday))
+      peat_zwt_annual_alpha = 1._r8 - exp(-1._r8 / &
+           peat_compaction_zwt_smoothing_years)
+      !$acc enter data copyin(peat_compaction_timescale_seconds, &
+      !$acc     peat_zwt_running_alpha, peat_zwt_annual_alpha)
 
       ! Build the physical-equivalent solid-C density used by the peat
-      ! capacity-overflow calculation. In AD spinup the prognostic slow-pool
-      ! concentrations are deliberately reduced, so reconstruct the physical
-      ! density with the same pool factors used by vertical transport.
+      ! storage-and-throughflow calculation. In AD spinup the prognostic
+      ! slow-pool concentrations are deliberately reduced, so reconstruct the
+      ! physical density with the same pool factors used by vertical transport.
+      ! Sources are deliberately omitted here: their net solid-C contribution
+      ! is handled separately below, so that an input is not counted both as
+      ! stored mass and as throughflow.
       !$acc parallel loop independent gang vector default(present) private(c,t)
       do fc = 1,num_soilc
          c = filter_soilc(fc)
@@ -324,11 +423,116 @@ contains
               top_pp%peat_depth(t) > 0._r8
       end do
 
+      ! Diagnose the acrotelm base from sustained growing-season drawdown.
+      ! The instantaneous ZWT is first smoothed over a configurable interval;
+      ! the deepest value reached by that running mean during the thawed
+      ! growing season is retained for the year. At the next year boundary,
+      ! that annual value enters a five-year history. The 90th percentile of
+      ! the available annual values drives the slowly adjusting acrotelm base.
+      ! This excludes winter water-table artifacts, rejects isolated daily
+      ! excursions, and avoids letting a single dry year define the profile.
+      ! All updates occur in physical rather than accelerated-decomposition
+      ! time.
+      !$acc parallel loop independent gang vector default(present) &
+      !$acc& private(c,t,peat_zwt_sample,peat_zwt_p90,peat_zwt_history_index)
+      do fc = 1,num_soilc
+         c = filter_soilc(fc)
+         if (peat_dynamic_column(fc)) then
+            t = col_pp%topounit(c)
+            if (top_pp%acrotelm_depth(t) > 0._r8) then
+               ! A site surface dataset may prescribe the boundary below each
+               ! topounit's local surface. Continue accumulating the water-
+               ! table statistic for evaluation, but do not let restart state
+               ! or the prognostic estimate move the prescribed boundary.
+               peat_acrotelm_depth(c) = top_pp%acrotelm_depth(t)
+            else if (peat_acrotelm_depth(c) <= 0._r8 .or. &
+                 peat_acrotelm_depth(c) > top_pp%peat_depth(t)) then
+               peat_acrotelm_depth(c) = min( &
+                    peat_compaction_initial_acrotelm_depth, &
+                    top_pp%peat_depth(t))
+            end if
+
+            if (peat_zwt_annual_low_count(c) > 0) then
+               peat_zwt_p90 = peat_zwt_percentile90_5( &
+                    peat_zwt_annual_low(c,1), peat_zwt_annual_low(c,2), &
+                    peat_zwt_annual_low(c,3), peat_zwt_annual_low(c,4), &
+                    peat_zwt_annual_low(c,5), peat_zwt_annual_low_count(c))
+            else
+               peat_zwt_p90 = peat_acrotelm_depth(c)
+            end if
+            peat_zwt_gs_p90(c) = peat_zwt_p90
+
+            if (peat_zwt_stat_year(c) <= 0._r8) then
+               peat_zwt_stat_year(c) = real(year_curr,r8)
+            else if (real(year_curr,r8) > peat_zwt_stat_year(c) + 0.5_r8) then
+               if (peat_zwt_gs_elapsed(c) > 0._r8) then
+                  if (peat_zwt_annual_low_count(c) < peat_zwt_history_years) then
+                     peat_zwt_annual_low_count(c) = peat_zwt_annual_low_count(c) + 1
+                     peat_zwt_history_index = peat_zwt_annual_low_count(c)
+                  else
+                     do peat_zwt_history_index = 1,peat_zwt_history_years-1
+                        peat_zwt_annual_low(c,peat_zwt_history_index) = &
+                             peat_zwt_annual_low(c,peat_zwt_history_index+1)
+                     end do
+                     peat_zwt_history_index = peat_zwt_history_years
+                  end if
+                  peat_zwt_annual_low(c,peat_zwt_history_index) = &
+                       peat_zwt_gs_deepest(c)
+                  peat_zwt_p90 = peat_zwt_percentile90_5( &
+                       peat_zwt_annual_low(c,1), peat_zwt_annual_low(c,2), &
+                       peat_zwt_annual_low(c,3), peat_zwt_annual_low(c,4), &
+                       peat_zwt_annual_low(c,5), peat_zwt_annual_low_count(c))
+                  peat_zwt_gs_p90(c) = peat_zwt_p90
+                  ! Keep the cold-start boundary until a complete five-year
+                  ! hydrologic window exists. This prevents a temporarily
+                  ! deep startup water table from controlling the density
+                  ! profile through a one- or two-value upper quantile.
+                  if (peat_zwt_annual_low_count(c) == peat_zwt_history_years .and. &
+                       top_pp%acrotelm_depth(t) <= 0._r8) then
+                     peat_acrotelm_depth(c) = peat_acrotelm_depth(c) + &
+                          peat_zwt_annual_alpha * &
+                          (peat_zwt_p90 - peat_acrotelm_depth(c))
+                  end if
+               end if
+               peat_zwt_running_mean(c) = 0._r8
+               peat_zwt_gs_deepest(c) = 0._r8
+               peat_zwt_gs_elapsed(c) = 0._r8
+               peat_zwt_stat_year(c) = real(year_curr,r8)
+            end if
+
+            if (real(jday_mod,r8) >= peat_compaction_growing_season_start_doy .and. &
+                 real(jday_mod,r8) <= peat_compaction_growing_season_end_doy .and. &
+                 icefrac(c,1) < 0.5_r8 .and. &
+                 zwt(c) <= top_pp%peat_depth(t)) then
+               ! A water table below the resolved peat column cannot locate
+               ! the acrotelm boundary. The complete-window requirement above
+               ! separately limits sensitivity to cold-start hydrology.
+               peat_zwt_sample = max(zwt(c), 0._r8)
+               if (peat_zwt_gs_elapsed(c) <= 0._r8) then
+                  peat_zwt_running_mean(c) = peat_zwt_sample
+                  peat_zwt_gs_deepest(c) = peat_zwt_sample
+               else
+                  peat_zwt_running_mean(c) = peat_zwt_running_mean(c) + &
+                       peat_zwt_running_alpha * &
+                       (peat_zwt_sample - peat_zwt_running_mean(c))
+                  peat_zwt_gs_deepest(c) = max(peat_zwt_gs_deepest(c), &
+                       peat_zwt_running_mean(c))
+               end if
+               peat_zwt_gs_elapsed(c) = peat_zwt_gs_elapsed(c) + dtime_mod
+            end if
+         end if
+      end do
+
       !$acc parallel loop independent gang default(present)
       do j = 1,nlevdecomp
          !$acc loop vector independent &
          !$acc& private(c,peat_physical_density,peat_target_density, &
-         !$acc& peat_pool_factor,s)
+         !$acc& peat_pool_factor,s,peat_transition_fraction, &
+         !$acc& peat_transition_top,peat_transition_bottom, &
+         !$acc& peat_transition_integral_top, &
+         !$acc& peat_transition_integral_bottom,peat_layer_top, &
+         !$acc& peat_layer_bottom,peat_bulk_density,peat_watsat, &
+         !$acc& peat_bsw,peat_sucsat,peat_hksat)
          do fc = 1,num_soilc
             c = filter_soilc(fc)
             peat_physical_density = 0._r8
@@ -346,21 +550,78 @@ contains
                         end if
                      end if
                      peat_physical_density = peat_physical_density + &
-                          max(decomp_cpools_vr(c,j,s) + decomp_csources(c,j,s), 0._r8) * &
+                          max(decomp_cpools_vr(c,j,s), 0._r8) * &
                           peat_pool_factor
                   end if
                end do
+               peat_transition_top = peat_acrotelm_depth(c)
+               peat_transition_bottom = peat_transition_top + &
+                    peat_compaction_transition_width
+               peat_layer_top = max(0._r8, zsoi(j) - &
+                    0.5_r8 * dzsoi_decomp(j))
+               peat_layer_bottom = peat_layer_top + dzsoi_decomp(j)
+
+               if (peat_layer_top <= peat_transition_top) then
+                  peat_transition_integral_top = 0._r8
+               else if (peat_layer_top < peat_transition_bottom) then
+                  peat_transition_integral_top = &
+                       (peat_layer_top - peat_transition_top)**2 / &
+                       (2._r8 * peat_compaction_transition_width)
+               else
+                  peat_transition_integral_top = peat_layer_top - &
+                       peat_transition_top - &
+                       0.5_r8 * peat_compaction_transition_width
+               end if
+
+               if (peat_layer_bottom <= peat_transition_top) then
+                  peat_transition_integral_bottom = 0._r8
+               else if (peat_layer_bottom < peat_transition_bottom) then
+                  peat_transition_integral_bottom = &
+                       (peat_layer_bottom - peat_transition_top)**2 / &
+                       (2._r8 * peat_compaction_transition_width)
+               else
+                  peat_transition_integral_bottom = peat_layer_bottom - &
+                       peat_transition_top - &
+                       0.5_r8 * peat_compaction_transition_width
+               end if
+
+               peat_transition_fraction = min(1._r8, max(0._r8, &
+                    (peat_transition_integral_bottom - &
+                     peat_transition_integral_top) / dzsoi_decomp(j)))
                peat_target_density = 1000._r8 * &
                     (peat_compaction_surface_density + &
                      (peat_compaction_deep_density - &
                       peat_compaction_surface_density) * &
-                     (1._r8 - exp(-max(zsoi(j),0._r8) / &
-                      peat_compaction_efolding_depth)))
+                     peat_transition_fraction)
             end if
             peat_c_density(fc,j) = peat_physical_density
             peat_c_density_diag(c,j) = peat_physical_density
             peat_c_target_diag(c,j) = peat_target_density
             peat_c_burial_flux_diag(c,j) = 0._r8
+            if (peat_dynamic_column(fc) .and. use_jules_peat_hydraulics .and. &
+                 zsoi(j) <= top_pp%peat_depth(col_pp%topounit(c))) then
+               peat_bulk_density = min(peat_hydraulic_bulk_density_max, &
+                    max(peat_hydraulic_bulk_density_min, &
+                    1.e-3_r8 * peat_physical_density / &
+                    peat_hydraulic_carbon_fraction))
+               call jules_peat_hydraulic_properties(peat_bulk_density, &
+                    peat_watsat, peat_bsw, peat_sucsat, peat_hksat)
+               soilstate_vars%bd_col(c,j) = peat_bulk_density
+               soilstate_vars%watsat_col(c,j) = peat_watsat
+               soilstate_vars%bsw_col(c,j) = peat_bsw
+               soilstate_vars%sucsat_col(c,j) = peat_sucsat
+               soilstate_vars%hksat_col(c,j) = peat_hksat
+               soilstate_vars%watdry_col(c,j) = peat_watsat * &
+                    (316230._r8 / peat_sucsat)**(-1._r8 / peat_bsw)
+               soilstate_vars%watopt_col(c,j) = peat_watsat * &
+                    (158490._r8 / peat_sucsat)**(-1._r8 / peat_bsw)
+               soilstate_vars%watfc_col(c,j) = peat_watsat * &
+                    (0.1_r8 / (peat_hksat * secspday))** &
+                    (1._r8 / (2._r8 * peat_bsw + 3._r8))
+               soilstate_vars%sucmin_col(c,j) = -10132500._r8
+               soilstate_vars%watmin_col(c,j) = peat_watsat * &
+                    (10132500._r8 / peat_sucsat)**(-1._r8 / peat_bsw)
+            end if
          end do
       end do
 
@@ -419,8 +680,7 @@ contains
             !$acc parallel loop independent gang default(present)
             do j = 1,nlevdecomp+1
                !$acc loop vector independent &
-               !$acc& private(c,t,l,peat_depth_factor,peat_physical_density, &
-               !$acc& peat_target_density,peat_excess_flux)
+               !$acc& private(c,t,peat_depth_factor)
                do fc = 1, num_soilc
                   c = filter_soilc (fc)
                   if  ( ( max(altmax(c), altmax_lastyear(c)) <= max_altdepth_cryoturbation ) .and. &
@@ -440,32 +700,10 @@ contains
                           peat_adv_reference_depth
                      if (peat_depth_factor > 0._r8) then
                         if (use_peatland_compaction_profile) then
-                           ! The coefficient at j is the velocity through the
-                           ! upper interface of layer j. There is no external
-                           ! C supply at the surface and no loss through the
-                           ! bottom of the decomposition column. Interior
-                           ! velocities relax only donor-layer C above its
-                           ! depth-dependent storage capacity.
+                           ! Dynamic peat throughflow is constructed in a
+                           ! top-down pass below, after all interface
+                           ! coefficients have been initialized.
                            som_adv_coef(c,j) = 0._r8
-                           if (j > 1 .and. j <= nlevdecomp .and. &
-                                zisoi(j-1) <= top_pp%peat_depth(t)) then
-                              l = j - 1
-                              peat_physical_density = peat_c_density(fc,l)
-                              peat_target_density = 1000._r8 * &
-                                   (peat_compaction_surface_density + &
-                                    (peat_compaction_deep_density - &
-                                     peat_compaction_surface_density) * &
-                                    (1._r8 - exp(-max(zsoi(l),0._r8) / &
-                                     peat_compaction_efolding_depth)))
-                              if (peat_physical_density > peat_target_density) then
-                                 peat_excess_flux = &
-                                      (peat_physical_density - peat_target_density) * &
-                                      dzsoi_decomp(l) / peat_compaction_timescale_seconds
-                                 som_adv_coef(c,j) = peat_excess_flux / &
-                                      max(peat_physical_density, epsilon)
-                                 peat_c_burial_flux_diag(c,l) = peat_excess_flux
-                              end if
-                           end if
                         else
                            ! Compatibility path for the historical prescribed
                            ! velocity and total-peat-depth scaling.
@@ -481,6 +719,68 @@ contains
                      som_diffus_coef(c,j) = 0._r8
                   endif
                end do
+            end do
+
+            ! Construct the dynamic peat burial flux once per donor layer from
+            ! its conserved local solid-C budget. Incoming transport is not
+            ! passed directly through the receiving layer in the same update:
+            ! it first changes that layer's prognostic density and composition,
+            ! which can drive the next interface on a subsequent update. A
+            ! layer already at target density continuously transmits its own
+            ! net local solid-C production. A layer below target retains that
+            ! production (up to its storage demand); a layer above target also
+            ! releases excess storage on the compaction timescale.
+            ! Solid-to-solid cascade transfers cancel in the sum of
+            ! decomp_csources, while litter inputs and losses to dissolved C or
+            ! gases remain. The last decomposition layer is a closed lower
+            ! boundary, as in the previous implementation.
+            !$acc parallel loop independent gang default(present) &
+            !$acc& private(c,t,j,l,s,peat_solid_source_flux,peat_storage_demand, &
+            !$acc& peat_available_flux,peat_excess_flux, &
+            !$acc& peat_physical_density,peat_target_density)
+            do fc = 1, num_soilc
+               c = filter_soilc(fc)
+               if (peat_dynamic_column(fc) .and. &
+                    max(altmax(c), altmax_lastyear(c)) > &
+                    max_altdepth_cryoturbation) then
+                  t = col_pp%topounit(c)
+                  !$acc loop seq
+                  do j = 2,nlevdecomp
+                     l = j - 1
+                     if (zisoi(l) <= top_pp%peat_depth(t)) then
+                        peat_solid_source_flux = 0._r8
+                        !$acc loop seq
+                        do s = 1,ndecomp_pools
+                           if (.not. is_dissolved(s)) then
+                              peat_solid_source_flux = peat_solid_source_flux + &
+                                   decomp_csources(c,l,s) * dzsoi_decomp(l) / &
+                                   dtime_mod
+                           end if
+                        end do
+
+                        peat_physical_density = peat_c_density(fc,l)
+                        peat_target_density = peat_c_target_diag(c,l)
+                        peat_storage_demand = &
+                             (peat_target_density - peat_physical_density) * &
+                             dzsoi_decomp(l) / peat_compaction_timescale_seconds
+
+                        peat_excess_flux = max(0._r8, &
+                             peat_solid_source_flux - peat_storage_demand)
+
+                        ! Never export more C than the donor layer, its local
+                        ! source, and its incoming flux can supply this step.
+                        peat_available_flux = max(0._r8, &
+                             peat_solid_source_flux + peat_physical_density * &
+                             dzsoi_decomp(l) / dtime_mod)
+                        peat_excess_flux = min(peat_excess_flux, &
+                             peat_available_flux)
+
+                        som_adv_coef(c,j) = peat_excess_flux / &
+                             max(peat_physical_density, epsilon)
+                        peat_c_burial_flux_diag(c,l) = peat_excess_flux
+                     end if
+                  end do
+               end if
             end do
          end if
       endif
@@ -729,7 +1029,8 @@ contains
       !$acc exit data delete(a_tri(:,:,:),b_tri(:,:,:),&
       !$acc     c_tri(:,:,:),r_tri(:,:,:), gam(:), &
       !$acc     conc_trcr(:,:,:), spinup_term, i_type, dom_diffusion_multiplier, &
-      !$acc     peat_compaction_timescale_seconds, peat_dynamic_column(:), &
+      !$acc     peat_compaction_timescale_seconds, peat_zwt_running_alpha, &
+      !$acc     peat_zwt_annual_alpha, peat_dynamic_column(:), &
       !$acc     transport_pool(:,:), peat_c_density(:,:))
     end associate
 

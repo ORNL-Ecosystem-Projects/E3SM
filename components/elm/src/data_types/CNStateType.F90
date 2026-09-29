@@ -18,6 +18,7 @@ module CNStateType
   use elm_varctl     , only: forest_fert_exp
   use elm_varctl          , only : nu_com
   use elm_varctl   , only:  use_fates,use_crop,use_humhol
+  use elm_varctl   , only:  use_peatland_compaction_profile
   use topounit_varcon,  only : max_topounits
   use GridcellType    , only : grc_pp
   ! 
@@ -87,6 +88,14 @@ module CNStateType
      real(r8) , pointer :: peat_c_density_col          (:,:)   ! col physical-equivalent solid peat C density (gC/m3)
      real(r8) , pointer :: peat_c_target_density_col   (:,:)   ! col target solid peat C density (gC/m3)
      real(r8) , pointer :: peat_c_burial_flux_col      (:,:)   ! col excess solid peat C burial flux (gC/m2/s)
+     real(r8) , pointer :: peat_zwt_running_mean_col   (:)     ! col sustained growing-season ZWT depth (m)
+     real(r8) , pointer :: peat_zwt_gs_deepest_col     (:)     ! col annual deepest running-mean growing-season ZWT (m)
+     real(r8) , pointer :: peat_zwt_annual_low_col      (:,:)   ! col five-year history of annual sustained low-water depths (m)
+     integer  , pointer :: peat_zwt_annual_low_count_col(:)     ! col number of valid annual low-water depths in history
+     real(r8) , pointer :: peat_zwt_gs_p90_col          (:)     ! col 90th percentile of annual sustained low-water depths (m)
+     real(r8) , pointer :: peat_acrotelm_depth_col     (:)     ! col smoothed acrotelm base depth (m)
+     real(r8) , pointer :: peat_zwt_gs_elapsed_col     (:)     ! col thawed growing-season sampling time (s)
+     real(r8) , pointer :: peat_zwt_stat_year_col      (:)     ! col calendar year last processed by peat ZWT statistic
 
      real(r8) , pointer :: tempavg_t2m_patch           (:)     ! patch temporary average 2m air temperature (K)
      real(r8) , pointer :: annavg_t2m_patch            (:)     ! patch annual average 2m air temperature (K)
@@ -280,6 +289,14 @@ contains
     allocate(this%peat_c_density_col  (begc:endc,1:nlevdecomp_full)) ; this%peat_c_density_col  (:,:) = spval
     allocate(this%peat_c_target_density_col(begc:endc,1:nlevdecomp_full)); this%peat_c_target_density_col(:,:) = spval
     allocate(this%peat_c_burial_flux_col(begc:endc,1:nlevdecomp_full)); this%peat_c_burial_flux_col(:,:) = spval
+    allocate(this%peat_zwt_running_mean_col(begc:endc))            ; this%peat_zwt_running_mean_col(:) = spval
+    allocate(this%peat_zwt_gs_deepest_col(begc:endc))              ; this%peat_zwt_gs_deepest_col(:) = spval
+    allocate(this%peat_zwt_annual_low_col(begc:endc,1:5))           ; this%peat_zwt_annual_low_col(:,:) = spval
+    allocate(this%peat_zwt_annual_low_count_col(begc:endc))         ; this%peat_zwt_annual_low_count_col(:) = ispval
+    allocate(this%peat_zwt_gs_p90_col(begc:endc))                   ; this%peat_zwt_gs_p90_col(:) = spval
+    allocate(this%peat_acrotelm_depth_col(begc:endc))              ; this%peat_acrotelm_depth_col(:) = spval
+    allocate(this%peat_zwt_gs_elapsed_col(begc:endc))              ; this%peat_zwt_gs_elapsed_col(:) = spval
+    allocate(this%peat_zwt_stat_year_col(begc:endc))               ; this%peat_zwt_stat_year_col(:) = spval
 
     allocate(this%tempavg_t2m_patch   (begp:endp))                   ; this%tempavg_t2m_patch   (:)   = spval
     allocate(this%annsum_counter_col  (begc:endc))                   ; this%annsum_counter_col  (:)   = spval
@@ -457,13 +474,33 @@ contains
 
     this%peat_c_target_density_col(begc:endc,:) = spval
     call hist_addfld_decomp (fname='PEAT_C_TARGET_DENSITY', units='gC/m^3', type2d='levdcmp', &
-         avgflag='A', long_name='target solid peat carbon density for capacity overflow', &
+         avgflag='A', long_name='hydrologically diagnosed target solid peat carbon density', &
          ptr_col=this%peat_c_target_density_col, default='inactive')
 
     this%peat_c_burial_flux_col(begc:endc,:) = spval
     call hist_addfld_decomp (fname='PEAT_C_BURIAL_FLUX', units='gC/m^2/s', type2d='levdcmp', &
-         avgflag='A', long_name='downward solid peat carbon flux driven by capacity overflow', &
+         avgflag='A', long_name='downward solid peat carbon storage-throughflow flux', &
          ptr_col=this%peat_c_burial_flux_col, default='inactive')
+
+    this%peat_zwt_running_mean_col(begc:endc) = spval
+    call hist_addfld1d (fname='PEAT_ZWT_RUNMEAN', units='m', &
+         avgflag='A', long_name='30-day running mean growing-season water-table depth', &
+         ptr_col=this%peat_zwt_running_mean_col, default='inactive')
+
+    this%peat_zwt_gs_deepest_col(begc:endc) = spval
+    call hist_addfld1d (fname='PEAT_ZWT_GS_DEEPEST', units='m', &
+         avgflag='A', long_name='annual deepest running-mean growing-season water-table depth', &
+         ptr_col=this%peat_zwt_gs_deepest_col, default='inactive')
+
+    this%peat_zwt_gs_p90_col(begc:endc) = spval
+    call hist_addfld1d (fname='PEAT_ZWT_GS_P90', units='m', &
+         avgflag='A', long_name='five-year 90th percentile of annual sustained low-water depth', &
+         ptr_col=this%peat_zwt_gs_p90_col, default='inactive')
+
+    this%peat_acrotelm_depth_col(begc:endc) = spval
+    call hist_addfld1d (fname='PEAT_ACROTELM_DEPTH', units='m', &
+         avgflag='A', long_name='active prescribed or hydrologically diagnosed acrotelm base depth', &
+         ptr_col=this%peat_acrotelm_depth_col, default='inactive')
 
     this%lfc2_col(begc:endc) = spval
     call hist_addfld1d (fname='LFC2', units='per sec', &
@@ -1085,6 +1122,14 @@ contains
           this%peat_c_density_col(c,1:nlevdecomp_full) = 0._r8
           this%peat_c_target_density_col(c,1:nlevdecomp_full) = 0._r8
           this%peat_c_burial_flux_col(c,1:nlevdecomp_full) = 0._r8
+          this%peat_zwt_running_mean_col(c) = 0._r8
+          this%peat_zwt_gs_deepest_col(c) = 0._r8
+          this%peat_zwt_annual_low_col(c,1:5) = 0._r8
+          this%peat_zwt_annual_low_count_col(c) = 0
+          this%peat_zwt_gs_p90_col(c) = 0._r8
+          this%peat_acrotelm_depth_col(c) = 0._r8
+          this%peat_zwt_gs_elapsed_col(c) = 0._r8
+          this%peat_zwt_stat_year_col(c) = 0._r8
           !this%scalaravg_col(c,1:nlevdecomp_full)       = 0._r8
 
           ! initialize the profiles for converting to vertically resolved carbon pools
@@ -1232,6 +1277,7 @@ contains
     logical          :: readvar   ! determine if variable is on initial file
     real(r8), pointer :: ptr2d(:,:) ! temp. pointers for slicing larger arrays
     real(r8), pointer :: ptr1d(:)   ! temp. pointers for slicing larger arrays
+    character(len=32) :: peat_zwt_history_name
     !-----------------------------------------------------------------------
   
     call restartvar(ncid=ncid, flag=flag, varname='dormant_flag', xtype=ncd_double,  &
@@ -1459,6 +1505,68 @@ contains
             dim1name='column',dim2name='levgrnd', switchdim=.true., &
             long_name='SOM diffusivity due to bio/cryo-turbation',  units='m^2/s', fill_value=spval, &
             interpinic_flag='interp', readvar=readvar, data=ptr2d)
+    end if
+
+    if (use_peatland_compaction_profile) then
+       call restartvar(ncid=ncid, flag=flag, varname='peat_zwt_running_mean', xtype=ncd_double, &
+            dim1name='column', &
+            long_name='running mean growing-season water-table depth', units='m', &
+            interpinic_flag='interp', readvar=readvar, data=this%peat_zwt_running_mean_col)
+       if (flag == 'read' .and. .not. readvar) then
+          this%peat_zwt_running_mean_col(bounds%begc:bounds%endc) = 0._r8
+       end if
+
+       call restartvar(ncid=ncid, flag=flag, varname='peat_zwt_gs_deepest', xtype=ncd_double, &
+            dim1name='column', &
+            long_name='annual deepest running-mean growing-season water-table depth', units='m', &
+            interpinic_flag='interp', readvar=readvar, data=this%peat_zwt_gs_deepest_col)
+       if (flag == 'read' .and. .not. readvar) then
+          this%peat_zwt_gs_deepest_col(bounds%begc:bounds%endc) = 0._r8
+       end if
+
+       do j = 1,5
+          ptr1d => this%peat_zwt_annual_low_col(:,j)
+          write(peat_zwt_history_name,'("peat_zwt_annual_low_",i1)') j
+          call restartvar(ncid=ncid, flag=flag, varname=trim(peat_zwt_history_name), &
+               xtype=ncd_double, dim1name='column', &
+               long_name='annual sustained low-water depth in five-year history', units='m', &
+               interpinic_flag='interp', readvar=readvar, data=ptr1d)
+          if (flag == 'read' .and. .not. readvar) then
+             ptr1d(bounds%begc:bounds%endc) = 0._r8
+          end if
+       end do
+
+       call restartvar(ncid=ncid, flag=flag, varname='peat_zwt_annual_low_count', xtype=ncd_int, &
+            dim1name='column', &
+            long_name='valid years in five-year annual low-water history', units='1', &
+            interpinic_flag='interp', readvar=readvar, data=this%peat_zwt_annual_low_count_col)
+       if (flag == 'read' .and. .not. readvar) then
+          this%peat_zwt_annual_low_count_col(bounds%begc:bounds%endc) = 0
+       end if
+
+       call restartvar(ncid=ncid, flag=flag, varname='peat_acrotelm_depth', xtype=ncd_double, &
+            dim1name='column', &
+            long_name='active prescribed or hydrologically diagnosed acrotelm base depth', units='m', &
+            interpinic_flag='interp', readvar=readvar, data=this%peat_acrotelm_depth_col)
+       if (flag == 'read' .and. .not. readvar) then
+          this%peat_acrotelm_depth_col(bounds%begc:bounds%endc) = 0._r8
+       end if
+
+       call restartvar(ncid=ncid, flag=flag, varname='peat_zwt_gs_elapsed', xtype=ncd_double, &
+            dim1name='column', &
+            long_name='thawed growing-season sampling time for peat ZWT statistic', units='s', &
+            interpinic_flag='interp', readvar=readvar, data=this%peat_zwt_gs_elapsed_col)
+       if (flag == 'read' .and. .not. readvar) then
+          this%peat_zwt_gs_elapsed_col(bounds%begc:bounds%endc) = 0._r8
+       end if
+
+       call restartvar(ncid=ncid, flag=flag, varname='peat_zwt_stat_year', xtype=ncd_double, &
+            dim1name='column', &
+            long_name='calendar year last processed by peat ZWT statistic', units='year', &
+            interpinic_flag='interp', readvar=readvar, data=this%peat_zwt_stat_year_col)
+       if (flag == 'read' .and. .not. readvar) then
+          this%peat_zwt_stat_year_col(bounds%begc:bounds%endc) = 0._r8
+       end if
     end if
 
     call restartvar(ncid=ncid, flag=flag, varname='nfire', xtype=ncd_double,  &
