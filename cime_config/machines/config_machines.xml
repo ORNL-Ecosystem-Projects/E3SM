@@ -4291,6 +4291,8 @@
       <arguments>
         <arg name="ntasks">-n {{ total_tasks }}</arg>
         <arg name="oversubscribe">--oversubscribe</arg>
+        <!-- Independent one-rank OLMT cases otherwise all bind to core 0. -->
+        <arg name="binding">--bind-to none</arg>
       </arguments>
     </mpirun>
     <module_system type="none" />

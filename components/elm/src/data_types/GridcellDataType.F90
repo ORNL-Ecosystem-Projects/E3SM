@@ -602,19 +602,24 @@ contains
        end if 
     end if
     
-    this%tcs_month_beg(begg:endg) = spval
-    call hist_addfld1d (fname='TCS_MONTH_BEGIN',  units='gC/m^2',  &
-         avgflag='I', long_name='total carbon storage at the beginning of a month', &
-         ptr_lnd=this%tcs_month_beg)
+    ! These whole-gridcell diagnostics are maintained and restarted only for
+    ! the bulk carbon state. Registering the same unprefixed field names for
+    ! the C13 or C14 state aborts history initialization on duplicate names.
+    if (carbon_type == 'c12') then
+       this%tcs_month_beg(begg:endg) = spval
+       call hist_addfld1d (fname='TCS_MONTH_BEGIN',  units='gC/m^2',  &
+            avgflag='I', long_name='total carbon storage at the beginning of a month', &
+            ptr_lnd=this%tcs_month_beg)
 
-    this%tcs_month_end(begg:endg) = spval
-    call hist_addfld1d (fname='TCS_MONTH_END',  units='gC/m^2',  &
-         avgflag='I', long_name='total carbon storage at the end of a month', &
-         ptr_lnd=this%tcs_month_end)
+       this%tcs_month_end(begg:endg) = spval
+       call hist_addfld1d (fname='TCS_MONTH_END',  units='gC/m^2',  &
+            avgflag='I', long_name='total carbon storage at the end of a month', &
+            ptr_lnd=this%tcs_month_end)
 
-    call hist_addfld1d (fname='CMASS_BALANCE_ERROR',  units='gC/m^2',  &
-         avgflag='A', long_name='Gridcell carbon mass balance error', &
-         ptr_lnd=this%errcb)
+       call hist_addfld1d (fname='CMASS_BALANCE_ERROR',  units='gC/m^2',  &
+            avgflag='A', long_name='Gridcell carbon mass balance error', &
+            ptr_lnd=this%errcb)
+    end if
 
     !-----------------------------------------------------------------------
     ! set cold-start initial values for select members of grc_cs

@@ -42,6 +42,7 @@ module subgridAveMod
   !! may consolidate once ELM port is finished
   interface p2c
      module procedure p2c_1d
+     module procedure p2c_1d_scaled
      module procedure p2c_2d
      module procedure p2c_2d_gpu
      module procedure p2c_1d_filter
@@ -179,6 +180,62 @@ contains
      end if
 
   end subroutine p2c_1d
+
+  !-----------------------------------------------------------------------
+  subroutine p2c_1d_scaled(bounds, parr, carr, p2c_scale_type)
+    ! !DESCRIPTION:
+    ! Perform a weighted average from PFTs to columns using the character
+    ! scale-type interface used by history fields.
+    !
+    ! !ARGUMENTS:
+    type(bounds_type), intent(in) :: bounds
+    real(r8), intent(in)  :: parr(bounds%begp:)
+    real(r8), intent(out) :: carr(bounds%begc:)
+    character(len=*), intent(in) :: p2c_scale_type
+    !
+    ! !LOCAL VARIABLES:
+    integer :: p, c, index
+    logical :: found
+    real(r8) :: scale_p2c(bounds%begp:bounds%endp)
+    real(r8) :: sumwt(bounds%begc:bounds%endc)
+    !------------------------------------------------------------------------
+
+    SHR_ASSERT_ALL((ubound(parr) == (/bounds%endp/)), errMsg(__FILE__, __LINE__))
+    SHR_ASSERT_ALL((ubound(carr) == (/bounds%endc/)), errMsg(__FILE__, __LINE__))
+
+    if (p2c_scale_type == 'unity') then
+       scale_p2c(:) = 1.0_r8
+    else
+       write(iulog,*) 'p2c_1d_scaled error: scale type ', p2c_scale_type, ' not supported'
+       call endrun(msg=errMsg(__FILE__, __LINE__))
+    end if
+
+    carr(:) = spval
+    sumwt(:) = 0._r8
+    do p = bounds%begp, bounds%endp
+       if (veg_pp%active(p) .and. veg_pp%wtcol(p) /= 0._r8 .and. parr(p) /= spval) then
+          c = veg_pp%column(p)
+          if (sumwt(c) == 0._r8) carr(c) = 0._r8
+          carr(c) = carr(c) + parr(p) * scale_p2c(p) * veg_pp%wtcol(p)
+          sumwt(c) = sumwt(c) + veg_pp%wtcol(p)
+       end if
+    end do
+
+    found = .false.
+    do c = bounds%begc, bounds%endc
+       if (sumwt(c) > 1.0_r8 + 1.e-6_r8) then
+          found = .true.
+          index = c
+       else if (sumwt(c) /= 0._r8) then
+          carr(c) = carr(c) / sumwt(c)
+       end if
+    end do
+    if (found) then
+       write(iulog,*) 'p2c_1d_scaled error: sumwt is greater than 1.0 at c= ', index
+       call endrun(decomp_index=index, elmlevel=namec, msg=errMsg(__FILE__, __LINE__))
+    end if
+
+  end subroutine p2c_1d_scaled
 
   !-----------------------------------------------------------------------
   subroutine p2c_2d (bounds, num2d, parr, carr, p2c_scale_type)

@@ -177,21 +177,31 @@ contains
   end subroutine ncd_pio_init
 
   !-----------------------------------------------------------------------
-  subroutine ncd_pio_openfile(file, fname, mode)
+  subroutine ncd_pio_openfile(file, fname, mode, avoid_pnetcdf)
     !
     ! !DESCRIPTION:
     ! Open a NetCDF PIO file
     !
     ! !ARGUMENTS:
+    use pio, only : pio_iotype_pnetcdf, pio_iotype_netcdf
     class(file_desc_t) , intent(inout) :: file   ! Output PIO file handle
     character(len=*)   , intent(in)    :: fname  ! Input filename to open
     integer            , intent(in)    :: mode   ! file mode
+    logical, optional  , intent(in)    :: avoid_pnetcdf
     !
     ! !LOCAL VARIABLES:
     integer :: ierr
+    integer :: my_io_type
     !-----------------------------------------------------------------------
 
-    ierr = pio_openfile(pio_subsystem, file, io_type, fname, mode)
+    my_io_type = io_type
+    if (present(avoid_pnetcdf)) then
+       if (avoid_pnetcdf .and. my_io_type == pio_iotype_pnetcdf) then
+          my_io_type = pio_iotype_netcdf
+       end if
+    end if
+
+    ierr = pio_openfile(pio_subsystem, file, my_io_type, fname, mode)
 
     if(ierr/= PIO_NOERR) then
        call shr_sys_abort('ncd_pio_openfile ERROR: Failed to open file')
@@ -842,7 +852,14 @@ contains
     integer :: status
     !-----------------------------------------------------------------------
 
-    status = PIO_put_att(ncid,varid,trim(attrib),value)
+    ! Scorpio warns that zero-length text attributes are invalid input, and
+    ! some serial-NetCDF builds corrupt the attribute buffer when many such
+    ! attributes are defined in succession (notably while defining ELM
+    ! restart files).  An absent descriptive attribute carries the same
+    ! information as an empty one, so do not pass empty strings to PIO.
+    if (len_trim(value) > 0) then
+       status = PIO_put_att(ncid,varid,trim(attrib),trim(value))
+    end if
 
   end subroutine ncd_putatt_char
 

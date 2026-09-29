@@ -181,10 +181,14 @@ module histFileMod
      integer :: num1d_out                      ! size of hbuf first dimension (all nodes)
      integer :: num2d                          ! size of hbuf second dimension (e.g. number of vertical levels)
      integer :: hpindex                        ! history pointer index 
-     character(len=8) :: p2c_scale_type        ! scale factor when averaging pft to column
-     character(len=8) :: c2l_scale_type        ! scale factor when averaging column to landunit
-     character(len=8) :: l2g_scale_type        ! scale factor when averaging landunit to gridcell
-     character(len=8) :: t2g_scale_type        ! scale factor when averaging topounit to gridcell
+     ! These values are persisted with the common history string dimension.
+     ! Matching that length is required when ncd_io reads a history restart;
+     ! an 8-character destination for the 16-character on-file variables can
+     ! corrupt memory during continuation initialization.
+     character(len=hist_dim_name_length) :: p2c_scale_type ! pft-to-column scale factor
+     character(len=hist_dim_name_length) :: c2l_scale_type ! column-to-landunit scale factor
+     character(len=hist_dim_name_length) :: l2g_scale_type ! landunit-to-gridcell scale factor
+     character(len=hist_dim_name_length) :: t2g_scale_type ! topounit-to-gridcell scale factor
      integer :: no_snow_behavior               ! for multi-layer snow fields, flag saying how to treat times when a given snow layer is absent
   end type field_info
 
@@ -1029,7 +1033,7 @@ contains
     ! call to p2g, and the lack of explicit bounds on its arguments; see also bug 1786)
     !
     ! !USES:
-    use subgridAveMod   , only : p2g, c2g, l2g, t2g
+    use subgridAveMod   , only : p2c, p2g, c2g, l2g, t2g
     use landunit_varcon , only : istice_mec
     use decompMod       , only : BOUNDS_LEVEL_PROC
     !
@@ -1045,6 +1049,7 @@ contains
     logical  :: check_active            ! true => check 'active' flag of each point (this refers to a point being active, NOT a history field being active)
     logical  :: valid                   ! true => history operation is valid
     logical  :: map2gcell               ! true => map clm pointer field to gridcell
+    logical  :: map2column              ! true => map clm pointer field to column
     character(len=hist_dim_name_length)  :: type1d         ! 1d clm pointerr type   ["gridcell","landunit","column","pft"]
     character(len=hist_dim_name_length)  :: type1d_out     ! 1d history buffer type ["gridcell","landunit","column","pft"]
     character(len=1)  :: avgflag        ! time averaging flag
@@ -1057,6 +1062,8 @@ contains
     real(r8), pointer :: field(:)       ! clm 1d pointer field
     logical , pointer :: active(:)      ! flag saying whether each point is active (used for type1d = landunit/column/pft) (this refers to a point being active, NOT a history field being active)
     real(r8) :: field_gcell(bounds%begg:bounds%endg)  ! gricell level field (used if mapping to gridcell is done)
+    real(r8) :: field_column(bounds%begc:bounds%endc) ! column field (used if mapping to columns is done)
+    real(r8) :: field_pft(bounds%begp:bounds%endp)    ! normalized-bounds PFT field used for mapping
     integer j
     character(len=*),parameter :: subname = 'hist_update_hbuf_field_1d'
     integer k_offset                    ! offset for mapping sliced subarray pointers when outputting variables in PFT/col vector form
@@ -1081,6 +1088,7 @@ contains
     ! set variables to check weights when allocate all pfts
 
     map2gcell = .false.
+    map2column = .false.
     if (type1d_out == nameg .or. type1d_out == grlnd) then
        if (type1d == namep) then
           ! In this and the following calls, we do NOT explicitly subset field using
@@ -1111,6 +1119,54 @@ contains
                field_gcell(bounds%begg:bounds%endg), &
                t2g_scale_type)
           map2gcell = .true.
+       end if
+    end if
+
+    if (type1d_out == namec .and. type1d /= namec) then
+       if (type1d == namep) then
+          do k = bounds%begp, bounds%endp
+             field_pft(k) = field(k - beg1d + lbound(field,1))
+          end do
+          call p2c(bounds, field_pft, field_column, p2c_scale_type)
+          map2column = .true.
+       else if (type1d == namel) then
+          do k = bounds%begc, bounds%endc
+             field_column(k) = field(col_pp%landunit(k) - beg1d + lbound(field,1))
+          end do
+          map2column = .true.
+       else if (type1d == namet) then
+          do k = bounds%begc, bounds%endc
+             field_column(k) = field(col_pp%topounit(k) - beg1d + lbound(field,1))
+          end do
+          map2column = .true.
+       else if (type1d == nameg .or. type1d == grlnd) then
+          do k = bounds%begc, bounds%endc
+             field_column(k) = field(col_pp%gridcell(k) - beg1d + lbound(field,1))
+          end do
+          map2column = .true.
+       end if
+    end if
+
+    if (map2column) then
+       do k = bounds%begc, bounds%endc
+          if (.not. col_pp%active(k)) field_column(k) = spval
+       end do
+    end if
+
+    if (.not. map2gcell .and. .not. map2column) then
+       if (type1d /= type1d_out .and. .not. &
+           ((type1d_out == nameg .or. type1d_out == grlnd) .and. &
+            (type1d == nameg .or. type1d == grlnd))) then
+          write(iulog,*) trim(subname), ' ERROR: unsupported history remapping for ', &
+               trim(tape(t)%hlist(f)%field%name), ': ', trim(type1d), ' to ', trim(type1d_out)
+          call endrun(msg=errMsg(__FILE__, __LINE__))
+       end if
+       if (beg1d < lbound(nacs,1) .or. end1d > ubound(nacs,1)) then
+          write(iulog,*) trim(subname), ' ERROR: incompatible history bounds for ', &
+               trim(tape(t)%hlist(f)%field%name)
+          write(iulog,*) ' input type/bounds: ', trim(type1d), beg1d, end1d
+          write(iulog,*) ' output type/bounds: ', trim(type1d_out), lbound(nacs,1), ubound(nacs,1)
+          call endrun(msg=errMsg(__FILE__, __LINE__))
        end if
     end if
 
@@ -1162,7 +1218,50 @@ contains
           call endrun(msg=errMsg(__FILE__, __LINE__))
        end select
 
-    else  ! Do not map to gridcell
+    else if (map2column) then
+
+       select case (avgflag)
+       case ('I')
+          do k = bounds%begc, bounds%endc
+             hbuf(k,1) = field_column(k)
+             nacs(k,1) = 1
+          end do
+       case ('A')
+          do k = bounds%begc, bounds%endc
+             if (field_column(k) /= spval) then
+                if (nacs(k,1) == 0) hbuf(k,1) = 0._r8
+                hbuf(k,1) = hbuf(k,1) + field_column(k)
+                nacs(k,1) = nacs(k,1) + 1
+             else
+                if (nacs(k,1) == 0) hbuf(k,1) = spval
+             end if
+          end do
+       case ('X')
+          do k = bounds%begc, bounds%endc
+             if (field_column(k) /= spval) then
+                if (nacs(k,1) == 0) hbuf(k,1) = -1.e50_r8
+                hbuf(k,1) = max(hbuf(k,1), field_column(k))
+             else
+                if (nacs(k,1) == 0) hbuf(k,1) = spval
+             end if
+             nacs(k,1) = 1
+          end do
+       case ('M')
+          do k = bounds%begc, bounds%endc
+             if (field_column(k) /= spval) then
+                if (nacs(k,1) == 0) hbuf(k,1) = +1.e50_r8
+                hbuf(k,1) = min(hbuf(k,1), field_column(k))
+             else
+                if (nacs(k,1) == 0) hbuf(k,1) = spval
+             end if
+             nacs(k,1) = 1
+          end do
+       case default
+          write(iulog,*) trim(subname),' ERROR: invalid time averaging flag ', avgflag
+          call endrun(msg=errMsg(__FILE__, __LINE__))
+       end select
+
+    else  ! Do not map to gridcell or column
 
        ! For data defined on the pft, col, and landunit we need to check if a point is active
        ! to determine whether that point should be assigned spval
@@ -1279,7 +1378,7 @@ contains
     ! call to p2g, and the lack of explicit bounds on its arguments; see also bug 1786)
     !
     ! !USES:
-    use subgridAveMod   , only : p2g, c2g, l2g, t2g
+    use subgridAveMod   , only : p2c, p2g, c2g, l2g, t2g
     use landunit_varcon , only : istice_mec
     use decompMod       , only : BOUNDS_LEVEL_PROC
     !
@@ -1297,6 +1396,7 @@ contains
     logical  :: check_active            ! true => check 'active' flag of each point (this refers to a point being active, NOT a history field being active)
     logical  :: valid                   ! true => history operation is valid
     logical  :: map2gcell               ! true => map clm pointer field to gridcell
+    logical  :: map2column              ! true => map clm pointer field to column
     character(len=hist_dim_name_length)  :: type1d         ! 1d clm pointerr type   ["gridcell","landunit","column","pft"]
     character(len=hist_dim_name_length)  :: type1d_out     ! 1d history buffer type ["gridcell","landunit","column","pft"]
     character(len=1)  :: avgflag        ! time averaging flag
@@ -1312,6 +1412,8 @@ contains
     logical , pointer :: active(:)      ! flag saying whether each point is active (used for type1d = landunit/column/pft) 
                                         !(this refers to a point being active, NOT a history field being active)
     real(r8) :: field_gcell(bounds%begg:bounds%endg,num2d) ! gricell level field (used if mapping to gridcell is done)
+    real(r8) :: field_column(bounds%begc:bounds%endc,num2d) ! column field (used if mapping to columns is done)
+    real(r8) :: field_pft(bounds%begp:bounds%endp,num2d)    ! normalized-bounds PFT field used for mapping
     character(len=*),parameter :: subname = 'hist_update_hbuf_field_2d'
     !-----------------------------------------------------------------------
 
@@ -1357,6 +1459,7 @@ contains
     ! set variables to check weights when allocate all pfts
 
     map2gcell = .false.
+    map2column = .false.
     if (type1d_out == nameg .or. type1d_out == grlnd) then
        if (type1d == namep) then
           ! In this and the following calls, we do NOT explicitly subset field using
@@ -1387,6 +1490,64 @@ contains
                field_gcell(bounds%begg:bounds%endg, :), &
                t2g_scale_type)
           map2gcell = .true.
+       end if
+    end if
+
+    if (type1d_out == namec .and. type1d /= namec) then
+       if (type1d == namep) then
+          do j = 1, num2d
+             do k = bounds%begp, bounds%endp
+                field_pft(k,j) = field(k - beg1d + lbound(field,1),j)
+             end do
+          end do
+          call p2c(bounds, num2d, field_pft, field_column, p2c_scale_type)
+          map2column = .true.
+       else if (type1d == namel) then
+          do j = 1, num2d
+             do k = bounds%begc, bounds%endc
+                field_column(k,j) = field(col_pp%landunit(k) - beg1d + lbound(field,1),j)
+             end do
+          end do
+          map2column = .true.
+       else if (type1d == namet) then
+          do j = 1, num2d
+             do k = bounds%begc, bounds%endc
+                field_column(k,j) = field(col_pp%topounit(k) - beg1d + lbound(field,1),j)
+             end do
+          end do
+          map2column = .true.
+       else if (type1d == nameg .or. type1d == grlnd) then
+          do j = 1, num2d
+             do k = bounds%begc, bounds%endc
+                field_column(k,j) = field(col_pp%gridcell(k) - beg1d + lbound(field,1),j)
+             end do
+          end do
+          map2column = .true.
+       end if
+    end if
+
+    if (map2column) then
+       do j = 1, num2d
+          do k = bounds%begc, bounds%endc
+             if (.not. col_pp%active(k)) field_column(k,j) = spval
+          end do
+       end do
+    end if
+
+    if (.not. map2gcell .and. .not. map2column) then
+       if (type1d /= type1d_out .and. .not. &
+           ((type1d_out == nameg .or. type1d_out == grlnd) .and. &
+            (type1d == nameg .or. type1d == grlnd))) then
+          write(iulog,*) trim(subname), ' ERROR: unsupported history remapping for ', &
+               trim(tape(t)%hlist(f)%field%name), ': ', trim(type1d), ' to ', trim(type1d_out)
+          call endrun(msg=errMsg(__FILE__, __LINE__))
+       end if
+       if (beg1d < lbound(nacs,1) .or. end1d > ubound(nacs,1)) then
+          write(iulog,*) trim(subname), ' ERROR: incompatible history bounds for ', &
+               trim(tape(t)%hlist(f)%field%name)
+          write(iulog,*) ' input type/bounds: ', trim(type1d), beg1d, end1d
+          write(iulog,*) ' output type/bounds: ', trim(type1d_out), lbound(nacs,1), ubound(nacs,1)
+          call endrun(msg=errMsg(__FILE__, __LINE__))
        end if
     end if
 
@@ -1446,7 +1607,58 @@ contains
           call endrun(msg=errMsg(__FILE__, __LINE__))
        end select
 
-    else  ! Do not map to gridcell
+    else if (map2column) then
+
+       select case (avgflag)
+       case ('I')
+          do j = 1, num2d
+             do k = bounds%begc, bounds%endc
+                hbuf(k,j) = field_column(k,j)
+                nacs(k,j) = 1
+             end do
+          end do
+       case ('A')
+          do j = 1, num2d
+             do k = bounds%begc, bounds%endc
+                if (field_column(k,j) /= spval) then
+                   if (nacs(k,j) == 0) hbuf(k,j) = 0._r8
+                   hbuf(k,j) = hbuf(k,j) + field_column(k,j)
+                   nacs(k,j) = nacs(k,j) + 1
+                else
+                   if (nacs(k,j) == 0) hbuf(k,j) = spval
+                end if
+             end do
+          end do
+       case ('X')
+          do j = 1, num2d
+             do k = bounds%begc, bounds%endc
+                if (field_column(k,j) /= spval) then
+                   if (nacs(k,j) == 0) hbuf(k,j) = -1.e50_r8
+                   hbuf(k,j) = max(hbuf(k,j), field_column(k,j))
+                else
+                   if (nacs(k,j) == 0) hbuf(k,j) = spval
+                end if
+                nacs(k,j) = 1
+             end do
+          end do
+       case ('M')
+          do j = 1, num2d
+             do k = bounds%begc, bounds%endc
+                if (field_column(k,j) /= spval) then
+                   if (nacs(k,j) == 0) hbuf(k,j) = +1.e50_r8
+                   hbuf(k,j) = min(hbuf(k,j), field_column(k,j))
+                else
+                   if (nacs(k,j) == 0) hbuf(k,j) = spval
+                end if
+                nacs(k,j) = 1
+             end do
+          end do
+       case default
+          write(iulog,*) trim(subname),' ERROR: invalid time averaging flag ', avgflag
+          call endrun(msg=errMsg(__FILE__, __LINE__))
+       end select
+
+    else  ! Do not map to gridcell or column
 
        ! For data defined on the pft, col or landunit, we need to check if a point is active
        ! to determine whether that point should be assigned spval
@@ -3525,7 +3737,8 @@ contains
              endif
 	     call ncd_pio_closefile(nfid(t))
              if (.not.if_stop .and. (tape(t)%ntimes/=tape(t)%mfilt)) then
-                call ncd_pio_openfile (nfid(t), trim(locfnh(t)), ncd_write)
+                call ncd_pio_openfile (nfid(t), trim(locfnh(t)), ncd_write, &
+                     avoid_pnetcdf=.not. tape(t)%dov2xy)
              end if
           else
              if (masterproc) then
@@ -3989,7 +4202,8 @@ contains
           do t = 1,ntapes
 
              call getfil( locrest(t), locfnhr(t), 0 )
-             call ncd_pio_openfile (ncid_hist(t), trim(locfnhr(t)), ncd_nowrite)
+             call ncd_pio_openfile (ncid_hist(t), trim(locfnhr(t)), ncd_nowrite, &
+                  avoid_pnetcdf=.not. tape(t)%dov2xy)
 
              if ( t == 1 )then
 
@@ -4161,7 +4375,8 @@ contains
              ! If history file is not full, open it
 
              if (tape(t)%ntimes /= 0) then
-                call ncd_pio_openfile (nfid(t), trim(locfnh(t)), ncd_write)
+                call ncd_pio_openfile (nfid(t), trim(locfnh(t)), ncd_write, &
+                     avoid_pnetcdf=.not. tape(t)%dov2xy)
              end if
 
           end do  ! end of tapes loop
@@ -5266,4 +5481,3 @@ contains
   end subroutine hist_do_disp
 
 end module histFileMod
-
