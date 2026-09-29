@@ -11,11 +11,13 @@ module SoilLittDecompMod
   use decompMod              , only : bounds_type
   use perf_mod               , only : t_startf, t_stopf
   use perfMod_GPU
-  use elm_varctl             , only : iulog, use_lch4, use_century_decomp
+  use elm_varctl             , only : iulog, use_lch4, use_century_decomp, use_microbe_methane
   use elm_varcon             , only : dzsoi_decomp
   use elm_varpar             , only : nlevdecomp, ndecomp_cascade_transitions, ndecomp_pools
+  use elm_varpar             , only : i_dom
   use DecompCascadeCNMod     , only : decomp_rate_constants_cn
   use DecompCascadeBGCMod    , only : decomp_rate_constants_bgc
+  use MicrobeDecompMod       , only : MicrobeDecompParamsInst
   use NitrifDenitrifMod    , only : nitrif_denitrif
   use VerticalProfileMod     , only : decomp_vertprofiles
   use CNDecompCascadeConType , only : decomp_cascade_con
@@ -28,6 +30,7 @@ module SoilLittDecompMod
   use SoilStateType          , only : soilstate_type
   use SoilHydrologyType      , only : soilhydrology_type
   use CH4Mod                 , only : ch4_type
+  use SharedParamsMod        , only : anoxia_wtsat
   use cropType               , only : crop_type
   use ColumnDataType         , only : col_cs, col_cf
   use ColumnDataType         , only : col_ns, col_nf
@@ -143,6 +146,9 @@ contains
     ! For methane code
     real(r8):: phr_vr(bounds%begc:bounds%endc,1:nlevdecomp)                                            !potential HR (gC/m3/s)
     real(r8):: hrsum(bounds%begc:bounds%endc,1:nlevdecomp)                                             !sum of HR (gC/m2/s)
+    real(r8):: raw_o2_activity                                                                        !unfloored oxygen activity (0-1)
+    real(r8):: respiration_redox_scalar                                                               !redox scalar already in decomp_k
+    real(r8):: solubilization_redox_scalar                                                            !redox scalar for litter/SOM -> DOM
 
     character(len=256) :: event
     !-----------------------------------------------------------------------
@@ -168,6 +174,11 @@ contains
          decomp_cpools_vr                 =>    col_cs%decomp_cpools_vr                  , & ! Input:  [real(r8) (:,:,:) ]  (gC/m3)  vertically-resolved decomposing (litter, cwd, soil) c pools
 
          w_scalar                         =>    col_cf%w_scalar                           , & ! Input:  [real(r8) (:,:)   ]  fraction by which decomposition is limited by moisture availability
+         o_scalar                         =>    col_cf%o_scalar                           , & ! Input:  [real(r8) (:,:)   ]  aerobic decomposition redox scalar, including its configured floor
+
+         o2stress_sat                     =>    ch4_vars%o2stress_sat_col                 , & ! Input:  [real(r8) (:,:)   ]  raw saturated-area oxygen activity
+         o2stress_unsat                   =>    ch4_vars%o2stress_unsat_col               , & ! Input:  [real(r8) (:,:)   ]  raw non-inundated-area oxygen activity
+         finundated                       =>    ch4_vars%finundated_col                   , & ! Input:  [real(r8) (:)     ]  inundated area fraction
 
          decomp_cascade_ntransfer_vr      =>    col_nf%decomp_cascade_ntransfer_vr      , & ! Output: [real(r8) (:,:,:) ]  vert-res transfer of N from donor to receiver pool along decomp. cascade (gN/m3/s)
          decomp_cascade_sminn_flux_vr     =>    col_nf%decomp_cascade_sminn_flux_vr     , & ! Output: [real(r8) (:,:,:) ]  vert-res mineral N flux for transition along decomposition cascade (gN/m3/s)
@@ -277,6 +288,33 @@ contains
 
                  p_decomp_cpool_loss(c,j,k) = decomp_cpools_vr(c,j,cascade_donor_pool(k)) &
                        * decomp_k(c,j,cascade_donor_pool(k))  * pathfrac_decomp_cascade(c,j,k)
+
+                  ! Solubilization is not identical to aerobic respiration.
+                  ! Hydrolysis, dissolution, and other litter/SOM-to-DOM
+                  ! pathways can remain active under anoxia.  The pool-level
+                  ! decomp_k already contains the standard (floored) oxygen
+                  ! scalar, so rescale only the seven litter/SOM -> DOM
+                  ! transitions to their separately parameterized response.
+                  ! max(..., respiration_redox_scalar) makes a parameter value
+                  ! of zero exactly reproduce the previous formulation.
+                  if (use_microbe_methane .and. cascade_receiver_pool(k) == i_dom .and. &
+                       (decomp_cascade_con%is_litter(cascade_donor_pool(k)) .or. &
+                        decomp_cascade_con%is_soil(cascade_donor_pool(k)))) then
+                     raw_o2_activity = max(0._r8, min(1._r8, o2stress_unsat(c,j)))
+                     if (anoxia_wtsat) then
+                        raw_o2_activity = raw_o2_activity * (1._r8 - finundated(c)) + &
+                             max(0._r8, min(1._r8, o2stress_sat(c,j))) * finundated(c)
+                     end if
+                     respiration_redox_scalar = max(0._r8, min(1._r8, o_scalar(c,j)))
+                     solubilization_redox_scalar = max(respiration_redox_scalar, &
+                          MicrobeDecompParamsInst%dom_solubilization_anoxic_fraction + &
+                          (1._r8 - MicrobeDecompParamsInst%dom_solubilization_anoxic_fraction) * &
+                          raw_o2_activity)
+                     if (respiration_redox_scalar > tiny(1._r8)) then
+                        p_decomp_cpool_loss(c,j,k) = p_decomp_cpool_loss(c,j,k) * &
+                             solubilization_redox_scalar / respiration_redox_scalar
+                     end if
+                  end if
                   if ( .not. floating_cn_ratio_decomp_pools(cascade_receiver_pool(k)) ) then  !! not transition of cwd to litter
 
                      if (cascade_receiver_pool(k) /= i_atm ) then  ! not 100% respiration

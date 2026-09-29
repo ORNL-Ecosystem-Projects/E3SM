@@ -72,6 +72,11 @@ module MicrobeDecompMod
      real(r8) :: microbe_som3_q10
      real(r8) :: microbe_som4_q10
      real(r8) :: microbe_dom_q10
+     ! Fraction of the potential litter/SOM-to-DOM solubilization rate
+     ! retained at zero oxygen availability. A value of zero preserves the
+     ! standard decomposition redox response; one removes oxygen limitation
+     ! from the solubilization transitions only.
+     real(r8) :: dom_solubilization_anoxic_fraction
 
      ! Litter/SOM solubilization and direct stabilization fractions.
      real(r8) :: l1dom_f
@@ -154,6 +159,8 @@ contains
     call read_scalar_parameter(ncid, 'microbe_som3_q10', MicrobeDecompParamsInst%microbe_som3_q10)
     call read_scalar_parameter(ncid, 'microbe_som4_q10', MicrobeDecompParamsInst%microbe_som4_q10)
     call read_scalar_parameter(ncid, 'microbe_dom_q10', MicrobeDecompParamsInst%microbe_dom_q10)
+    call read_scalar_parameter(ncid, 'dom_solubilization_anoxic_fraction', &
+         MicrobeDecompParamsInst%dom_solubilization_anoxic_fraction)
 
     call read_scalar_parameter(ncid, 'l1dom_f', MicrobeDecompParamsInst%l1dom_f)
     call read_scalar_parameter(ncid, 'l2dom_f', MicrobeDecompParamsInst%l2dom_f)
@@ -254,6 +261,8 @@ contains
     call require_positive('microbe_som3_q10', MicrobeDecompParamsInst%microbe_som3_q10)
     call require_positive('microbe_som4_q10', MicrobeDecompParamsInst%microbe_som4_q10)
     call require_positive('microbe_dom_q10', MicrobeDecompParamsInst%microbe_dom_q10)
+    call require_fraction('dom_solubilization_anoxic_fraction', &
+         MicrobeDecompParamsInst%dom_solubilization_anoxic_fraction)
 
     call require_fraction('l1dom_f', MicrobeDecompParamsInst%l1dom_f)
     call require_fraction('l2dom_f', MicrobeDecompParamsInst%l2dom_f)

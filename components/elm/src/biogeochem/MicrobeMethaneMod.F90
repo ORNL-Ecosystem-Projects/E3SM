@@ -1422,6 +1422,12 @@ contains
                aqueous_temperature_scalar + &
                MicrobeMethaneParamsInst%aqueous_solute_dispersivity * &
                0.5_r8 * (abs(water_flux(j-1)) + abs(water_flux(j))))
+          if (MicrobeMethaneParamsInst%aqueous_dom_saturated_macrodispersion > 0._r8) then
+             acetate_diffusion_conductivity(j) = acetate_diffusion_conductivity(j) + &
+                  thawed_fraction * liquid_fraction(j) * &
+                  MicrobeMethaneParamsInst%aqueous_dom_saturated_macrodispersion * &
+                  saturated_macrodispersion_scalar
+          end if
           nh4_diffusion_conductivity(j) = thawed_fraction * &
                (liquid_fraction(j) * &
                MicrobeMethaneParamsInst%aqueous_nh4_molecular_diffusivity * &
@@ -1439,7 +1445,7 @@ contains
                MicrobeMethaneParamsInst%aqueous_solute_dispersivity * &
                0.5_r8 * (abs(water_flux(j-1)) + abs(water_flux(j))))
           ! The saturated coefficient represents water-path mixing rather than
-          ! a DOM-specific reaction and is therefore shared by dissolved N.
+          ! a DOM-specific reaction and is therefore shared by acetate and dissolved N.
           if (MicrobeMethaneParamsInst%aqueous_dom_saturated_macrodispersion > 0._r8) then
              nh4_diffusion_conductivity(j) = nh4_diffusion_conductivity(j) + &
                   thawed_fraction * liquid_fraction(j) * &
