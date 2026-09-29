@@ -70,6 +70,7 @@ module MicrobeMethaneStateUpdateMod
   public :: advanceMicrobeMethaneDOMProfileRestoration
   public :: advanceMicrobeMethaneTracerRelaxation
   public :: advanceMicrobeAqueousTracerTransport
+  public :: advanceMicrobeLateralAqueousTracer
   public :: advanceMicrobeDOMCompleteBypass
   public :: microbeMethaneAdditionalCarbonDensity
   public :: microbeMethaneColumnAdditionalCarbon
@@ -78,6 +79,129 @@ module MicrobeMethaneStateUpdateMod
   public :: microbeMethaneCO2Correction
 
 contains
+
+  pure subroutine advanceMicrobeLateralAqueousTracer(concentration, layer_thickness, &
+       liquid_fraction, mobile_fraction, storage_fraction, lateral_water_exchange, &
+       area_weight, edge_source, edge_target, minimum_liquid_fraction, dt, &
+       updated_concentration, column_flux, residual, valid)
+    ! Conservative, upwind lateral advection between paired topounit columns.
+    ! lateral_water_exchange is the realized, timestep-integrated water-depth
+    ! change in each layer (m; positive into the column). Only water represented
+    ! in a soil layer transports solute; aquifer or surface-water remainders are
+    ! deliberately solute-free until those stores carry prognostic chemistry.
+    real(r8), intent(in) :: concentration(:,:)
+    real(r8), intent(in) :: layer_thickness(size(concentration,1),size(concentration,2))
+    real(r8), intent(in) :: liquid_fraction(size(concentration,1),size(concentration,2))
+    real(r8), intent(in) :: mobile_fraction(size(concentration,1),size(concentration,2))
+    real(r8), intent(in) :: storage_fraction(size(concentration,1),size(concentration,2))
+    real(r8), intent(in) :: lateral_water_exchange(size(concentration,1),size(concentration,2))
+    real(r8), intent(in) :: area_weight(size(concentration,1))
+    integer, intent(in) :: edge_source(:), edge_target(size(edge_source))
+    real(r8), intent(in) :: minimum_liquid_fraction, dt
+    real(r8), intent(out) :: updated_concentration(size(concentration,1),size(concentration,2))
+    real(r8), intent(out) :: column_flux(size(concentration,1))
+    real(r8), intent(out) :: residual
+    logical, intent(out) :: valid
+    real(r8) :: donor_water, receiver_water, paired_water, donor_scale
+    real(r8) :: receiver_weight, receiver_weight_sum
+    real(r8) :: porewater_concentration, requested_mass, available_mass
+    real(r8) :: transferred_mass, layer_mass, flux_scale
+    integer :: edge, a, b, donor, receiver, j
+
+    updated_concentration = concentration
+    column_flux = 0._r8
+    residual = 0._r8
+    valid = .false.
+    if (size(concentration,1) == 0 .or. size(concentration,2) == 0 .or. &
+         dt <= 0._r8 .or. minimum_liquid_fraction <= 0._r8) return
+    if (any(layer_thickness <= 0._r8) .or. any(liquid_fraction < 0._r8) .or. &
+         any(mobile_fraction < 0._r8) .or. any(mobile_fraction > 1._r8) .or. &
+         any(storage_fraction < 0._r8) .or. any(storage_fraction > 1._r8) .or. &
+         any(area_weight <= 0._r8) .or. &
+         any(concentration < -state_tolerance)) return
+
+    do edge = 1, size(edge_source)
+       a = edge_source(edge)
+       b = edge_target(edge)
+       if (a < 1 .or. a > size(concentration,1) .or. &
+            b < 1 .or. b > size(concentration,1) .or. a == b) return
+       if (sum(lateral_water_exchange(a,:)) < -state_tolerance .and. &
+            sum(lateral_water_exchange(b,:)) > state_tolerance) then
+          donor = a
+          receiver = b
+       else if (sum(lateral_water_exchange(b,:)) < -state_tolerance .and. &
+            sum(lateral_water_exchange(a,:)) > state_tolerance) then
+          donor = b
+          receiver = a
+       else if (abs(sum(lateral_water_exchange(a,:))) <= state_tolerance .and. &
+            abs(sum(lateral_water_exchange(b,:))) <= state_tolerance) then
+          cycle
+       else
+          ! Some realized lateral water can come from or enter the surface or
+          ! deep aquifer stores, neither of which yet carries prognostic
+          ! chemistry. Skip that unmatched portion rather than treating a
+          ! valid hydrologic exchange as a tracer-transport failure.
+          cycle
+       end if
+
+       donor_water = area_weight(donor) * &
+            sum(max(-lateral_water_exchange(donor,:), 0._r8))
+       receiver_water = area_weight(receiver) * &
+            sum(max(lateral_water_exchange(receiver,:), 0._r8))
+       paired_water = min(donor_water, receiver_water)
+       if (paired_water <= tiny(1._r8)) cycle
+       donor_scale = paired_water / max(donor_water, tiny(1._r8))
+
+       receiver_weight_sum = 0._r8
+       do j = 1, size(concentration,2)
+          if (storage_fraction(receiver,j) > tiny(1._r8) .and. &
+               liquid_fraction(receiver,j) >= minimum_liquid_fraction) then
+             receiver_weight_sum = receiver_weight_sum + &
+                  area_weight(receiver) * max(lateral_water_exchange(receiver,j), 0._r8)
+          end if
+       end do
+       if (receiver_weight_sum <= tiny(1._r8)) cycle
+
+       transferred_mass = 0._r8
+       do j = 1, size(concentration,2)
+          if (lateral_water_exchange(donor,j) >= 0._r8 .or. &
+               liquid_fraction(donor,j) < minimum_liquid_fraction .or. &
+               storage_fraction(donor,j) <= tiny(1._r8)) cycle
+          porewater_concentration = mobile_fraction(donor,j) * &
+               max(0._r8, updated_concentration(donor,j)) / liquid_fraction(donor,j)
+          requested_mass = area_weight(donor) * donor_scale * &
+               (-lateral_water_exchange(donor,j)) * porewater_concentration
+          available_mass = area_weight(donor) * storage_fraction(donor,j) * &
+               max(0._r8, updated_concentration(donor,j)) * layer_thickness(donor,j)
+          layer_mass = min(requested_mass, available_mass)
+          updated_concentration(donor,j) = updated_concentration(donor,j) - &
+               layer_mass / (area_weight(donor) * storage_fraction(donor,j) * &
+               layer_thickness(donor,j))
+          transferred_mass = transferred_mass + layer_mass
+       end do
+
+       do j = 1, size(concentration,2)
+          if (storage_fraction(receiver,j) <= tiny(1._r8) .or. &
+               liquid_fraction(receiver,j) < minimum_liquid_fraction) cycle
+          receiver_weight = area_weight(receiver) * &
+               max(lateral_water_exchange(receiver,j), 0._r8)
+          if (receiver_weight <= 0._r8) cycle
+          layer_mass = transferred_mass * receiver_weight / receiver_weight_sum
+          updated_concentration(receiver,j) = updated_concentration(receiver,j) + &
+               layer_mass / (area_weight(receiver) * storage_fraction(receiver,j) * &
+               layer_thickness(receiver,j))
+       end do
+       column_flux(donor) = column_flux(donor) - &
+            transferred_mass / (area_weight(donor) * dt)
+       column_flux(receiver) = column_flux(receiver) + &
+            transferred_mass / (area_weight(receiver) * dt)
+    end do
+
+    flux_scale = max(1._r8, sum(abs(area_weight * column_flux * dt)))
+    residual = sum(area_weight * column_flux * dt)
+    valid = all(updated_concentration >= -state_tolerance) .and. &
+         abs(residual) <= aqueous_budget_tolerance * flux_scale
+  end subroutine advanceMicrobeLateralAqueousTracer
 
   pure subroutine advanceMicrobeDOMCompleteBypass(dom_c, dom_n, dom_p, &
        layer_thickness, liquid_fraction, mobile_fraction, minimum_liquid_fraction, &

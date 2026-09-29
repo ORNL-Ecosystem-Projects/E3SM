@@ -873,6 +873,16 @@ transport is not yet implemented, so use_c13 and use_c14 must be FALSE. It
 defaults to TRUE for HUMHOL revised-microbial-methane cases.
 </entry>
 
+<entry id="use_microbe_lateral_aqueous_transport" type="logical" category="bgc"
+       group="elm_inparm" valid_values="" value=".false.">
+Enable conservative lateral aqueous advection among paired bog topounits.
+The operator follows the layer-resolved water exchange already realized by
+peatland hydrology and transports DOM C/N/P, saturated acetate, dissolved NH4,
+NO3, and inorganic solution P. FALSE (default) preserves the existing vertical-
+transport-only behavior for controlled attribution tests. This option requires
+use_humhol=.true. and use_microbe_aqueous_transport=.true.
+</entry>
+
 <entry id="use_microbe_dom_preferential_flow" type="logical" category="bgc"
        group="elm_inparm" valid_values="" value=".false.">
 Enable rain-event preferential DOM transport as a sensitivity formulation.

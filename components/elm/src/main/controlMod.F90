@@ -109,6 +109,7 @@ module controlMod
                         use_clm_microbe_dom_relaxation, &
                         use_microbe_observed_dom_calibration, &
                         use_microbe_aqueous_transport, &
+                        use_microbe_lateral_aqueous_transport, &
                         use_microbe_dom_preferential_flow, &
                         use_microbe_zwt_macrodispersion, &
                         use_vertsoilc, use_extralakelayers, &
@@ -370,6 +371,7 @@ contains
          use_clm_microbe_dom_relaxation, &
          use_microbe_observed_dom_calibration, &
          use_microbe_aqueous_transport, &
+         use_microbe_lateral_aqueous_transport, &
          use_microbe_dom_preferential_flow, &
          use_microbe_zwt_macrodispersion, &
          use_vertsoilc, use_extralakelayers, &
@@ -824,6 +826,15 @@ contains
        call endrun(msg=' ERROR: use_microbe_aqueous_transport=.true. requires '//&
             'use_microbe_methane=.true.'//errMsg(__FILE__, __LINE__))
     end if
+    if (use_microbe_lateral_aqueous_transport .and. &
+         .not. use_microbe_aqueous_transport) then
+       call endrun(msg=' ERROR: use_microbe_lateral_aqueous_transport=.true. requires '//&
+            'use_microbe_aqueous_transport=.true.'//errMsg(__FILE__, __LINE__))
+    end if
+    if (use_microbe_lateral_aqueous_transport .and. .not. use_humhol) then
+       call endrun(msg=' ERROR: use_microbe_lateral_aqueous_transport=.true. requires '//&
+            'use_humhol=.true.'//errMsg(__FILE__, __LINE__))
+    end if
     if (use_microbe_dom_preferential_flow .and. .not. use_microbe_aqueous_transport) then
        call endrun(msg=' ERROR: use_microbe_dom_preferential_flow=.true. requires '//&
             'use_microbe_aqueous_transport=.true.'//errMsg(__FILE__, __LINE__))
@@ -845,6 +856,7 @@ contains
           use_clm_microbe_dom_relaxation .or. &
           use_microbe_observed_dom_calibration .or. &
           use_microbe_aqueous_transport .or. &
+          use_microbe_lateral_aqueous_transport .or. &
           use_microbe_dom_preferential_flow .or. &
           use_microbe_zwt_macrodispersion)) then
        call endrun(msg=' ERROR: use_legacy_ch4_with_microbe=.true. cannot be combined '//&
@@ -954,6 +966,7 @@ contains
     call mpi_bcast (use_clm_microbe_dom_relaxation, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_microbe_observed_dom_calibration, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_microbe_aqueous_transport, 1, MPI_LOGICAL, 0, mpicom, ier)
+    call mpi_bcast (use_microbe_lateral_aqueous_transport, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_microbe_dom_preferential_flow, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_microbe_zwt_macrodispersion, 1, MPI_LOGICAL, 0, mpicom, ier)
     call mpi_bcast (use_vertsoilc, 1, MPI_LOGICAL, 0, mpicom, ier)
@@ -1341,6 +1354,8 @@ contains
          use_microbe_observed_dom_calibration
     write(iulog,*) '    use_microbe_aqueous_transport = ', &
          use_microbe_aqueous_transport
+    write(iulog,*) '    use_microbe_lateral_aqueous_transport = ', &
+         use_microbe_lateral_aqueous_transport
     write(iulog,*) '    use_microbe_dom_preferential_flow = ', &
          use_microbe_dom_preferential_flow
     write(iulog,*) '    use_microbe_zwt_macrodispersion = ', &

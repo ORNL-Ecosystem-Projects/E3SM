@@ -3075,6 +3075,14 @@ sub setup_logic_microbe_methane {
       !value_is_true($nl->get_value('use_microbe_methane'))) {
     fatal_error("use_microbe_aqueous_transport=.true. requires use_microbe_methane=.true.\n");
   }
+  if (value_is_true($nl->get_value('use_microbe_lateral_aqueous_transport')) &&
+      !value_is_true($nl->get_value('use_microbe_aqueous_transport'))) {
+    fatal_error("use_microbe_lateral_aqueous_transport=.true. requires use_microbe_aqueous_transport=.true.\n");
+  }
+  if (value_is_true($nl->get_value('use_microbe_lateral_aqueous_transport')) &&
+      !value_is_true($nl->get_value('use_humhol'))) {
+    fatal_error("use_microbe_lateral_aqueous_transport=.true. requires use_humhol=.true.\n");
+  }
   if (value_is_true($nl->get_value('use_microbe_dom_preferential_flow')) &&
       !value_is_true($nl->get_value('use_microbe_aqueous_transport'))) {
     fatal_error("use_microbe_dom_preferential_flow=.true. requires use_microbe_aqueous_transport=.true.\n");
@@ -3096,6 +3104,7 @@ sub setup_logic_microbe_methane {
        value_is_true($nl->get_value('use_clm_microbe_dom_relaxation')) ||
        value_is_true($nl->get_value('use_microbe_observed_dom_calibration')) ||
        value_is_true($nl->get_value('use_microbe_aqueous_transport')) ||
+       value_is_true($nl->get_value('use_microbe_lateral_aqueous_transport')) ||
        value_is_true($nl->get_value('use_microbe_dom_preferential_flow')) ||
        value_is_true($nl->get_value('use_microbe_zwt_macrodispersion')))) {
     fatal_error("use_legacy_ch4_with_microbe=.true. cannot be combined with revised-methane or revised-solute transport options.\n");

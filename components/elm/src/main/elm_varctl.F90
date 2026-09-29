@@ -389,6 +389,7 @@ module elm_varctl
   logical, public :: use_clm_microbe_dom_relaxation = .false.
   logical, public :: use_microbe_observed_dom_calibration = .false.
   logical, public :: use_microbe_aqueous_transport = .false.
+  logical, public :: use_microbe_lateral_aqueous_transport = .false.
   logical, public :: use_microbe_dom_preferential_flow = .false.
   logical, public :: use_microbe_zwt_macrodispersion = .false.
   logical, public :: use_vertsoilc       = .false.
@@ -567,6 +568,7 @@ module elm_varctl
   !$acc declare copyin(use_clm_microbe_dom_relaxation)
   !$acc declare copyin(use_microbe_observed_dom_calibration)
   !$acc declare copyin(use_microbe_aqueous_transport)
+  !$acc declare copyin(use_microbe_lateral_aqueous_transport)
   !$acc declare copyin(use_microbe_dom_preferential_flow)
   !$acc declare copyin(use_microbe_zwt_macrodispersion)
   !$acc declare copyin(use_nitrif_denitrif)

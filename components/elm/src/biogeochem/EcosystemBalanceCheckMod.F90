@@ -448,7 +448,7 @@ contains
   !-----------------------------------------------------------------------
   subroutine ColNBalanceCheck(bounds, &
        num_soilc, filter_soilc, &
-       col_ns, col_nf, aqueous_nitrogen_export_col)
+       col_ns, col_nf, aqueous_nitrogen_export_col, lateral_nitrogen_flux_col)
     !
     ! !DESCRIPTION:
     ! On the radiation time step, perform nitrogen mass conservation check
@@ -462,6 +462,7 @@ contains
     type(column_nitrogen_state) , intent(inout) :: col_ns
     type(column_nitrogen_flux)  , intent(inout) :: col_nf
     real(r8), optional          , intent(in)    :: aqueous_nitrogen_export_col(bounds%begc:)
+    real(r8), optional          , intent(in)    :: lateral_nitrogen_flux_col(bounds%begc:)
     !
     ! !LOCAL VARIABLES:
     integer :: c,err_index,j,p  ! indices
@@ -601,6 +602,9 @@ contains
                col_prod1n_loss(c) + col_prod10n_loss(c) + col_prod100n_loss(c)
 
          col_noutputs(c) = col_noutputs(c) - som_n_leached(c)
+         if (present(lateral_nitrogen_flux_col)) then
+            col_ninputs(c) = col_ninputs(c) + lateral_nitrogen_flux_col(c)
+         end if
          if (present(aqueous_nitrogen_export_col)) then
             col_noutputs(c) = col_noutputs(c) + aqueous_nitrogen_export_col(c)
          end if
@@ -677,7 +681,7 @@ contains
   !-----------------------------------------------------------------------
   subroutine ColPBalanceCheck(bounds, &
        num_soilc, filter_soilc, &
-       col_ps, col_pf, aqueous_phosphorus_export_col)
+       col_ps, col_pf, aqueous_phosphorus_export_col, lateral_phosphorus_flux_col)
     !
     ! !DESCRIPTION:
     ! On the radiation time step, perform phosphorus mass conservation check
@@ -690,6 +694,7 @@ contains
     type(column_phosphorus_state) , intent(inout) :: col_ps
     type(column_phosphorus_flux)  , intent(inout) :: col_pf
     real(r8), optional            , intent(in)    :: aqueous_phosphorus_export_col(bounds%begc:)
+    real(r8), optional            , intent(in)    :: lateral_phosphorus_flux_col(bounds%begc:)
     !
     ! !LOCAL VARIABLES:
     integer :: c,err_index,j,k,p  ! indices
@@ -857,6 +862,9 @@ contains
          end if
 
          col_poutputs(c) = col_poutputs(c) - som_p_leached(c)
+         if (present(lateral_phosphorus_flux_col)) then
+            col_pinputs(c) = col_pinputs(c) + lateral_phosphorus_flux_col(c)
+         end if
          if (present(aqueous_phosphorus_export_col)) then
             col_poutputs(c) = col_poutputs(c) + aqueous_phosphorus_export_col(c)
          end if

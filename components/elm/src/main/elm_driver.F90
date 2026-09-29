@@ -1402,11 +1402,15 @@ contains
              call ColNBalanceCheck(bounds_clump, &
                   filter(nc)%num_soilc, filter(nc)%soilc, col_ns, col_nf, &
                   aqueous_nitrogen_export_col=&
-                  microbe_methane_vars%aqueous_nitrogen_export_col)
+                  microbe_methane_vars%aqueous_nitrogen_export_col, &
+                  lateral_nitrogen_flux_col=&
+                  microbe_methane_vars%lateral_nitrogen_flux_col)
              call ColPBalanceCheck(bounds_clump, &
                   filter(nc)%num_soilc, filter(nc)%soilc, col_ps, col_pf, &
                   aqueous_phosphorus_export_col=&
-                  microbe_methane_vars%aqueous_phosphorus_export_col)
+                  microbe_methane_vars%aqueous_phosphorus_export_col, &
+                  lateral_phosphorus_flux_col=&
+                  microbe_methane_vars%lateral_phosphorus_flux_col)
           else
              call ColNBalanceCheck(bounds_clump, &
                   filter(nc)%num_soilc, filter(nc)%soilc, col_ns, col_nf)

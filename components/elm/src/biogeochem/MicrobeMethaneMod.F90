@@ -11,8 +11,9 @@ module MicrobeMethaneMod
        use_microbe_nonbog_lateral_gas_transport, &
        use_clm_microbe_humhol_saturation, use_clm_microbe_dom_relaxation, &
        use_microbe_observed_dom_calibration, &
-       use_microbe_aqueous_transport, use_microbe_dom_preferential_flow, &
-       use_microbe_zwt_macrodispersion, use_humhol
+       use_microbe_aqueous_transport, use_microbe_lateral_aqueous_transport, &
+       use_microbe_dom_preferential_flow, &
+       use_microbe_zwt_macrodispersion, use_humhol, use_c14
   use pio, only : file_desc_t
 
   implicit none
@@ -62,6 +63,15 @@ module MicrobeMethaneMod
      real(r8), pointer :: surface_carbon_flux_col(:) => null()
      ! Net lateral CH4 plus CO2 carbon transfer, positive into the column.
      real(r8), pointer :: lateral_carbon_flux_col(:) => null()
+     real(r8), pointer :: lateral_nitrogen_flux_col(:) => null()
+     real(r8), pointer :: lateral_phosphorus_flux_col(:) => null()
+     real(r8), pointer :: lateral_dom_c_flux_col(:) => null()
+     real(r8), pointer :: lateral_acetate_c_flux_col(:) => null()
+     real(r8), pointer :: lateral_dom_n_flux_col(:) => null()
+     real(r8), pointer :: lateral_nh4_flux_col(:) => null()
+     real(r8), pointer :: lateral_no3_flux_col(:) => null()
+     real(r8), pointer :: lateral_dom_p_flux_col(:) => null()
+     real(r8), pointer :: lateral_solution_p_flux_col(:) => null()
      ! Physical aqueous-transport diagnostics. Interface arrays store the
      ! downward-positive flux through the lower face of each decomposition layer.
      real(r8), pointer :: dom_porewater_c_col(:,:) => null()
@@ -96,6 +106,7 @@ module MicrobeMethaneMod
      real(r8), pointer :: dom_to_som_col(:,:) => null()
      real(r8), pointer :: dom_cascade_respiration_col(:,:) => null()
      real(r8), pointer :: dom_internal_transport_convergence_col(:,:) => null()
+     real(r8), pointer :: dom_lateral_transport_tendency_col(:,:) => null()
      real(r8), pointer :: dom_drainage_loss_col(:,:) => null()
      real(r8), pointer :: dom_net_tendency_col(:,:) => null()
      real(r8), pointer :: dom_profile_restoring_col(:,:) => null()
@@ -223,6 +234,16 @@ contains
     allocate(this%additional_carbon_col(begc:endc)); this%additional_carbon_col = nan
     allocate(this%surface_carbon_flux_col(begc:endc)); this%surface_carbon_flux_col = nan
     allocate(this%lateral_carbon_flux_col(begc:endc)); this%lateral_carbon_flux_col = nan
+    allocate(this%lateral_nitrogen_flux_col(begc:endc)); this%lateral_nitrogen_flux_col = nan
+    allocate(this%lateral_phosphorus_flux_col(begc:endc)); this%lateral_phosphorus_flux_col = nan
+    allocate(this%lateral_dom_c_flux_col(begc:endc)); this%lateral_dom_c_flux_col = nan
+    allocate(this%lateral_acetate_c_flux_col(begc:endc)); this%lateral_acetate_c_flux_col = nan
+    allocate(this%lateral_dom_n_flux_col(begc:endc)); this%lateral_dom_n_flux_col = nan
+    allocate(this%lateral_nh4_flux_col(begc:endc)); this%lateral_nh4_flux_col = nan
+    allocate(this%lateral_no3_flux_col(begc:endc)); this%lateral_no3_flux_col = nan
+    allocate(this%lateral_dom_p_flux_col(begc:endc)); this%lateral_dom_p_flux_col = nan
+    allocate(this%lateral_solution_p_flux_col(begc:endc)); &
+         this%lateral_solution_p_flux_col = nan
     allocate(this%dom_advective_flux_col(begc:endc,1:nlevdecomp_full)); &
          this%dom_advective_flux_col = nan
     allocate(this%dom_porewater_c_col(begc:endc,1:nlevdecomp_full)); &
@@ -277,6 +298,8 @@ contains
          this%dom_cascade_respiration_col = nan
     allocate(this%dom_internal_transport_convergence_col(begc:endc,1:nlevdecomp_full)); &
          this%dom_internal_transport_convergence_col = nan
+    allocate(this%dom_lateral_transport_tendency_col(begc:endc,1:nlevdecomp_full)); &
+         this%dom_lateral_transport_tendency_col = nan
     allocate(this%dom_drainage_loss_col(begc:endc,1:nlevdecomp_full)); &
          this%dom_drainage_loss_col = nan
     allocate(this%dom_net_tendency_col(begc:endc,1:nlevdecomp_full)); &
@@ -406,6 +429,15 @@ contains
     this%additional_carbon_col = 0._r8
     this%surface_carbon_flux_col = 0._r8
     this%lateral_carbon_flux_col = 0._r8
+    this%lateral_nitrogen_flux_col = 0._r8
+    this%lateral_phosphorus_flux_col = 0._r8
+    this%lateral_dom_c_flux_col = 0._r8
+    this%lateral_acetate_c_flux_col = 0._r8
+    this%lateral_dom_n_flux_col = 0._r8
+    this%lateral_nh4_flux_col = 0._r8
+    this%lateral_no3_flux_col = 0._r8
+    this%lateral_dom_p_flux_col = 0._r8
+    this%lateral_solution_p_flux_col = 0._r8
     this%dom_advective_flux_col = 0._r8
     this%dom_porewater_c_col = 0._r8
     this%dom_diffusive_flux_col = 0._r8
@@ -433,6 +465,7 @@ contains
     this%dom_to_som_col = 0._r8
     this%dom_cascade_respiration_col = 0._r8
     this%dom_internal_transport_convergence_col = 0._r8
+    this%dom_lateral_transport_tendency_col = 0._r8
     this%dom_drainage_loss_col = 0._r8
     this%dom_net_tendency_col = 0._r8
     this%dom_profile_restoring_col = 0._r8
@@ -511,6 +544,8 @@ contains
           this%additional_carbon_col(c) = 0._r8
           this%surface_carbon_flux_col(c) = 0._r8
           this%lateral_carbon_flux_col(c) = 0._r8
+          this%lateral_nitrogen_flux_col(c) = 0._r8
+          this%lateral_phosphorus_flux_col(c) = 0._r8
           this%surface_ch4_flux_col(c) = 0._r8
           this%surface_co2_flux_col(c) = 0._r8
        end if
@@ -607,8 +642,35 @@ contains
          long_name='net revised methane CH4 plus CO2 carbon flux; positive to atmosphere', &
          ptr_col=this%surface_carbon_flux_col, default='inactive')
     call hist_addfld1d(fname='MM_LATERAL_C_FLUX', units='gC/m^2/s', avgflag='A', &
-         long_name='net revised methane CH4 plus CO2 lateral carbon transfer; positive into column', &
+         long_name='net gas plus aqueous lateral carbon transfer; positive into column', &
          ptr_col=this%lateral_carbon_flux_col, default='inactive')
+    call hist_addfld1d(fname='MM_LATERAL_N_FLUX', units='gN/m^2/s', avgflag='A', &
+         long_name='net aqueous DOM plus mineral nitrogen lateral transfer; positive into column', &
+         ptr_col=this%lateral_nitrogen_flux_col, default='inactive')
+    call hist_addfld1d(fname='MM_LATERAL_P_FLUX', units='gP/m^2/s', avgflag='A', &
+         long_name='net aqueous DOM plus solution phosphorus lateral transfer; positive into column', &
+         ptr_col=this%lateral_phosphorus_flux_col, default='inactive')
+    call hist_addfld1d(fname='MM_LATERAL_DOM_C_FLUX', units='gC/m^2/s', avgflag='A', &
+         long_name='net lateral dissolved organic carbon transfer; positive into column', &
+         ptr_col=this%lateral_dom_c_flux_col, default='inactive')
+    call hist_addfld1d(fname='MM_LATERAL_ACETATE_C_FLUX', units='gC/m^2/s', avgflag='A', &
+         long_name='net lateral acetate carbon transfer; positive into column', &
+         ptr_col=this%lateral_acetate_c_flux_col, default='inactive')
+    call hist_addfld1d(fname='MM_LATERAL_DOM_N_FLUX', units='gN/m^2/s', avgflag='A', &
+         long_name='net lateral dissolved organic nitrogen transfer; positive into column', &
+         ptr_col=this%lateral_dom_n_flux_col, default='inactive')
+    call hist_addfld1d(fname='MM_LATERAL_NH4_FLUX', units='gN/m^2/s', avgflag='A', &
+         long_name='net lateral dissolved ammonium transfer; positive into column', &
+         ptr_col=this%lateral_nh4_flux_col, default='inactive')
+    call hist_addfld1d(fname='MM_LATERAL_NO3_FLUX', units='gN/m^2/s', avgflag='A', &
+         long_name='net lateral nitrate transfer; positive into column', &
+         ptr_col=this%lateral_no3_flux_col, default='inactive')
+    call hist_addfld1d(fname='MM_LATERAL_DOM_P_FLUX', units='gP/m^2/s', avgflag='A', &
+         long_name='net lateral dissolved organic phosphorus transfer; positive into column', &
+         ptr_col=this%lateral_dom_p_flux_col, default='inactive')
+    call hist_addfld1d(fname='MM_LATERAL_SOLUTION_P_FLUX', units='gP/m^2/s', avgflag='A', &
+         long_name='net lateral inorganic solution phosphorus transfer; positive into column', &
+         ptr_col=this%lateral_solution_p_flux_col, default='inactive')
     call hist_addfld_decomp(fname='MM_DOM_ADV_FLUX', units='gC/m^2/s', type2d='levdcmp', &
          avgflag='A', long_name='downward DOM carbon advective flux at lower layer face', &
          ptr_col=this%dom_advective_flux_col, default='inactive')
@@ -691,6 +753,9 @@ contains
     call add_dom_budget_rate('MM_DOM_TRANSPORT_CONV', &
          'internal aqueous DOM transport convergence excluding bottom drainage; signed', &
          this%dom_internal_transport_convergence_col)
+    call add_dom_budget_rate('MM_DOM_LATERAL_TEND', &
+         'DOM carbon tendency from water-flux-driven bog topounit exchange; signed', &
+         this%dom_lateral_transport_tendency_col)
     call add_dom_budget_rate('MM_DOM_DRAINAGE_LOSS', &
          'lower-boundary DOM drainage assigned to the bottom layer; positive loss', &
          this%dom_drainage_loss_col)
@@ -952,6 +1017,7 @@ contains
     use MicrobeMethaneStateUpdateMod, only : advanceMicrobeMethaneDOMProfileRestoration
     use MicrobeMethaneStateUpdateMod, only : advanceMicrobeMethaneTracerRelaxation
     use MicrobeMethaneStateUpdateMod, only : advanceMicrobeAqueousTracerTransport
+    use MicrobeMethaneStateUpdateMod, only : advanceMicrobeLateralAqueousTracer
     use MicrobeMethaneStateUpdateMod, only : advanceMicrobeDOMCompleteBypass
     use MicrobeMethaneStateUpdateMod, only : advanceMicrobeMethaneGasTransport
     use MicrobeMethaneStateUpdateMod, only : microbeMethaneColumnAdditionalCarbon
@@ -1094,6 +1160,15 @@ contains
 
     this%surface_carbon_flux_col(bounds%begc:bounds%endc) = 0._r8
     this%lateral_carbon_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%lateral_nitrogen_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%lateral_phosphorus_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%lateral_dom_c_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%lateral_acetate_c_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%lateral_dom_n_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%lateral_nh4_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%lateral_no3_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%lateral_dom_p_flux_col(bounds%begc:bounds%endc) = 0._r8
+    this%lateral_solution_p_flux_col(bounds%begc:bounds%endc) = 0._r8
     this%dom_advective_flux_col(bounds%begc:bounds%endc,:) = 0._r8
     this%dom_porewater_c_col(bounds%begc:bounds%endc,:) = 0._r8
     this%ch4_porewater_col(bounds%begc:bounds%endc,:) = 0._r8
@@ -1124,6 +1199,7 @@ contains
     this%dom_to_som_col(bounds%begc:bounds%endc,:) = 0._r8
     this%dom_cascade_respiration_col(bounds%begc:bounds%endc,:) = 0._r8
     this%dom_internal_transport_convergence_col(bounds%begc:bounds%endc,:) = 0._r8
+    this%dom_lateral_transport_tendency_col(bounds%begc:bounds%endc,:) = 0._r8
     this%dom_drainage_loss_col(bounds%begc:bounds%endc,:) = 0._r8
     this%dom_net_tendency_col(bounds%begc:bounds%endc,:) = 0._r8
     this%dom_profile_restoring_col(bounds%begc:bounds%endc,:) = 0._r8
@@ -2096,6 +2172,14 @@ contains
        call syncLegacyOxygenBridge(c, fraction, unsaturated_work, saturated_work, reaction)
     end do
 
+    ! Advect dissolved substrates and nutrients with the realized lateral
+    ! groundwater exchange. The first implementation deliberately restricts
+    ! exchange to bog--bog edges (normally hummock--hollow); non-bog routing
+    ! can be enabled later after fen and upland chemistry are evaluated.
+    if (use_microbe_lateral_aqueous_transport) then
+       call applyTopounitLateralAqueousAdvection()
+    end if
+
     ! CLM-SPRUCE's Fickian backend also exchanged gas laterally between its
     ! two hard-coded hummock/hollow columns. Apply the generalized topounit
     ! graph transaction only in the parity transport mode; the optional ELM
@@ -2105,6 +2189,306 @@ contains
     end if
 
   contains
+
+    subroutine applyTopounitLateralAqueousAdvection()
+      real(r8) :: concentration(num_soilc,nlevdecomp)
+      real(r8) :: updated(num_soilc,nlevdecomp)
+      real(r8) :: layer_thickness_lateral(num_soilc,nlevdecomp)
+      real(r8) :: liquid_fraction_lateral(num_soilc,nlevdecomp)
+      real(r8) :: mobile_fraction_lateral(num_soilc,nlevdecomp)
+      real(r8) :: dom_mobile_fraction_lateral(num_soilc,nlevdecomp)
+      real(r8) :: storage_fraction_lateral(num_soilc,nlevdecomp)
+      real(r8) :: water_exchange(num_soilc,nlevdecomp)
+      real(r8) :: area_weight(num_soilc)
+      real(r8) :: dom_c_flux(num_soilc), dom_n_flux(num_soilc)
+      real(r8) :: dom_p_flux(num_soilc), acetate_flux(num_soilc)
+      real(r8) :: c14_dom_flux(num_soilc), c14_acetate_flux(num_soilc)
+      real(r8) :: nh4_flux(num_soilc), no3_flux(num_soilc), solution_p_flux(num_soilc)
+      real(r8) :: lateral_residual, relative_saturation
+      integer :: edge_source(num_soilc), edge_target(num_soilc)
+      integer :: soil_fc_by_topounit(bounds%begt:bounds%endt)
+      integer :: bog_degree(num_soilc)
+      integer :: edge_count, edge, source_fc, target_fc, target_t, t
+      logical :: lateral_valid, duplicate_edge
+
+      if (num_soilc <= 0) return
+      soil_fc_by_topounit = 0
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         t = col_pp%topounit(c)
+         if (t < bounds%begt .or. t > bounds%endt) cycle
+         if (soil_fc_by_topounit(t) /= 0 .and. &
+              soil_fc_by_topounit(t) /= source_fc) then
+            call endrun(msg=' ERROR: lateral aqueous transport requires one soil '//&
+                 'column per connected topounit'//errMsg(__FILE__, __LINE__))
+         end if
+         soil_fc_by_topounit(t) = source_fc
+      end do
+
+      edge_count = 0
+      bog_degree = 0
+      do t = bounds%begt, bounds%endt
+         if (.not. top_pp%active(t) .or. .not. top_pp%is_bog(t) .or. &
+              soil_fc_by_topounit(t) == 0) cycle
+         target_t = top_pp%regional_target_ti(t)
+         if (target_t < bounds%begt .or. target_t > bounds%endt .or. target_t == t) cycle
+         if (.not. top_pp%active(target_t) .or. .not. top_pp%is_bog(target_t) .or. &
+              top_pp%gridcell(target_t) /= top_pp%gridcell(t) .or. &
+              soil_fc_by_topounit(target_t) == 0) cycle
+         source_fc = soil_fc_by_topounit(t)
+         target_fc = soil_fc_by_topounit(target_t)
+         duplicate_edge = .false.
+         do edge = 1, edge_count
+            if ((edge_source(edge) == source_fc .and. edge_target(edge) == target_fc) .or. &
+                 (edge_source(edge) == target_fc .and. edge_target(edge) == source_fc)) then
+               duplicate_edge = .true.
+            end if
+         end do
+         if (duplicate_edge) cycle
+         edge_count = edge_count + 1
+         edge_source(edge_count) = source_fc
+         edge_target(edge_count) = target_fc
+         bog_degree(source_fc) = bog_degree(source_fc) + 1
+         bog_degree(target_fc) = bog_degree(target_fc) + 1
+      end do
+      if (edge_count == 0) return
+      if (any(bog_degree > 1)) then
+         call endrun(msg=' ERROR: layer-resolved lateral aqueous transport currently '//&
+              'supports paired bog topounits only'//errMsg(__FILE__, __LINE__))
+      end if
+
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         t = col_pp%topounit(c)
+         area_weight(source_fc) = max(tiny(1._r8), &
+              top_pp%wtgcell(t) * max(col_pp%wttopounit(c), tiny(1._r8)))
+         do j = 1, nlevdecomp
+            layer_thickness_lateral(source_fc,j) = col_pp%dz(c,j)
+            liquid_fraction_lateral(source_fc,j) = max(0._r8, col_ws%h2osoi_liq(c,j)) / &
+                 (denh2o * max(col_pp%dz(c,j), tiny(1._r8)))
+            water_exchange(source_fc,j) = 1.e-3_r8 * col_wf%qflx_lat_aqu_layer(c,j)
+            relative_saturation = clampUnitInterval(liquid_fraction_lateral(source_fc,j) / &
+                 max(soilstate_vars%watsat_col(c,j), tiny(1._r8)))
+            if (MicrobeMethaneParamsInst%aqueous_dom_mobile_saturation_exponent > 0._r8) then
+               dom_mobile_fraction_lateral(source_fc,j) = &
+                    MicrobeMethaneParamsInst%aqueous_dom_mobile_fraction * &
+                    relative_saturation ** &
+                    MicrobeMethaneParamsInst%aqueous_dom_mobile_saturation_exponent
+            else
+               dom_mobile_fraction_lateral(source_fc,j) = &
+                    MicrobeMethaneParamsInst%aqueous_dom_mobile_fraction
+            end if
+            storage_fraction_lateral(source_fc,j) = 1._r8
+         end do
+      end do
+
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         concentration(source_fc,:) = col_cs%decomp_cpools_vr(c,1:nlevdecomp,i_dom)
+      end do
+      call advanceMicrobeLateralAqueousTracer(concentration, layer_thickness_lateral, &
+           liquid_fraction_lateral, dom_mobile_fraction_lateral, storage_fraction_lateral, &
+           water_exchange, area_weight, edge_source(1:edge_count), edge_target(1:edge_count), &
+           MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, updated, &
+           dom_c_flux, lateral_residual, lateral_valid)
+      call requireValidLateralAqueousTransport(lateral_residual, lateral_valid)
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         this%dom_lateral_transport_tendency_col(c,1:nlevdecomp) = &
+              (updated(source_fc,:) - concentration(source_fc,:)) / dt
+         this%dom_net_tendency_col(c,1:nlevdecomp) = &
+              this%dom_net_tendency_col(c,1:nlevdecomp) + &
+              this%dom_lateral_transport_tendency_col(c,1:nlevdecomp)
+         col_cs%decomp_cpools_vr(c,1:nlevdecomp,i_dom) = updated(source_fc,:)
+      end do
+      if (use_c14) then
+         do source_fc = 1, num_soilc
+            c = filter_soilc(source_fc)
+            concentration(source_fc,:) = &
+                 c14_col_cs%decomp_cpools_vr(c,1:nlevdecomp,i_dom)
+         end do
+         call advanceMicrobeLateralAqueousTracer(concentration, layer_thickness_lateral, &
+              liquid_fraction_lateral, dom_mobile_fraction_lateral, storage_fraction_lateral, &
+              water_exchange, area_weight, edge_source(1:edge_count), edge_target(1:edge_count), &
+              MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, updated, &
+              c14_dom_flux, lateral_residual, lateral_valid)
+         call requireValidLateralAqueousTransport(lateral_residual, lateral_valid)
+         do source_fc = 1, num_soilc
+            c = filter_soilc(source_fc)
+            c14_col_cs%decomp_cpools_vr(c,1:nlevdecomp,i_dom) = updated(source_fc,:)
+         end do
+      end if
+
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         concentration(source_fc,:) = col_ns%decomp_npools_vr(c,1:nlevdecomp,i_dom)
+      end do
+      call advanceMicrobeLateralAqueousTracer(concentration, layer_thickness_lateral, &
+           liquid_fraction_lateral, dom_mobile_fraction_lateral, storage_fraction_lateral, &
+           water_exchange, area_weight, edge_source(1:edge_count), edge_target(1:edge_count), &
+           MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, updated, &
+           dom_n_flux, lateral_residual, lateral_valid)
+      call requireValidLateralAqueousTransport(lateral_residual, lateral_valid)
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         col_ns%decomp_npools_vr(c,1:nlevdecomp,i_dom) = updated(source_fc,:)
+      end do
+
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         concentration(source_fc,:) = col_ps%decomp_ppools_vr(c,1:nlevdecomp,i_dom)
+      end do
+      call advanceMicrobeLateralAqueousTracer(concentration, layer_thickness_lateral, &
+           liquid_fraction_lateral, dom_mobile_fraction_lateral, storage_fraction_lateral, &
+           water_exchange, area_weight, edge_source(1:edge_count), edge_target(1:edge_count), &
+           MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, updated, &
+           dom_p_flux, lateral_residual, lateral_valid)
+      call requireValidLateralAqueousTransport(lateral_residual, lateral_valid)
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         col_ps%decomp_ppools_vr(c,1:nlevdecomp,i_dom) = updated(source_fc,:)
+      end do
+
+      ! Acetate follows the saturated reaction partition because lateral
+      ! aquifer flow samples water connected to the main water table.
+      mobile_fraction_lateral = MicrobeMethaneParamsInst%aqueous_acetate_mobile_fraction
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         concentration(source_fc,:) = this%acetate_c_sat_col(c,1:nlevdecomp)
+         storage_fraction_lateral(source_fc,:) = &
+              clampUnitInterval(this%sat_fraction_previous_col(c))
+      end do
+      call advanceMicrobeLateralAqueousTracer(concentration, layer_thickness_lateral, &
+           liquid_fraction_lateral, mobile_fraction_lateral, storage_fraction_lateral, &
+           water_exchange, area_weight, edge_source(1:edge_count), edge_target(1:edge_count), &
+           MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, updated, &
+           acetate_flux, lateral_residual, lateral_valid)
+      call requireValidLateralAqueousTransport(lateral_residual, lateral_valid)
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         this%acetate_c_sat_col(c,1:nlevdecomp) = updated(source_fc,:)
+      end do
+      if (use_c14) then
+         do source_fc = 1, num_soilc
+            c = filter_soilc(source_fc)
+            concentration(source_fc,:) = &
+                 this%c14_acetate_c_sat_col(c,1:nlevdecomp)
+         end do
+         call advanceMicrobeLateralAqueousTracer(concentration, layer_thickness_lateral, &
+              liquid_fraction_lateral, mobile_fraction_lateral, storage_fraction_lateral, &
+              water_exchange, area_weight, edge_source(1:edge_count), edge_target(1:edge_count), &
+              MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, updated, &
+              c14_acetate_flux, lateral_residual, lateral_valid)
+         call requireValidLateralAqueousTransport(lateral_residual, lateral_valid)
+         do source_fc = 1, num_soilc
+            c = filter_soilc(source_fc)
+            this%c14_acetate_c_sat_col(c,1:nlevdecomp) = updated(source_fc,:)
+         end do
+      end if
+
+      ! NH4 transport is retarded by equilibrium sorption; NO3 and solution P
+      ! are treated as fully dissolved. DOM-P remains organic and is transported
+      ! separately from the inorganic solution-P counterpool.
+      storage_fraction_lateral = 1._r8
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         concentration(source_fc,:) = col_ns%smin_nh4_vr(c,1:nlevdecomp)
+         mobile_fraction_lateral(source_fc,:) = &
+              this%mineral_nh4_mobile_fraction_col(c,1:nlevdecomp)
+      end do
+      call advanceMicrobeLateralAqueousTracer(concentration, layer_thickness_lateral, &
+           liquid_fraction_lateral, mobile_fraction_lateral, storage_fraction_lateral, &
+           water_exchange, area_weight, edge_source(1:edge_count), edge_target(1:edge_count), &
+           MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, updated, &
+           nh4_flux, lateral_residual, lateral_valid)
+      call requireValidLateralAqueousTransport(lateral_residual, lateral_valid)
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         col_ns%smin_nh4_vr(c,1:nlevdecomp) = updated(source_fc,:)
+      end do
+
+      mobile_fraction_lateral = 1._r8
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         concentration(source_fc,:) = col_ns%smin_no3_vr(c,1:nlevdecomp)
+      end do
+      call advanceMicrobeLateralAqueousTracer(concentration, layer_thickness_lateral, &
+           liquid_fraction_lateral, mobile_fraction_lateral, storage_fraction_lateral, &
+           water_exchange, area_weight, edge_source(1:edge_count), edge_target(1:edge_count), &
+           MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, updated, &
+           no3_flux, lateral_residual, lateral_valid)
+      call requireValidLateralAqueousTransport(lateral_residual, lateral_valid)
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         col_ns%smin_no3_vr(c,1:nlevdecomp) = updated(source_fc,:)
+         col_ns%sminn_vr(c,1:nlevdecomp) = col_ns%smin_nh4_vr(c,1:nlevdecomp) + &
+              col_ns%smin_no3_vr(c,1:nlevdecomp)
+      end do
+
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         concentration(source_fc,:) = max(0._r8, col_ps%solutionp_vr(c,1:nlevdecomp))
+      end do
+      call advanceMicrobeLateralAqueousTracer(concentration, layer_thickness_lateral, &
+           liquid_fraction_lateral, mobile_fraction_lateral, storage_fraction_lateral, &
+           water_exchange, area_weight, edge_source(1:edge_count), edge_target(1:edge_count), &
+           MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction, dt, updated, &
+           solution_p_flux, lateral_residual, lateral_valid)
+      call requireValidLateralAqueousTransport(lateral_residual, lateral_valid)
+      do source_fc = 1, num_soilc
+         c = filter_soilc(source_fc)
+         ! Preserve a pre-existing negative numerical offset while transporting
+         ! only the physically available, nonnegative solution-P inventory.
+         col_ps%solutionp_vr(c,1:nlevdecomp) = &
+              min(0._r8, col_ps%solutionp_vr(c,1:nlevdecomp)) + updated(source_fc,:)
+         this%lateral_carbon_flux_col(c) = this%lateral_carbon_flux_col(c) + &
+              dom_c_flux(source_fc) + acetate_flux(source_fc)
+         this%lateral_nitrogen_flux_col(c) = dom_n_flux(source_fc) + &
+              nh4_flux(source_fc) + no3_flux(source_fc)
+         this%lateral_phosphorus_flux_col(c) = dom_p_flux(source_fc) + &
+              solution_p_flux(source_fc)
+         this%lateral_dom_c_flux_col(c) = dom_c_flux(source_fc)
+         this%lateral_acetate_c_flux_col(c) = acetate_flux(source_fc)
+         this%lateral_dom_n_flux_col(c) = dom_n_flux(source_fc)
+         this%lateral_nh4_flux_col(c) = nh4_flux(source_fc)
+         this%lateral_no3_flux_col(c) = no3_flux(source_fc)
+         this%lateral_dom_p_flux_col(c) = dom_p_flux(source_fc)
+         this%lateral_solution_p_flux_col(c) = solution_p_flux(source_fc)
+         call gatherColumnState(c, unsaturated_state, saturated_state)
+         layer_thickness = col_pp%dz(c,1:nlevdecomp)
+         this%additional_carbon_col(c) = microbeMethaneColumnAdditionalCarbon( &
+              clampUnitInterval(this%sat_fraction_previous_col(c)), &
+              unsaturated_state, saturated_state, layer_thickness)
+         do j = 1, nlevdecomp
+            if (liquid_fraction_lateral(source_fc,j) >= &
+                 MicrobeMethaneParamsInst%aqueous_solute_min_liquid_fraction) then
+               this%dom_porewater_c_col(c,j) = &
+                    dom_mobile_fraction_lateral(source_fc,j) * &
+                    max(0._r8, col_cs%decomp_cpools_vr(c,j,i_dom)) / &
+                    liquid_fraction_lateral(source_fc,j)
+               this%mineral_nh4_porewater_col(c,j) = &
+                    this%mineral_nh4_mobile_fraction_col(c,j) * &
+                    max(0._r8, col_ns%smin_nh4_vr(c,j)) / &
+                    liquid_fraction_lateral(source_fc,j)
+               this%mineral_no3_porewater_col(c,j) = &
+                    max(0._r8, col_ns%smin_no3_vr(c,j)) / &
+                    liquid_fraction_lateral(source_fc,j)
+            end if
+         end do
+      end do
+
+    end subroutine applyTopounitLateralAqueousAdvection
+
+    subroutine requireValidLateralAqueousTransport(residual, valid)
+      real(r8), intent(in) :: residual
+      logical, intent(in) :: valid
+
+      if (.not. valid) then
+         write(message,'(a,es24.16)') &
+              ' ERROR: invalid bog lateral aqueous transport; residual ', residual
+         call endrun(msg=trim(message)//errMsg(__FILE__, __LINE__))
+      end if
+    end subroutine requireValidLateralAqueousTransport
 
     subroutine applyTopounitLateralGasDiffusion()
       real(r8) :: lateral_concentration(num_soilc,nlevdecomp)
