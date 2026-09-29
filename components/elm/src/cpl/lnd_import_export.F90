@@ -13,6 +13,7 @@ module lnd_import_export
   use elm_varpar   , only: numpft, numharvest
   use ocn2lndType  , only: ocn2lnd_type
   use GridcellType , only: grc_pp          ! for access to gridcell topology
+  use TopounitType , only: top_pp          ! topounit surface-structure properties
   use TopounitDataType , only: top_as, top_af  ! atmospheric state and flux variables  
   use elm_cpl_indices
   use mct_mod
@@ -1243,6 +1244,14 @@ contains
          end do
        end if  
 #endif
+
+       ! Surface structures can shed a fraction of incident snow outside the
+       ! represented topounit. Rain is intentionally unchanged because SPRUCE
+       ! frustum runoff drains inside the enclosure. A default value of 1
+       ! preserves existing behavior when the surface field is absent.
+       do topo = grc_pp%topi(g), grc_pp%topf(g)
+         top_af%snow(topo) = top_af%snow(topo) * top_pp%structure_snow_retention(topo)
+       end do
 
        ! Determine optional receive fields
        ! CO2 (and C13O2) concentration: constant, prognostic, or diagnostic

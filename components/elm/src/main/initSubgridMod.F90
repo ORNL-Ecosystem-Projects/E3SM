@@ -399,7 +399,8 @@ contains
 
   !-----------------------------------------------------------------------
   subroutine add_topounit(ti, gi, wtgcell, elv, dist, slp, asp, topo_ind, is_tpu_active, &
-       is_bog, peat_depth, till_ksat, structure_shade_frac, structure_light_trans, &
+       is_bog, peat_depth, till_ksat, drainage_outlet_depth, acrotelm_depth, &
+       structure_shade_frac, structure_light_trans, structure_snow_retention, &
        regional_target_ti)
     !
     ! !DESCRIPTION:
@@ -420,8 +421,11 @@ contains
     logical , intent(in)    :: is_bog        ! true when this topounit represents a bog
     real(r8), intent(in)    :: peat_depth    ! peat depth above restrictive till (m)
     real(r8), intent(in)    :: till_ksat     ! restrictive till saturated conductivity (mm/s)
+    real(r8), intent(in)    :: drainage_outlet_depth ! outlet depth below shared hollow surface (m)
+    real(r8), intent(in)    :: acrotelm_depth ! prescribed depth below local surface (m); 0=prognostic
     real(r8), intent(in)    :: structure_shade_frac ! area fraction covered by a shading structure [-]
     real(r8), intent(in)    :: structure_light_trans ! structure shortwave transmissivity [-]
+    real(r8), intent(in)    :: structure_snow_retention ! fraction of snowfall retained [-]
     integer , intent(in)    :: regional_target_ti ! topounit target for regional lateral flow
     !
     ! !LOCAL VARIABLES:
@@ -441,8 +445,11 @@ contains
     top_pp%is_bog(ti) = is_bog
     top_pp%peat_depth(ti) = peat_depth
     top_pp%till_ksat(ti) = till_ksat
+    top_pp%drainage_outlet_depth(ti) = drainage_outlet_depth
+    top_pp%acrotelm_depth(ti) = acrotelm_depth
     top_pp%structure_shade_frac(ti) = structure_shade_frac
     top_pp%structure_light_trans(ti) = structure_light_trans
+    top_pp%structure_snow_retention(ti) = structure_snow_retention
     top_pp%regional_target_ti(ti) = regional_target_ti
     top_pp%downhill_ti(ti) = -1   ! initialized to no downhill neighbor state (-1)
     

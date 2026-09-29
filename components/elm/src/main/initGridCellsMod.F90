@@ -258,7 +258,10 @@ contains
     use elm_varsur , only : wt_tunit, elv_tunit, dist_tunit, regional_target_tunit
     use elm_varsur , only : surface_target_tunit
     use elm_varsur , only : slp_tunit, asp_tunit, bog_tunit, peat_depth_tunit, till_ksat_tunit
+    use elm_varsur , only : drainage_outlet_depth_tunit
+    use elm_varsur , only : acrotelm_depth_tunit
     use elm_varsur , only : structure_shade_frac_tunit, structure_light_trans_tunit
+    use elm_varsur , only : structure_snow_retention_tunit
     use elm_varsur , only : num_tunit_per_grd
     use elm_varctl , only : use_IM2_hillslope_hydrology, use_humhol
     use topounit_varcon   , only : max_topounits, has_topounit 
@@ -270,7 +273,10 @@ contains
     integer :: topounit, ntopos,topo_ind, num_topo_tmp,tmp_tpu
     real(r8) :: wttopounit2gridcell, elv, dist, slp            ! topounit weight, elevation, distance and slope
     real(r8) :: peat_depth, till_ksat                          ! peat depth and till conductivity
+    real(r8) :: drainage_outlet_depth                          ! outlet depth below hollow surface
+    real(r8) :: acrotelm_depth                                 ! prescribed depth below local surface; 0=prognostic
     real(r8) :: structure_shade_frac, structure_light_trans   ! surface-structure radiation properties
+    real(r8) :: structure_snow_retention                       ! fraction of snowfall retained
     integer :: asp                                             ! aspect
     integer :: regional_target, regional_target_ti             ! regional lateral-flow target
     integer :: surface_target                                  ! one-way surface-routing target
@@ -309,8 +315,11 @@ contains
        is_bog = bog_tunit(gdc,topounit) /= 0
        peat_depth = peat_depth_tunit(gdc,topounit)
        till_ksat = till_ksat_tunit(gdc,topounit)
+       drainage_outlet_depth = drainage_outlet_depth_tunit(gdc,topounit)
+       acrotelm_depth = acrotelm_depth_tunit(gdc,topounit)
        structure_shade_frac = structure_shade_frac_tunit(gdc,topounit)
        structure_light_trans = structure_light_trans_tunit(gdc,topounit)
+       structure_snow_retention = structure_snow_retention_tunit(gdc,topounit)
        regional_target = regional_target_tunit(gdc,topounit)
        if (regional_target > 0 .and. regional_target <= ntopos .and. regional_target /= topounit) then
           regional_target_ti = begt + regional_target - 1
@@ -320,9 +329,11 @@ contains
        topo_ind = topounit
        call add_topounit(ti=ti, gi=gdc, wtgcell=wttopounit2gridcell, elv=elv, dist=dist, slp=slp, &
             asp=asp, topo_ind=topo_ind, is_tpu_active=is_tpu_active, is_bog=is_bog, &
-            peat_depth=peat_depth, till_ksat=till_ksat, &
+            peat_depth=peat_depth, till_ksat=till_ksat, drainage_outlet_depth=drainage_outlet_depth, &
+            acrotelm_depth=acrotelm_depth, &
             structure_shade_frac=structure_shade_frac, &
-            structure_light_trans=structure_light_trans, regional_target_ti=regional_target_ti)
+            structure_light_trans=structure_light_trans, &
+            structure_snow_retention=structure_snow_retention, regional_target_ti=regional_target_ti)
     end do
 
     ! Peatland surface routing uses an explicit graph that is independent of

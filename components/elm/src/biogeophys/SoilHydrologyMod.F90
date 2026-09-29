@@ -1482,6 +1482,9 @@ contains
      real(r8) :: rsub_top_max
      real(r8) :: rsub_top_zwt                            ! water-table depth used for regional drainage (m)
      real(r8) :: rsub_top_ref_elev                       ! drainage reference elevation (m)
+     real(r8) :: rsub_top_outlet_depth                   ! outlet depth below shared hollow surface (m)
+     real(r8) :: rsub_top_factor                         ! normalized water-table drainage response (-)
+     real(r8) :: rsub_top_factor_denom                   ! normalization at the drainage outlet (-)
      real(r8) :: h2osoi_vol
      real(r8) :: imped
      real(r8) :: rsub_top_tot
@@ -1842,29 +1845,47 @@ contains
                 end if
              endif
 
-             ! Bog baseflow is controlled by depth below the surrounding
-             ! regional surface, rather than depth below each microtopographic
-             ! surface independently. A configured fen can share this drainage
-             ! geometry without being relabeled as a bog for saturation or
-             ! lateral-routing behavior.
+             ! Bog baseflow is controlled by a shared regional reference rather
+             ! than depth below each microtopographic surface independently.
+             ! Normally this retains the historical highest-surface reference.
+             ! When use_fen_bog_drainage is enabled, all peat topounits share a
+             ! lagg outlet referenced to the hollow (lowest active bog surface).
+             ! This includes a nominal fen without relabeling it as a bog for
+             ! saturation, vegetation, or lateral-routing behavior.
              g = col_pp%gridcell(c)
              t = col_pp%topounit(c)
              use_bog_drainage = use_humhol .and. top_pp%peat_depth(t) > 0._r8 .and. &
                   (top_pp%is_bog(t) .or. use_fen_bog_drainage)
              rsub_top_zwt = zwt(c)
+             rsub_top_outlet_depth = 0._r8
              if (use_bog_drainage .and. grc_pp%ntopounits(g) > 1) then
                 topi = grc_pp%topi(g)
                 topf = grc_pp%topf(g)
-                rsub_top_ref_elev = top_pp%elevation(t)
-                do tpeer = topi, topf
-                   if (top_pp%active(tpeer)) then
-                      rsub_top_ref_elev = max(rsub_top_ref_elev, top_pp%elevation(tpeer))
-                   end if
-                end do
-                ! Standalone configurations using fen-as-bog drainage omit the
-                ! surrounding upland reference surface.
-                if (use_fen_bog_drainage) rsub_top_ref_elev = rsub_top_ref_elev + 3._r8
+                if (use_fen_bog_drainage) then
+                   rsub_top_ref_elev = huge(1._r8)
+                   do tpeer = topi, topf
+                      if (top_pp%active(tpeer) .and. top_pp%is_bog(tpeer)) then
+                         rsub_top_ref_elev = min(rsub_top_ref_elev, top_pp%elevation(tpeer))
+                      end if
+                   end do
+                   if (rsub_top_ref_elev > 0.5_r8 * huge(1._r8)) rsub_top_ref_elev = top_pp%elevation(t)
+                   rsub_top_outlet_depth = top_pp%drainage_outlet_depth(t)
+                else
+                   rsub_top_ref_elev = top_pp%elevation(t)
+                   do tpeer = topi, topf
+                      if (top_pp%active(tpeer)) then
+                         rsub_top_ref_elev = max(rsub_top_ref_elev, top_pp%elevation(tpeer))
+                      end if
+                   end do
+                end if
                 rsub_top_zwt = max(0._r8, zwt(c) + rsub_top_ref_elev - top_pp%elevation(t))
+             end if
+
+             if (use_fen_bog_drainage .and. rsub_top_outlet_depth > 0._r8) then
+                rsub_top_factor_denom = 1._r8 - exp(-fff(c) * rsub_top_outlet_depth)
+                rsub_top_factor = (exp(-fff(c) * rsub_top_zwt) - &
+                     exp(-fff(c) * rsub_top_outlet_depth)) / rsub_top_factor_denom
+                rsub_top_factor = max(0._r8, min(1._r8, rsub_top_factor))
              end if
              if (use_vichydro) then
                 ! ARNO model for the bottom soil layer (based on bottom soil layer
@@ -1885,7 +1906,13 @@ contains
                 if (jwt(c) == nlevbed .and. zengdecker_2009_with_var_soil_thick) then
                    rsub_top(c)    = 0._r8
                 else
-                   rsub_top(c)    = imped * rsub_top_max* exp(-fff(c)*rsub_top_zwt)
+                   if (use_fen_bog_drainage .and. rsub_top_outlet_depth > 0._r8) then
+                      rsub_top(c) = imped * rsub_top_max * rsub_top_factor
+                   else
+                      ! Retain the original expression when the optional shared
+                      ! outlet is disabled so non-SPRUCE configurations remain BFB.
+                      rsub_top(c) = imped * rsub_top_max* exp(-fff(c)*rsub_top_zwt)
+                   end if
                 end if
 
              end if
@@ -1907,7 +1934,16 @@ contains
                  if (use_bog_drainage .and. grc_pp%ntopounits(g) > 1) then
                     rsub_top_zwt = max(0._r8, zwt(c) + rsub_top_ref_elev - top_pp%elevation(t))
                  end if
-                 rsub_top(c) = imped * rsub_top_max * exp(-fff(c) * rsub_top_zwt)
+                 if (use_fen_bog_drainage .and. rsub_top_outlet_depth > 0._r8) then
+                    rsub_top_factor = (exp(-fff(c) * rsub_top_zwt) - &
+                         exp(-fff(c) * rsub_top_outlet_depth)) / rsub_top_factor_denom
+                    rsub_top_factor = max(0._r8, min(1._r8, rsub_top_factor))
+                 end if
+                 if (use_fen_bog_drainage .and. rsub_top_outlet_depth > 0._r8) then
+                    rsub_top(c) = imped * rsub_top_max * rsub_top_factor
+                 else
+                    rsub_top(c) = imped * rsub_top_max * exp(-fff(c) * rsub_top_zwt)
+                 end if
                  rsub_top_tot = - rsub_top(c) * dtime
                  s_y = watsat(c,nlevbed) &
                      * ( 1. - (1.+1.e3*zwt(c)/sucsat(c,nlevbed))**(-1./bsw(c,nlevbed)))

@@ -1484,13 +1484,16 @@ contains
     ! !USES:
     use ncdio_pio       , only : file_desc_t, var_desc_t, ncd_pio_openfile, ncd_pio_closefile
     use ncdio_pio       , only : ncd_io, check_var, ncd_inqfdims, check_dim, ncd_inqdid, ncd_inqdlen
-    use elm_varctl      , only: fsurdat, use_humhol
+    use elm_varctl      , only: fsurdat, use_humhol, use_fen_bog_drainage
     use fileutils       , only : getfil   
     use GridcellType    , only : grc_pp
     use elm_varsur      , only : wt_tunit, elv_tunit, dist_tunit, regional_target_tunit
     use elm_varsur      , only : surface_target_tunit
     use elm_varsur      , only : slp_tunit, asp_tunit, bog_tunit, peat_depth_tunit, till_ksat_tunit
+    use elm_varsur      , only : drainage_outlet_depth_tunit
+    use elm_varsur      , only : acrotelm_depth_tunit
     use elm_varsur      , only : structure_shade_frac_tunit, structure_light_trans_tunit
+    use elm_varsur      , only : structure_snow_retention_tunit
     use elm_varsur      , only : num_tunit_per_grd
     use topounit_varcon ,  only : max_topounits, has_topounit
     
@@ -1521,8 +1524,11 @@ contains
     integer ,pointer :: TopounitIsBog(:,:)       ! Bog flag: 1=bog, 0=non-bog
     real(r8),pointer :: TopounitPeatDepth(:,:)   ! Peat depth (m)
     real(r8),pointer :: TopounitTillKsat(:,:)    ! Restrictive till conductivity (mm/s)
+    real(r8),pointer :: TopounitDrainageOutletDepth(:,:) ! Outlet depth below shared hollow surface (m)
+    real(r8),pointer :: TopounitAcrotelmDepth(:,:) ! Prescribed depth below local surface (m); 0=prognostic
     real(r8),pointer :: TopounitStructureShadeFrac(:,:) ! Area fraction covered by a shading structure
     real(r8),pointer :: TopounitStructureLightTrans(:,:) ! Structure shortwave transmissivity
+    real(r8),pointer :: TopounitStructureSnowRetention(:,:) ! Fraction of snowfall retained on topounit
     integer ,pointer :: num_topo_per_grid(:)      ! Topounit aspect
     real(r8),pointer :: GridElevation(:)      ! Topounit aspect
 !    integer ,pointer :: TopounitIndices(:,:)     ! Topounit indices in each grid
@@ -1543,8 +1549,11 @@ contains
     allocate(TopounitIsBog(begg:endg,max_topounits))
     allocate(TopounitPeatDepth(begg:endg,max_topounits))
     allocate(TopounitTillKsat(begg:endg,max_topounits))
+    allocate(TopounitDrainageOutletDepth(begg:endg,max_topounits))
+    allocate(TopounitAcrotelmDepth(begg:endg,max_topounits))
     allocate(TopounitStructureShadeFrac(begg:endg,max_topounits))
     allocate(TopounitStructureLightTrans(begg:endg,max_topounits))
+    allocate(TopounitStructureSnowRetention(begg:endg,max_topounits))
     allocate(num_topo_per_grid(begg:endg))
 !    allocate(TopounitIndices(begg:endg,max_topounits))
 
@@ -1554,8 +1563,14 @@ contains
     TopounitIsBog(:,:) = 0
     TopounitPeatDepth(:,:) = 0._r8
     TopounitTillKsat(:,:) = 0._r8
+    TopounitDrainageOutletDepth(:,:) = 0._r8
+    TopounitAcrotelmDepth(:,:) = 0._r8
+    ! Preserve compatibility with existing standalone SPRUCE surface files.
+    ! Newly generated files carry this geometry explicitly.
+    if (use_fen_bog_drainage) TopounitDrainageOutletDepth(:,:) = 0.4_r8
     TopounitStructureShadeFrac(:,:) = 0._r8
     TopounitStructureLightTrans(:,:) = 1._r8
+    TopounitStructureSnowRetention(:,:) = 1._r8
     
     ! Read surface data
     call getfil( lfsurdat, locfn, 0 )
@@ -1682,6 +1697,18 @@ contains
          dim1name=grlnd, readvar=readvar)
     endif
 
+    call check_var(ncid=ncid, varname='TopounitDrainageOutletDepth', vardesc=vardesc, readvar=readvar)
+    if (readvar) then
+       call ncd_io(ncid=ncid, varname='TopounitDrainageOutletDepth', flag='read', &
+            data=TopounitDrainageOutletDepth, dim1name=grlnd, readvar=readvar)
+    endif
+
+    call check_var(ncid=ncid, varname='TopounitAcrotelmDepth', vardesc=vardesc, readvar=readvar)
+    if (readvar) then
+       call ncd_io(ncid=ncid, varname='TopounitAcrotelmDepth', flag='read', &
+            data=TopounitAcrotelmDepth, dim1name=grlnd, readvar=readvar)
+    endif
+
     call check_var(ncid=ncid, varname='TopounitStructureShadeFrac', vardesc=vardesc, readvar=readvar)
     if (readvar) then
        call ncd_io(ncid=ncid, varname='TopounitStructureShadeFrac', flag='read', &
@@ -1692,6 +1719,12 @@ contains
     if (readvar) then
        call ncd_io(ncid=ncid, varname='TopounitStructureLightTrans', flag='read', &
             data=TopounitStructureLightTrans, dim1name=grlnd, readvar=readvar)
+    endif
+
+    call check_var(ncid=ncid, varname='TopounitStructureSnowRetention', vardesc=vardesc, readvar=readvar)
+    if (readvar) then
+       call ncd_io(ncid=ncid, varname='TopounitStructureSnowRetention', flag='read', &
+            data=TopounitStructureSnowRetention, dim1name=grlnd, readvar=readvar)
     endif
 
     do n = begg,endg
@@ -1707,6 +1740,29 @@ contains
              write(iulog,*) subname, ': invalid TopounitStructureLightTrans at grid/topounit ', n, t, &
                   TopounitStructureLightTrans(n,t)
              call endrun(msg='TopounitStructureLightTrans must be in [0,1]'//errMsg(__FILE__, __LINE__))
+          endif
+          if (TopounitStructureSnowRetention(n,t) < 0._r8 .or. &
+               TopounitStructureSnowRetention(n,t) > 1._r8) then
+             write(iulog,*) subname, ': invalid TopounitStructureSnowRetention at grid/topounit ', n, t, &
+                  TopounitStructureSnowRetention(n,t)
+             call endrun(msg='TopounitStructureSnowRetention must be in [0,1]'//errMsg(__FILE__, __LINE__))
+          endif
+          if (TopounitDrainageOutletDepth(n,t) < 0._r8) then
+             write(iulog,*) subname, ': invalid TopounitDrainageOutletDepth at grid/topounit ', n, t, &
+                  TopounitDrainageOutletDepth(n,t)
+             call endrun(msg='TopounitDrainageOutletDepth must be nonnegative'//errMsg(__FILE__, __LINE__))
+          endif
+          if (TopounitAcrotelmDepth(n,t) < 0._r8) then
+             write(iulog,*) subname, ': invalid TopounitAcrotelmDepth at grid/topounit ', n, t, &
+                  TopounitAcrotelmDepth(n,t)
+             call endrun(msg='TopounitAcrotelmDepth must be nonnegative'//errMsg(__FILE__, __LINE__))
+          endif
+          if (TopounitAcrotelmDepth(n,t) > 0._r8 .and. &
+               TopounitAcrotelmDepth(n,t) > TopounitPeatDepth(n,t)) then
+             write(iulog,*) subname, ': TopounitAcrotelmDepth exceeds peat depth at grid/topounit ', n, t, &
+                  TopounitAcrotelmDepth(n,t), TopounitPeatDepth(n,t)
+             call endrun(msg='TopounitAcrotelmDepth must not exceed TopounitPeatDepth'// &
+                  errMsg(__FILE__, __LINE__))
           endif
        enddo
     enddo
@@ -1737,8 +1793,11 @@ contains
               bog_tunit(n,t) = TopounitIsBog(n,t)
               peat_depth_tunit(n,t) = TopounitPeatDepth(n,t)
               till_ksat_tunit(n,t) = TopounitTillKsat(n,t)
+              drainage_outlet_depth_tunit(n,t) = TopounitDrainageOutletDepth(n,t)
+              acrotelm_depth_tunit(n,t) = TopounitAcrotelmDepth(n,t)
               structure_shade_frac_tunit(n,t) = TopounitStructureShadeFrac(n,t)
               structure_light_trans_tunit(n,t) = TopounitStructureLightTrans(n,t)
+              structure_snow_retention_tunit(n,t) = TopounitStructureSnowRetention(n,t)
         !      slp_tunit(n,t) = TopounitSlope(n,t)
         !      asp_tunit(n,t) = TopounitAspect(n,t)              
            end do
@@ -1746,8 +1805,9 @@ contains
      endif	
     deallocate(maxTopoElv,TopounitFracArea,TopounitElv,TopounitLateralDist, &
          TopounitRegionalTarget,TopounitSurfaceTarget,TopounitSlope,TopounitAspect,TopounitIsBog, &
-         TopounitPeatDepth,TopounitTillKsat,TopounitStructureShadeFrac, &
-         TopounitStructureLightTrans,GridElevation)
+         TopounitPeatDepth,TopounitTillKsat,TopounitDrainageOutletDepth,TopounitAcrotelmDepth, &
+         TopounitStructureShadeFrac, &
+         TopounitStructureLightTrans,TopounitStructureSnowRetention,GridElevation)
     
     call ncd_pio_closefile(ncid)
     
