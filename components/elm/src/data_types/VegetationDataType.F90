@@ -374,6 +374,7 @@ module VegetationDataType
     real(r8), pointer :: qflx_snwcp_ice     (:)   => null() ! excess snowfall due to snow capping (mm H2O /s)
     real(r8), pointer :: qflx_tran_veg      (:)   => null() ! vegetation transpiration (mm H2O/s) (+ = to atm)
     real(r8), pointer :: qflx_moss_soil     (:)   => null() ! upper-soil to moss water exchange (mm H2O/s)
+    real(r8), pointer :: qflx_moss_atm      (:)   => null() ! intercepted rain/dew retained by living moss (mm H2O/s)
     real(r8), pointer :: qflx_dew_snow      (:)   => null() ! surface dew added to snow pack (mm H2O /s) [+]
     real(r8), pointer :: qflx_dew_grnd      (:)   => null() ! ground surface dew formation (mm H2O /s) [+]
     real(r8), pointer :: qflx_prec_intr     (:)   => null() ! interception of precipitation [mm/s]
@@ -5613,6 +5614,7 @@ module VegetationDataType
     allocate(this%qflx_snwcp_ice         (begp:endp))             ; this%qflx_snwcp_ice       (:)   = spval
     allocate(this%qflx_tran_veg          (begp:endp))             ; this%qflx_tran_veg        (:)   = spval
     allocate(this%qflx_moss_soil         (begp:endp))             ; this%qflx_moss_soil       (:)   = 0._r8
+    allocate(this%qflx_moss_atm          (begp:endp))             ; this%qflx_moss_atm        (:)   = 0._r8
     allocate(this%qflx_dew_snow          (begp:endp))             ; this%qflx_dew_snow        (:)   = spval
     allocate(this%qflx_dew_grnd          (begp:endp))             ; this%qflx_dew_grnd        (:)   = spval
     allocate(this%qflx_prec_intr         (begp:endp))             ; this%qflx_prec_intr       (:)   = spval
@@ -5695,6 +5697,11 @@ module VegetationDataType
          avgflag='A', long_name='upper-soil to living-moss water exchange', &
          ptr_patch=this%qflx_moss_soil, default='inactive')
 
+    this%qflx_moss_atm(begp:endp) = 0._r8
+    call hist_addfld1d (fname='QFLX_MOSS_ATM', units='mm H2O/s', &
+         avgflag='A', long_name='intercepted rain and dew retained by living moss', &
+         ptr_patch=this%qflx_moss_atm, default='inactive')
+
     this%qflx_snwcp_liq(begp:endp) = spval
     call hist_addfld1d (fname='QSNWCPLIQ', units='mm H2O/s', &
          avgflag='A', long_name='excess rainfall due to snow capping', &
@@ -5764,6 +5771,7 @@ module VegetationDataType
     this%qflx_dew_grnd (begp:endp) = 0.0_r8
     this%qflx_dew_snow (begp:endp) = 0.0_r8
     this%qflx_moss_soil(begp:endp) = 0.0_r8
+    this%qflx_moss_atm (begp:endp) = 0.0_r8
 
     do p = begp, endp
        l = veg_pp%landunit(p)

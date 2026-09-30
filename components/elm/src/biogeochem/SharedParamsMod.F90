@@ -43,6 +43,7 @@ module SharedParamsMod
   real(r8), public :: moss_water_content_min = 0.5_r8
   real(r8), public :: moss_water_content_max = 8._r8
   real(r8), public :: moss_water_drainage_threshold = 8.5_r8
+  real(r8), public :: moss_water_substrate_rewetting_timescale_days = 1._r8
   real(r8), public :: peat_compaction_surface_density = 20._r8
   real(r8), public :: peat_compaction_deep_density = 90._r8
   real(r8), public :: peat_compaction_initial_acrotelm_depth = 0.25_r8
@@ -74,6 +75,7 @@ module SharedParamsMod
   !$acc declare copyin(moss_water_content_min)
   !$acc declare copyin(moss_water_content_max)
   !$acc declare copyin(moss_water_drainage_threshold)
+  !$acc declare copyin(moss_water_substrate_rewetting_timescale_days)
   !$acc declare copyin(peat_compaction_surface_density)
   !$acc declare copyin(peat_compaction_deep_density)
   !$acc declare copyin(peat_compaction_initial_acrotelm_depth)
@@ -232,6 +234,10 @@ contains
         call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
         if (readv) moss_water_drainage_threshold=tempr
 
+        tString='moss_water_substrate_rewetting_timescale_days'
+        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+        if (readv) moss_water_substrate_rewetting_timescale_days=tempr
+
         tString='peat_compaction_surface_density'
         call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
         if (readv) peat_compaction_surface_density=tempr
@@ -326,6 +332,7 @@ contains
              moss_water_content_min < 0._r8 .or. &
              moss_water_content_max <= moss_water_content_min .or. &
              moss_water_drainage_threshold < moss_water_content_max .or. &
+             moss_water_substrate_rewetting_timescale_days <= 0._r8 .or. &
              moss_water_initial_content > moss_water_content_max) then
            call endrun(msg=' ERROR: invalid prognostic moss-water parameters'//&
                 errMsg(__FILE__, __LINE__))
@@ -381,6 +388,7 @@ contains
         !$acc update device(moss_water_content_min)
         !$acc update device(moss_water_content_max)
         !$acc update device(moss_water_drainage_threshold)
+        !$acc update device(moss_water_substrate_rewetting_timescale_days)
         !$acc update device(peat_compaction_surface_density)
         !$acc update device(peat_compaction_deep_density)
         !$acc update device(peat_compaction_initial_acrotelm_depth)
@@ -418,6 +426,8 @@ contains
                 moss_water_content_min, moss_water_content_max
            write(iulog,*) '  moss drainage threshold (gH2O/g dry mass) = ', &
                 moss_water_drainage_threshold
+           write(iulog,*) '  moss substrate-rewetting timescale (days) = ', &
+                moss_water_substrate_rewetting_timescale_days
            write(iulog,*) '  peat_compaction_surface_density (kg C/m3) = ', peat_compaction_surface_density
            write(iulog,*) '  peat_compaction_deep_density (kg C/m3) = ', peat_compaction_deep_density
            write(iulog,*) '  peat_compaction_initial_acrotelm_depth (m) = ', &

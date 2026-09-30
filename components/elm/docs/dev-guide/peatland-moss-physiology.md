@@ -18,6 +18,16 @@ potential, while a separately parameterized power law maps saturation to
 hydraulic conductivity. The living-layer thickness is only the hydraulic path
 length for exchange with the top peat layer. Atmospheric moss water loss is
 removed from this store and is not also imposed as a vascular root sink.
+Two conservative pathways can rewet a dry store. Intercepted liquid rain or
+dew is first retained directly by the living moss up to its biomass-scaled
+structural holding capacity. The upper peat can also recharge the store when
+its matric head is higher than the moss head. During this wetting direction,
+the liquid-filled fraction of the upper peat supplies a finite interface
+conductivity so a completely dry moss store is not an absorbing state; the
+upper-soil conductivity, including frozen-soil impedance, still limits
+hydraulic contact. A parameterized timescale caps this substrate-rewetting
+flux and prevents instantaneous filling.
+
 Below the structural holding capacity, soil--moss exchange is one-way: soil
 water may recharge the moss, but tightly held internal water does not drain
 back into the soil in response to a downward matric-potential gradient. Only
@@ -29,8 +39,9 @@ g H2O g-1 dry mass, matching the units of the historical Sphagnum water
 response. The cold start uses 10 gC m-2 of live moss, a carbon fraction of
 0.5 gC g-1 dry mass, and 5 g H2O g-1 dry mass, giving 0.10 kg H2O m-2. At
 200 gC m-2, the default maximum of 8 g g-1 permits 3.2 kg H2O m-2.
-`H2O_MOSS_STORAGE`, `MOSS_WATER_POTENTIAL`, and `QFLX_MOSS_SOIL` expose the
-state and positive soil-to-moss exchange.
+`H2O_MOSS_STORAGE`, `MOSS_WATER_POTENTIAL`, `QFLX_MOSS_SOIL`, and
+`QFLX_MOSS_ATM` expose the state, substrate recharge, and intercepted
+atmospheric water retained by the moss.
 
 Setting `use_prognostic_moss_water=.false.` retains the historical diagnostic
 mapping from mean liquid volumetric water content in soil layers 3 and 4. Its
@@ -82,6 +93,7 @@ standard ELM parameter file rather than kept in a site-private file.
 | `moss_water_content_min` | scalar | g H2O g-1 dry mass | 0.5 | Dry-mass water ratio mapped to zero effective saturation |
 | `moss_water_content_max` | scalar | g H2O g-1 dry mass | 8 | Maximum dry-mass water ratio; gives 3.2 kg H2O m-2 at 200 gC m-2 |
 | `moss_water_drainage_threshold` | scalar | g H2O g-1 dry mass | 8.5 | Structural holding capacity; only water above this ratio drains from moss to upper peat |
+| `moss_water_substrate_rewetting_timescale_days` | scalar | days | 1 | E-folding timescale limiting upper-peat recharge of the retained moss-water store |
 
 `vpd_max_moss` must exceed `vpd_min_moss`, and `blower_lambda` must be
 positive. The blower contribution is additionally gated by `use_humhol`, a

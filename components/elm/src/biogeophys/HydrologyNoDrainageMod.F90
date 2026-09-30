@@ -642,21 +642,25 @@ contains
     ! Conservative operator-split exchange between the living-moss water
     ! store and the upper peat. Positive flux is from soil to moss.
     use elm_varctl       , only : use_prognostic_moss_water
+    use subgridAveMod    , only : p2c
     use SharedParamsMod  , only : moss_water_layer_thickness, &
          moss_water_saturated_suction, moss_water_clapp_hornberger_b, &
          moss_water_hydraulic_conductivity_sat, &
          moss_water_conductivity_exponent, moss_water_content_min, &
          moss_water_content_max, moss_water_drainage_threshold, &
-         moss_carbon_fraction_dry_mass
+         moss_carbon_fraction_dry_mass, &
+         moss_water_substrate_rewetting_timescale_days
     type(bounds_type)    , intent(in)    :: bounds
     integer              , intent(in)    :: num_hydrologyc
     integer              , intent(in)    :: filter_hydrologyc(:)
     type(soilstate_type) , intent(inout) :: soilstate_vars
     real(r8)             , intent(in)    :: dtime
     integer :: c, p, pi, fc
-    real(r8) :: store_min, store_max, se, psi_moss, kmoss, ksoil
+    real(r8) :: store_min, store_max, se, se_interface, psi_moss, kmoss, ksoil
     real(r8) :: moss_biomass_kg, moss_water_ratio
     real(r8) :: resistance, head_soil, head_moss, qdesired
+    real(r8) :: retained_water, pore_capacity, liquid_saturation
+    real(r8) :: substrate_rewetting_timescale
     real(r8) :: qcol(bounds%begc:bounds%endc)
     real(r8) :: qscale(bounds%begc:bounds%endc)
     real(r8) :: donor_water, receiver_space
@@ -667,17 +671,39 @@ contains
     qcol(:) = 0._r8
     qscale(:) = 1._r8
     veg_wf%qflx_moss_soil(bounds%begp:bounds%endp) = 0._r8
+    veg_wf%qflx_moss_atm(bounds%begp:bounds%endp) = 0._r8
+    substrate_rewetting_timescale = &
+         moss_water_substrate_rewetting_timescale_days * 86400._r8
 
     ! Atmospheric loss computed by CanopyFluxes is withdrawn from the moss
-    ! store here. The same flux remains in qflx_evap_tot for water balance.
+    ! store here. After that loss, transfer any remaining free intercepted
+    ! liquid (rain or dew) from h2ocan into the retained living-moss store.
+    ! This is an internal, exactly conservative transfer; water above the
+    ! biomass-scaled holding capacity remains in the free interception store.
     do p = bounds%begp, bounds%endp
        if (veg_pp%active(p) .and. &
             nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
           veg_ws%h2o_moss_storage(p) = max(store_min, &
                veg_ws%h2o_moss_storage(p) - &
                max(0._r8, veg_wf%qflx_tran_veg(p)) * dtime)
+          moss_biomass_kg = max(0._r8, veg_cs%totvegc(p)) * &
+               1.e-3_r8 / moss_carbon_fraction_dry_mass
+          store_max = moss_biomass_kg * moss_water_drainage_threshold
+          retained_water = min(max(0._r8, veg_ws%h2ocan(p)), &
+               max(0._r8, store_max - veg_ws%h2o_moss_storage(p)))
+          veg_ws%h2o_moss_storage(p) = veg_ws%h2o_moss_storage(p) + &
+               retained_water
+          veg_ws%h2ocan(p) = max(0._r8, veg_ws%h2ocan(p) - retained_water)
+          veg_wf%qflx_moss_atm(p) = retained_water / dtime
        end if
     end do
+
+    ! The standard patch-to-column aggregation occurs before this operator.
+    ! Refresh column canopy water after the internal h2ocan-to-moss transfer
+    ! so the end-of-step water balance sees both sides of the exchange.
+    call p2c(bounds, num_hydrologyc, filter_hydrologyc, &
+         veg_ws%h2ocan(bounds%begp:bounds%endp), &
+         col_ws%h2ocan(bounds%begc:bounds%endc))
 
     ! Form the potential-gradient flux for every moss patch, then aggregate
     ! to the column so the soil donor/receiver limit is applied once.
@@ -700,18 +726,32 @@ contains
              se = max(1.e-6_r8, min(1._r8, se))
              psi_moss = -moss_water_saturated_suction * &
                   se**(-moss_water_clapp_hornberger_b)
-             kmoss = moss_water_hydraulic_conductivity_sat * &
-                  se**moss_water_conductivity_exponent
              ksoil = max(0._r8, soilstate_vars%hk_l_col(c,1))
+             head_soil = soilstate_vars%smp_l_col(c,1) - &
+                  col_pp%z(c,1) * 1000._r8
+             head_moss = psi_moss + 0.5_r8 * &
+                  moss_water_layer_thickness * 1000._r8
+
+             ! During wetting only, the liquid-filled pore fraction at the
+             ! moss-peat interface supplies a finite wetting-front
+             ! conductivity. This avoids a permanently dry absorbing state
+             ! caused by kmoss -> 0, while the soil conductivity (including
+             ! frozen-soil impedance) continues to gate hydraulic contact.
+             pore_capacity = max(1.e-12_r8, &
+                  soilstate_vars%watsat_col(c,1) * col_pp%dz(c,1) * denh2o)
+             liquid_saturation = max(0._r8, min(1._r8, &
+                  col_ws%h2osoi_liq(c,1) / pore_capacity))
+             se_interface = se
+             if (head_soil > head_moss) then
+                se_interface = max(se_interface, liquid_saturation)
+             end if
+             kmoss = moss_water_hydraulic_conductivity_sat * &
+                  se_interface**moss_water_conductivity_exponent
 
              if (kmoss > 0._r8 .and. ksoil > 0._r8 .and. &
                   ksoil < 1.e20_r8) then
                 resistance = 0.5_r8 * moss_water_layer_thickness * 1000._r8 / kmoss + &
                      max(1._r8, col_pp%z(c,1) * 1000._r8) / ksoil
-                head_soil = soilstate_vars%smp_l_col(c,1) - &
-                     col_pp%z(c,1) * 1000._r8
-                head_moss = psi_moss + 0.5_r8 * &
-                     moss_water_layer_thickness * 1000._r8
                 qdesired = (head_soil - head_moss) / resistance
              else
                 qdesired = 0._r8
@@ -728,6 +768,9 @@ contains
                 qdesired = max(0._r8, qdesired)
                 qdesired = min(qdesired, &
                      (store_max - veg_ws%h2o_moss_storage(p)) / dtime)
+                qdesired = min(qdesired, &
+                     (store_max - veg_ws%h2o_moss_storage(p)) / &
+                     substrate_rewetting_timescale)
              end if
              veg_wf%qflx_moss_soil(p) = qdesired
              qcol(c) = qcol(c) + qdesired * veg_pp%wtcol(p)
