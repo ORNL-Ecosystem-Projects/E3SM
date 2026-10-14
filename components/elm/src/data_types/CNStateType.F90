@@ -1,5 +1,6 @@
 module CNStateType
 
+  use, intrinsic :: ieee_arithmetic, only : ieee_is_finite
   use shr_kind_mod   , only : r8 => shr_kind_r8
   use shr_log_mod    , only : errMsg => shr_log_errMsg
   use decompMod      , only : bounds_type
@@ -17,7 +18,7 @@ module CNStateType
   use VegetationType      , only : veg_pp                
   use elm_varctl     , only: forest_fert_exp
   use elm_varctl          , only : nu_com
-  use elm_varctl   , only:  use_fates,use_crop,use_humhol
+  use elm_varctl   , only:  use_fates,use_crop,use_humhol,spinup_state
   use elm_varctl   , only:  use_peatland_compaction_profile
   use topounit_varcon,  only : max_topounits
   use GridcellType    , only : grc_pp
@@ -1274,6 +1275,7 @@ contains
     ! !LOCAL VARIABLES:
     integer, pointer :: temp1d(:) ! temporary
     integer          :: p,j,c,i,g   ! indices
+    integer          :: n_scalaravg_fallback
     logical          :: readvar   ! determine if variable is on initial file
     real(r8), pointer :: ptr2d(:,:) ! temp. pointers for slicing larger arrays
     real(r8), pointer :: ptr1d(:)   ! temp. pointers for slicing larger arrays
@@ -1609,6 +1611,27 @@ contains
             dim1name='column',dim2name='levgrnd', switchdim=.true., &
             long_name='fraction of potential immobilization of phosphorus', units='1', &
             interpinic_flag='interp', readvar=readvar, data=ptr2d)
+
+    ! Short peatland AD runs end before the 20-40 year scalar averaging window.
+    ! Use the existing unit-scalar fallback when entering final spinup rather
+    ! than dividing accelerated pools by zero while reading the restart.
+    if (flag == 'read' .and. use_humhol .and. spinup_state == 0) then
+       n_scalaravg_fallback = 0
+       do c = bounds%begc, bounds%endc
+          if (.not. ieee_is_finite(this%scalaravg_col(c,4))) then
+             this%scalaravg_col(c,:) = 1._r8
+             n_scalaravg_fallback = n_scalaravg_fallback + 1
+          else if (this%scalaravg_col(c,4) < 1.0e-3_r8 .or. &
+                   this%scalaravg_col(c,4) >= 0.5_r8 * spval) then
+             this%scalaravg_col(c,:) = 1._r8
+             n_scalaravg_fallback = n_scalaravg_fallback + 1
+          end if
+       end do
+       if (n_scalaravg_fallback > 0 .and. masterproc) then
+          write(iulog,*) 'CNState restart: using unit SCALARAVG for ', &
+               n_scalaravg_fallback, ' peatland columns without a valid AD average'
+       end if
+    end if
 
     if (crop_prog) then
 
