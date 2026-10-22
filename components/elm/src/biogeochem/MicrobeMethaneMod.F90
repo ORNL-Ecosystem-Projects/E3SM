@@ -3197,8 +3197,10 @@ contains
       potential_demand = potential_demand + &
            max(0._r8, root_respiration) / &
            (catomw * max(col_pp%dz(column,layer), tiny(1._r8)))
+      ! Use the realized NH4-to-NO3 flux after nutrient allocation. The same
+      ! flux updates the mineral-N pools; the potential can be larger.
       potential_demand = potential_demand + &
-           max(0._r8, col_nf%pot_f_nit_vr(column,layer)) * 2._r8 / 14._r8
+           max(0._r8, col_nf%f_nit_vr(column,layer)) * 2._r8 / 14._r8
     end function elmAerobicOxygenDemand
 
     subroutine syncLegacyOxygenBridge(column, saturated_fraction, unsaturated, saturated, reactions)

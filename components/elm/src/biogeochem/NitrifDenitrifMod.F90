@@ -10,7 +10,7 @@ module NitrifDenitrifMod
   use elm_varpar          , only : nlevgrnd,nlevdecomp
   use elm_varcon          , only : rpi, denh2o, dzsoi, zisoi, grav
   use elm_varcon          , only : d_con_g, d_con_w, spval, secspday
-  use elm_varctl          , only : use_lch4, use_microbe_methane, &
+  use elm_varctl          , only : use_lch4, use_humhol, use_microbe_methane, &
                                    use_legacy_ch4_with_microbe, iulog
   use abortutils          , only : endrun
   use decompMod           , only : bounds_type
@@ -210,13 +210,13 @@ contains
          n2_n2o_ratio_denit_vr         =>    col_nf%n2_n2o_ratio_denit_vr           & ! Output:  [real(r8) (:,:) ]  ratio of N2 to N2O production by denitrification [gN/gN]
          )
 
-      ! Set maximum nitrification rate constant
+      ! Preserve the inherited constant outside microbe-enabled peatlands.
+      ! The parameter-file value is in s-1 and is active only for that path.
       k_nitr_max =  0.1_r8 / secspday   ! [1/sec] 10%/day  Parton et al., 2001
-
-      ! Todo:  FIX(SPM,032414) - the explicit divide gives different results than when that
-      ! value is placed in the parameters netcdf file.  To get bfb, keep the
-      ! divide in source.
-      !k_nitr_max = NitrifDenitrifParamsInst%k_nitr_max
+      if (use_humhol .and. use_microbe_methane .and. &
+           .not. use_legacy_ch4_with_microbe) then
+         k_nitr_max = NitrifDenitrifParamsInst%k_nitr_max
+      end if
 
       surface_tension_water = NitrifDenitrifParamsInst%surface_tension_water
 
@@ -276,7 +276,12 @@ contains
                ratio_diffusivity_water_gas(c,j) = (d_con_g(2,1) + d_con_g(2,2)*t_soisno(c,j) ) * 1.e-4_r8 / &
                     ((d_con_w(2,1) + d_con_w(2,2)*t_soisno(c,j) + d_con_w(2,3)*t_soisno(c,j)**2) * 1.e-9_r8)
 
-               if (o2_decomp_depth_unsat(c,j) /= spval .and. conc_o2_unsat(c,j) /= spval .and.  &
+               if (use_humhol .and. use_microbe_methane .and. .not. use_legacy_ch4_with_microbe .and. &
+                    conc_o2_unsat(c,j) /= spval .and. conc_o2_unsat(c,j) <= 0._r8) then
+                  ! Zero demand can mean that the revised reaction kernel has
+                  ! exhausted O2, not that this layer is fully aerobic.
+                  anaerobic_frac(c,j) = 1._r8
+               else if (o2_decomp_depth_unsat(c,j) /= spval .and. conc_o2_unsat(c,j) /= spval .and.  &
                     o2_decomp_depth_unsat(c,j) > smallparameter) then
                   anaerobic_frac(c,j) = exp(-rij_kro_a * r_psi(c,j)**(-rij_kro_alpha) * &
                        o2_decomp_depth_unsat(c,j)**(-rij_kro_beta) * &
@@ -289,7 +294,10 @@ contains
                if (anoxia_wtsat) then ! Average saturated fraction values into anaerobic_frac(c,j).
                   r_min_sat = 2._r8 * surface_tension_water / (rho_w * grav * abs(grav * 1.e-6_r8 * sucsat(c,j)))
                   r_psi_sat = sqrt(r_min_sat * r_max)
-                  if (o2_decomp_depth_sat(c,j) /= spval .and. conc_o2_sat(c,j) /= spval .and. &
+                  if (use_humhol .and. use_microbe_methane .and. .not. use_legacy_ch4_with_microbe .and. &
+                       conc_o2_sat(c,j) /= spval .and. conc_o2_sat(c,j) <= 0._r8) then
+                     anaerobic_frac_sat = 1._r8
+                  else if (o2_decomp_depth_sat(c,j) /= spval .and. conc_o2_sat(c,j) /= spval .and. &
                        o2_decomp_depth_sat(c,j) > smallparameter) then
                      anaerobic_frac_sat = exp(-rij_kro_a * r_psi_sat**(-rij_kro_alpha) * &
                           o2_decomp_depth_sat(c,j)**(-rij_kro_beta) * &
@@ -331,6 +339,14 @@ contains
 
             ! limit to oxic fraction of soils
             pot_f_nit_vr(c,j)  = pot_f_nit_vr(c,j) * (1._r8 - anaerobic_frac(c,j))
+
+            if (use_humhol .and. use_microbe_methane .and. .not. use_legacy_ch4_with_microbe) then
+               ! The revised methane solver resolves competition for O2.
+               ! The inherited microsite fraction alone does not constrain
+               ! nitrification when the available O2 is already consumed.
+               pot_f_nit_vr(c,j) = pot_f_nit_vr(c,j) * &
+                    max(0._r8, min(1._r8, ch4_vars%o2stress_unsat_col(c,j)))
+            end if
 
             ! limit to non-frozen soil layers
             if ( t_soisno(c,j) <= SHR_CONST_TKFRZ .and. no_frozen_nitrif_denitrif) then
