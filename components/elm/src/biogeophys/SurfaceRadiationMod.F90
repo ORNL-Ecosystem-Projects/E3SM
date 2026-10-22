@@ -24,6 +24,7 @@ module SurfaceRadiationMod
   use ColumnDataType    , only : col_ws
   use VegetationType    , only : veg_pp
   use VegetationPropertiesType, only : veg_vp
+  use pftvarcon        , only : npeat_nbrdlf_dcd_brl_shrub
   use landunit_varcon   , only : istdlak
 
   use timeinfoMod
@@ -972,7 +973,10 @@ contains
                  p_shrub = filter_nourbanp(fp_shrub)
                  if (veg_pp%topounit(p_shrub) == t .and. &
                       veg_pp%column(p_shrub) == veg_pp%column(p) .and. &
-                      nint(veg_vp%woody(veg_pp%itype(p_shrub))) == 2) then
+                      (nint(veg_vp%woody(veg_pp%itype(p_shrub))) == 2 .or. &
+                       veg_pp%itype(p_shrub) == npeat_nbrdlf_dcd_brl_shrub)) then
+                    ! The peatland shrub is named explicitly in the 22-PFT
+                    ! parameter file, whose woody flag is only binary.
                     shrub_lai = shrub_lai + elai(p_shrub) * veg_pp%wtcol(p_shrub)
                  end if
               end do

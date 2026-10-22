@@ -3204,12 +3204,15 @@ contains
     integer :: fp           ! lake filter pft index
     real(r8):: t1           ! temporary variable
     real(r8):: dt
+    real(r8):: leaf_loss_fraction ! fraction shed during this timestep for partially deciduous PFTs
     !-----------------------------------------------------------------------
 
     associate(                                                                     &
          ivt                   =>    veg_pp%itype                                   , & ! Input:  [integer  (:) ]  pft vegetation type
 
          leafcn                =>    veg_vp%leafcn                           , & ! Input:  [real(r8) (:) ]  leaf C:N (gC/gN)
+         season_decid          =>    veg_vp%season_decid                     , & ! Input:  [real(r8) (:) ]  seasonal-deciduous flag
+         leaf_offset_senescence_fraction => veg_vp%leaf_offset_senescence_fraction , & ! Input: fraction shed per offset
          lflitcn               =>    veg_vp%lflitcn                          , & ! Input:  [real(r8) (:) ]  leaf litter C:N (gC/gN)
          frootcn               =>    veg_vp%frootcn                          , & ! Input:  [real(r8) (:) ]  fine root C:N (gC/gN)
          livewdcn              =>    veg_vp%livewdcn                         , & ! Input:  [real(r8) (:) ]  live wood C:N (gC/gN)
@@ -3286,7 +3289,24 @@ contains
          ! only calculate fluxes during offset period
          if (offset_flag(p) == 1._r8) then
 
-            if (offset_counter(p) <= dt) then
+            if (.not. iscft(ivt(p)) .and. season_decid(ivt(p)) == 1._r8 .and. &
+                leaf_offset_senescence_fraction(ivt(p)) < 1._r8) then
+               ! A constant offset-period hazard leaves (1-f) of the displayed
+               ! leaf pool after one offset, without a separate leaf-age cohort.
+               ! Fine roots retain their original complete seasonal offset.
+               t1 = 1._r8 / dt
+               leaf_loss_fraction = 1._r8 - exp(log(1._r8 - leaf_offset_senescence_fraction(ivt(p))) * &
+                    dt / max(PhenolParamsInst%ndays_off * secspday, dt))
+               leafc_to_litter(p) = leaf_loss_fraction * (leafc(p) * t1 + cpool_to_leafc(p))
+               if (offset_counter(p) <= dt) then
+                  frootc_to_litter(p) = t1 * frootc(p) + cpool_to_frootc(p)
+               else
+                  t1 = dt * 2._r8 / (offset_counter(p) * offset_counter(p))
+                  frootc_to_litter(p) = prev_frootc_to_litter(p) + &
+                       t1 * (frootc(p) - prev_frootc_to_litter(p) * offset_counter(p))
+                  t1 = 1._r8 / dt
+               end if
+            else if (offset_counter(p) <= dt) then
                t1 = 1.0_r8 / dt
                if (iscft(ivt(p))) then
                ! this assumes that offset_counter == dt for crops
@@ -3337,7 +3357,9 @@ contains
                   frootp_to_litter(p) = frootc_to_litter(p) / frootcp(ivt(p))
                end if
             else
-               if (offset_counter(p) <= dt) then
+               if (offset_counter(p) <= dt .and. &
+                   .not. (.not. iscft(ivt(p)) .and. season_decid(ivt(p)) == 1._r8 .and. &
+                          leaf_offset_senescence_fraction(ivt(p)) < 1._r8)) then
                   t1 = 1.0_r8 / dt
                   if (iscft(ivt(p))) then
                      ! this assumes that offset_counter == dt for crops

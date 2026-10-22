@@ -43,6 +43,7 @@ module VegetationPropertiesType
      real(r8), pointer :: dsladlai      (:) => null()  ! dSLA/dLAI, projected area basis [m^2/gC]
      real(r8), pointer :: leafcn        (:) => null()  ! leaf C:N (gC/gN)
      real(r8), pointer :: flnr          (:) => null()  ! fraction of leaf N in the Rubisco enzyme (gN Rubisco / gN leaf)
+     real(r8), pointer :: extkn         (:) => null()  ! canopy photosynthetic-capacity extinction coefficient [1/LAI]
      real(r8), pointer :: woody         (:) => null()  ! woody lifeform flag (0 = non-woody, 1 = tree, 2 = shrub)
      real(r8), pointer :: lflitcn       (:) => null()  ! leaf litter C:N (gC/gN)
      real(r8), pointer :: frootcn       (:) => null()  ! fine root C:N (gC/gN)
@@ -63,6 +64,7 @@ module VegetationPropertiesType
      real(r8), pointer :: fr_fcel       (:) => null()  ! fine root litter cellulose fraction
      real(r8), pointer :: fr_flig       (:) => null()  ! fine root litter lignin fraction
      real(r8), pointer :: leaf_long     (:) => null()  ! leaf longevity (yrs)
+     real(r8), pointer :: leaf_offset_senescence_fraction (:) => null() ! displayed leaf loss per seasonal offset
      real(r8), pointer :: froot_long    (:) => null()  ! fine root longevity (yrs)
      real(r8), pointer :: evergreen     (:) => null()  ! binary flag for evergreen leaf habit (0 or 1)
      real(r8), pointer :: stress_decid  (:) => null()  ! binary flag for stress-deciduous leaf habit (0 or 1)
@@ -177,10 +179,10 @@ contains
     use elm_varpar, only : numrad, numpft
     use pftvarcon , only : smpso, smpsc, fnitr
     use pftvarcon , only : z0mr, displar, dleaf, rhol, rhos, taul, taus, xl
-    use pftvarcon , only : c3psn, slatop, dsladlai, leafcn, flnr, woody
+    use pftvarcon , only : c3psn, slatop, dsladlai, leafcn, flnr, extkn, woody
     use pftvarcon , only : lflitcn, frootcn, livewdcn, deadwdcn, froot_leaf, stem_leaf, croot_stem
     use pftvarcon , only : flivewd, fcur, lf_flab, lf_fcel, lf_flig, fr_flab, fr_fcel, fr_flig
-    use pftvarcon , only : leaf_long, froot_long, evergreen, stress_decid, season_decid
+    use pftvarcon , only : leaf_long, leaf_offset_senescence_fraction, froot_long, evergreen, stress_decid, season_decid
     use pftvarcon , only : manunitro, graincn, fleafcn, ffrootcn, fstemcn, dwood
     use pftvarcon , only : presharv, convfact, fyield
     use pftvarcon , only : leafcp,lflitcp, frootcp, livewdcp, deadwdcp,graincp
@@ -232,6 +234,7 @@ contains
     allocate(this%dsladlai      (0:numpft))        ; this%dsladlai     (:)   =spval
     allocate(this%leafcn        (0:numpft))        ; this%leafcn       (:)   =spval
     allocate(this%flnr          (0:numpft))        ; this%flnr         (:)   =spval
+    allocate(this%extkn         (0:numpft))        ; this%extkn        (:)   =spval
     allocate(this%woody         (0:numpft))        ; this%woody        (:)   =spval
     allocate(this%lflitcn       (0:numpft))        ; this%lflitcn      (:)   =spval
     allocate(this%frootcn       (0:numpft))        ; this%frootcn      (:)   =spval
@@ -250,6 +253,7 @@ contains
     allocate(this%fr_fcel       (0:numpft))        ; this%fr_fcel      (:)   =spval
     allocate(this%fr_flig       (0:numpft))        ; this%fr_flig      (:)   =spval
     allocate(this%leaf_long     (0:numpft))        ; this%leaf_long    (:)   =spval
+    allocate(this%leaf_offset_senescence_fraction (0:numpft)) ; this%leaf_offset_senescence_fraction(:) = spval
     allocate(this%froot_long    (0:numpft))        ; this%froot_long   (:)   =spval
     allocate(this%evergreen     (0:numpft))        ; this%evergreen    (:)   =spval
     allocate(this%stress_decid  (0:numpft))        ; this%stress_decid (:)   =spval
@@ -370,6 +374,7 @@ contains
        this%dsladlai(m)     = dsladlai(m)
        this%leafcn(m)       = leafcn(m)
        this%flnr(m)         = flnr(m)
+       this%extkn(m)        = extkn(m)
        this%smpso(m)        = smpso(m)
        this%smpsc(m)        = smpsc(m)
        this%fnitr(m)        = fnitr(m)
@@ -391,6 +396,7 @@ contains
        this%fr_fcel(m)      = fr_fcel(m)
        this%fr_flig(m)      = fr_flig(m)
        this%leaf_long(m)    = leaf_long(m)
+       this%leaf_offset_senescence_fraction(m) = leaf_offset_senescence_fraction(m)
        this%froot_long(m)   = froot_long(m)
        this%evergreen(m)    = evergreen(m)
        this%stress_decid(m) = stress_decid(m)

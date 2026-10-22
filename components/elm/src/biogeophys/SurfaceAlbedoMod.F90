@@ -939,9 +939,9 @@ contains
     ! because sunlit fraction is 0. Canopy scaling coefficients are set in
     ! TwoStream for coszen > 0. So kn must be set here and in TwoStream.
 
-    extkn = 0.30_r8
     do fp = 1,num_nourbanp
        p = filter_nourbanp(fp)
+       extkn = veg_vp%extkn(veg_pp%itype(p))
        if (nlevcan == 1) then
           vcmaxcintsun(p) = 0._r8
           vcmaxcintsha(p) = (1._r8 - exp(-extkn*elai(p))) / extkn
@@ -1518,7 +1518,7 @@ contains
                 fabi_sha_z(p,1) = fabi_sha(p,ib) / ((1._r8 - fsun_z(p,1))*laisum)
 
                 ! leaf to canopy scaling coefficients
-                extkn = 0.30_r8
+                extkn = veg_vp%extkn(veg_pp%itype(p))
                 extkb = twostext(p)
                 vcmaxcintsun(p) = (1._r8 - exp(-(extkn+extkb)*elaislope(p))) / (extkn + extkb)
                 vcmaxcintsha(p) = (1._r8 - exp(-extkn*elaislope(p))) / extkn - vcmaxcintsun(p)

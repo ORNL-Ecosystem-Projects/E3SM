@@ -117,6 +117,7 @@ module pftvarcon
   real(r8), allocatable :: dsladlai(:)    !dSLA/dLAI [m^2/gC]
   real(r8), allocatable :: leafcn(:)      !leaf C:N [gC/gN]
   real(r8), allocatable :: flnr(:)        !fraction of leaf N in Rubisco [no units]
+  real(r8), allocatable :: extkn(:)       !canopy photosynthetic-capacity extinction coefficient [1/LAI]
   real(r8), allocatable :: woody(:)       !woody lifeform flag (0 = non-woody, 1 = tree, 2 = shrub)
   real(r8), allocatable :: lflitcn(:)     !leaf litter C:N (gC/gN)
   real(r8), allocatable :: frootcn(:)     !fine root C:N (gC/gN)
@@ -185,6 +186,7 @@ module pftvarcon
   real(r8), allocatable :: fr_fcel(:)      !fine root litter cellulose fraction
   real(r8), allocatable :: fr_flig(:)      !fine root litter lignin fraction
   real(r8), allocatable :: leaf_long(:)    !leaf longevity (yrs)
+  real(r8), allocatable :: leaf_offset_senescence_fraction(:) !fraction of displayed leaves shed per seasonal offset
   real(r8), allocatable :: froot_long(:)   !fine root longevity(yrs)
   real(r8), allocatable :: evergreen(:)    !binary flag for evergreen leaf habit (0 or 1)
   real(r8), allocatable :: stress_decid(:) !binary flag for stress-deciduous leaf habit (0 or 1)
@@ -496,6 +498,7 @@ contains
     allocate( dsladlai      (0:mxpft) )
     allocate( leafcn        (0:mxpft) )
     allocate( flnr          (0:mxpft) )
+    allocate( extkn         (0:mxpft) )
     allocate( woody         (0:mxpft) )
     allocate( lflitcn       (0:mxpft) )
     allocate( frootcn       (0:mxpft) )
@@ -556,6 +559,7 @@ contains
     allocate( fr_fcel       (0:mxpft) )
     allocate( fr_flig       (0:mxpft) )
     allocate( leaf_long     (0:mxpft) )
+    allocate( leaf_offset_senescence_fraction (0:mxpft) )
     allocate( froot_long    (0:mxpft) )
     allocate( evergreen     (0:mxpft) )
     allocate( stress_decid  (0:mxpft) )
@@ -733,6 +737,10 @@ contains
     if ( .not. readv ) call endrun(msg=' ERROR: error in reading in pft data'//errMsg(__FILE__, __LINE__))
     call ncd_io('flnr',flnr, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if ( .not. readv ) call endrun(msg=' ERROR: error in reading in pft data'//errMsg(__FILE__, __LINE__))
+    call ncd_io('extkn',extkn, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if ( .not. readv ) extkn(:) = 0.30_r8
+    if (any(.not. (extkn(:) > 0._r8))) &
+         call endrun(msg=' ERROR: extkn must be positive for every PFT'//errMsg(__FILE__, __LINE__))
     call ncd_io('smpso',smpso, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if ( .not. readv ) call endrun(msg=' ERROR: error in reading in pft data'//errMsg(__FILE__, __LINE__))
     call ncd_io('smpsc',smpsc, 'read', ncid, readvar=readv, posNOTonfile=.true.)
@@ -791,6 +799,12 @@ contains
     if ( .not. readv ) call endrun(msg=' ERROR: error in reading in pft data'//errMsg(__FILE__, __LINE__))
     call ncd_io('leaf_long',leaf_long, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if ( .not. readv ) call endrun(msg=' ERROR: error in reading in pft data'//errMsg(__FILE__, __LINE__))
+    call ncd_io('leaf_offset_senescence_fraction',leaf_offset_senescence_fraction, &
+         'read', ncid, readvar=readv, posNOTonfile=.true.)
+    if (.not. readv) leaf_offset_senescence_fraction(:) = 1._r8
+    if (any(leaf_offset_senescence_fraction < 0._r8) .or. &
+        any(leaf_offset_senescence_fraction > 1._r8)) &
+         call endrun(msg=' ERROR: leaf_offset_senescence_fraction must be in [0,1]'//errMsg(__FILE__, __LINE__))
     call ncd_io('froot_long',froot_long, 'read', ncid, readvar=readv, posNOTonfile=.true.)
     if (.not. readv) froot_long = leaf_long
     !if ( .not. readv ) call endrun(msg=' ERROR: error in reading in pft data'//errMsg(__FILE__, __LINE__))
