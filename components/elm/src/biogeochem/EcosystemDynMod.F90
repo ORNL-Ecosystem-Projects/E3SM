@@ -52,6 +52,7 @@ module EcosystemDynMod
   use VegetationDataType , only : veg_nf_summary, veg_ns_summary, veg_cs_Summary
   use VegetationDataType , only : veg_pf_summary, veg_ps_summary
   use VegetationDataType , only : veg_cf_setvalues, veg_nf_setvalues, veg_pf_setvalues
+  use NitrogenDynamicsMod, only : MossNitrogenFixation
 
   use ColumnDataType , only : col_cf_summary, col_nf_summary, col_pf_Summary
   use ColumnDataType , only : col_cs_summary, col_ns_summary, col_ps_summary
@@ -601,6 +602,8 @@ contains
              cnstate_vars, ch4_vars,                  &
              crop_vars, atm2lnd_vars,                 &
              dt )
+    ! Allocation now defines the N in newly produced moss tissue.
+    call MossNitrogenFixation(num_soilp, filter_soilp)
     call t_stop_lnd(event)
 
     !----------------------------------------------------------------

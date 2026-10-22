@@ -789,6 +789,7 @@ module VegetationDataType
     real(r8), pointer :: retransn_to_npool                   (:)   => null()  ! deployment of retranslocated N (gN/m2/s)
     real(r8), pointer :: sminn_to_npool                      (:)   => null()  ! deployment of soil mineral N uptake (gN/m2/s)
     real(r8), pointer :: ndep_to_npool                       (:)   => null()  ! atmospheric N deposition intercepted by vegetation (gN/m2/s)
+    real(r8), pointer :: moss_nfix_to_npool                  (:)   => null()  ! moss-associated atmospheric N fixation (gN/m2/s)
     real(r8), pointer :: smin_no3_to_plant_vr                (:,:) => null()
     real(r8), pointer :: smin_nh4_to_plant_vr               (:,:) => null()
     real(r8), pointer :: npool_to_grainn                     (:)   => null()  ! allocation to grain N for prognostic crop (gN/m2/s)
@@ -9113,6 +9114,7 @@ module VegetationDataType
     allocate(this%retransn_to_npool                   (begp:endp)) ; this%retransn_to_npool                   (:) = spval
     allocate(this%sminn_to_npool                      (begp:endp)) ; this%sminn_to_npool                      (:) = spval
     allocate(this%ndep_to_npool                       (begp:endp)) ; this%ndep_to_npool                       (:) = spval
+    allocate(this%moss_nfix_to_npool                  (begp:endp)) ; this%moss_nfix_to_npool                  (:) = spval
     allocate(this%npool_to_leafn                      (begp:endp)) ; this%npool_to_leafn                      (:) = spval
     allocate(this%npool_to_leafn_storage              (begp:endp)) ; this%npool_to_leafn_storage              (:) = spval
     allocate(this%npool_to_frootn                     (begp:endp)) ; this%npool_to_frootn                     (:) = spval
@@ -9465,6 +9467,11 @@ module VegetationDataType
     call hist_addfld1d (fname='NDEP_TO_NPOOL', units='gN/m^2/s', &
          avgflag='A', long_name='atmospheric N deposition intercepted by vegetation', &
          ptr_patch=this%ndep_to_npool, default='inactive')
+
+    this%moss_nfix_to_npool(begp:endp) = spval
+    call hist_addfld1d (fname='MOSS_NFIX_TO_NPOOL', units='gN/m^2/s', &
+         avgflag='A', long_name='moss-associated N fixation to plant N pool', &
+         ptr_patch=this%moss_nfix_to_npool, default='inactive')
 
     this%npool_to_leafn(begp:endp) = spval
     call hist_addfld1d (fname='NPOOL_TO_LEAFN', units='gN/m^2/s', &
@@ -9881,6 +9888,7 @@ module VegetationDataType
        this%retransn_to_npool(i)                   = value_patch
        this%sminn_to_npool(i)                      = value_patch
        this%ndep_to_npool(i)                       = value_patch
+       this%moss_nfix_to_npool(i)                  = value_patch
        this%npool_to_leafn(i)                      = value_patch
        this%npool_to_leafn_storage(i)              = value_patch
        this%npool_to_frootn(i)                     = value_patch
@@ -9964,7 +9972,8 @@ module VegetationDataType
        this%ndeploy(p) = &
             this%sminn_to_npool(p) + &
             this%retransn_to_npool(p) + &
-            this%ndep_to_npool(p)
+            this%ndep_to_npool(p) + &
+            this%moss_nfix_to_npool(p)
 
        ! pft-level wood harvest
        this%wood_harvestn(p) = &

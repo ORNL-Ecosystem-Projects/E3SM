@@ -39,6 +39,7 @@ module NitrogenDynamicsMod
   public :: NitrogenDynamicsInit
   public :: NitrogenDeposition
   public :: NitrogenFixation
+  public :: MossNitrogenFixation
   public :: NitrogenLeaching
   public :: NitrogenFert
   public :: CNSoyfix
@@ -50,6 +51,7 @@ module NitrogenDynamicsMod
   type, public :: CNNDynamicsParamsType
      real(r8) :: sf      ! soluble fraction of mineral N (unitless)
      real(r8) :: sf_no3  ! soluble fraction of NO3 (unitless)
+     real(r8) :: moss_nfix_npp_fraction ! fraction of new moss biomass N supplied by fixation
   end type CNNDynamicsParamsType
 
   type(CNNDynamicsParamsType), public ::  CNNDynamicsParamsInst
@@ -111,6 +113,13 @@ contains
     call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
     if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
     CNNDynamicsParamsInst%sf_no3=tempr
+
+    call ncd_io(varname='moss_nfix_npp_fraction',data=tempr, flag='read', ncid=ncid, readvar=readv)
+    if (.not. readv) tempr = 0._r8
+    if (tempr < 0._r8 .or. tempr > 1._r8) then
+       call endrun(msg='moss_nfix_npp_fraction must be between zero and one'//errMsg(__FILE__, __LINE__))
+    end if
+    CNNDynamicsParamsInst%moss_nfix_npp_fraction = tempr
 
   end subroutine readNitrogenDynamicsParams
 
@@ -282,6 +291,28 @@ contains
     end associate
 
   end subroutine NitrogenFixation
+
+  !-----------------------------------------------------------------------
+  subroutine MossNitrogenFixation(num_soilp, filter_soilp)
+    ! An empirical atmospheric N input associated with living moss.
+    ! N production is the current allocation to new leaf and surrogate
+    ! fine-root tissue, including deployment from transfer pools. The fixed
+    ! N enters npool at state update and can support growth on later steps.
+    integer, intent(in) :: num_soilp, filter_soilp(:)
+    integer :: fp, p
+
+    if (.not. use_humhol .or. use_fates) return
+    if (CNNDynamicsParamsInst%moss_nfix_npp_fraction <= 0._r8) return
+
+    do fp = 1, num_soilp
+       p = filter_soilp(fp)
+       if (.not. veg_pp%active(p)) cycle
+       if (nint(veg_vp%nonvascular(veg_pp%itype(p))) /= 1) cycle
+       veg_nf%moss_nfix_to_npool(p) = CNNDynamicsParamsInst%moss_nfix_npp_fraction * &
+            max(0._r8, veg_nf%npool_to_leafn(p) + veg_nf%npool_to_frootn(p) + &
+            veg_nf%leafn_xfer_to_leafn(p) + veg_nf%frootn_xfer_to_frootn(p))
+    end do
+  end subroutine MossNitrogenFixation
 
   !-----------------------------------------------------------------------
   subroutine NitrogenLeaching(num_soilc, filter_soilc, dt )

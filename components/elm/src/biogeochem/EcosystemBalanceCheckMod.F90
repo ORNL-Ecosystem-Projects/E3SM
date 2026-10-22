@@ -481,6 +481,7 @@ contains
          totcoln                   =>    col_ns%totcoln                  , & ! Input:  [real(r8) (:)]  (gN/m2) total column nitrogen, incl veg
          ndep_to_sminn             =>    col_nf%ndep_to_sminn             , & ! Input:  [real(r8) (:)]  atmospheric N deposition to soil mineral N (gN/m2/s)
          ndep_to_npool             =>    veg_nf%ndep_to_npool             , & ! Input:  [real(r8) (:)]  atmospheric N deposition intercepted by vegetation (gN/m2/s)
+         moss_nfix_to_npool        =>    veg_nf%moss_nfix_to_npool        , & ! Input: moss-associated atmospheric N fixation (gN/m2/s)
          nfix_to_sminn             =>    col_nf%nfix_to_sminn             , & ! Input:  [real(r8) (:)]  symbiotic/asymbiotic N fixation to soil mineral N (gN/m2/s)
          nfix_to_ecosysn           =>    col_nf%nfix_to_ecosysn           , &
          fert_to_sminn             =>    col_nf%fert_to_sminn             , & ! Input:  [real(r8) (:)]
@@ -563,6 +564,7 @@ contains
                if (veg_pp%active(p) .and. (veg_pp%itype(p) .ne. noveg)) then
                   col_ninputs(c) = col_ninputs(c) + supplement_to_plantn(p) * veg_pp%wtcol(p)
                   col_ninputs(c) = col_ninputs(c) + ndep_to_npool(p) * veg_pp%wtcol(p)
+                  col_ninputs(c) = col_ninputs(c) + moss_nfix_to_npool(p) * veg_pp%wtcol(p)
                end if
             end do
 
